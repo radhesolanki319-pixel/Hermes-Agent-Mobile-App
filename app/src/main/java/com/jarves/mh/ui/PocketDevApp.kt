@@ -267,6 +267,8 @@ import com.jarves.mh.network.DiscoveredModel
 import com.jarves.mh.network.ModelDiscoveryResult
 import com.jarves.mh.network.GitHubRepository
 import com.jarves.mh.ui.theme.PocketBlue
+import com.jarves.mh.ui.theme.PocketGradientPrimary
+import com.jarves.mh.ui.theme.PocketGradientUserBubble
 import com.jarves.mh.ui.theme.PocketGreen
 import com.jarves.mh.ui.theme.PocketOrange
 import java.io.ByteArrayInputStream
@@ -2500,7 +2502,7 @@ private fun RootScreenHost(
     Scaffold(
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         bottomBar = {
-            if (!keyboardVisible) NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
+            if (!keyboardVisible) NavigationBar(containerColor = MaterialTheme.colorScheme.background) {
                 RootScreen.entries.forEach { tab ->
                     NavigationBarItem(
                         selected = screen == tab,
@@ -4756,7 +4758,7 @@ private fun WorkspaceScreen(
             )
         },
         bottomBar = {
-            if (!keyboardVisible) NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
+            if (!keyboardVisible) NavigationBar(containerColor = MaterialTheme.colorScheme.background) {
                 WorkspaceTab.entries.filter { it != WorkspaceTab.CHANGES }.forEach { tab ->
                     NavigationBarItem(
                         selected = selectedTab == tab,
@@ -6483,7 +6485,7 @@ private fun ChatTab(
 
                 Surface(
                     shape = RoundedCornerShape(26.dp),
-                    color = MaterialTheme.colorScheme.surface,
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
                     border = BorderStroke(
                         width = 1.dp,
                         color = if (canSend) MaterialTheme.colorScheme.primary.copy(alpha = 0.55f) else MaterialTheme.colorScheme.outlineVariant,
@@ -6579,7 +6581,16 @@ private fun ChatTab(
                                 modifier = Modifier
                                     .size(38.dp)
                                     .background(
-                                        color = if (canSend) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+                                        brush = if (canSend) {
+                                            PocketGradientPrimary
+                                        } else {
+                                            androidx.compose.ui.graphics.Brush.linearGradient(
+                                                listOf(
+                                                    MaterialTheme.colorScheme.surfaceVariant,
+                                                    MaterialTheme.colorScheme.surfaceVariant,
+                                                ),
+                                            )
+                                        },
                                         shape = CircleShape,
                                     )
                                     .clickable(
@@ -7063,9 +7074,18 @@ private fun MessageBubble(
     }
     Row(Modifier.fillMaxWidth(), horizontalArrangement = if (message.fromUser) Arrangement.End else Arrangement.Start) {
         Surface(
-            color = if (message.fromUser) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,
-            shape = RoundedCornerShape(18.dp),
-            modifier = Modifier.fillMaxWidth(if (message.fromUser) .82f else .92f),
+            color = Color.Transparent,
+            shape = RoundedCornerShape(if (message.fromUser) 24.dp else 18.dp),
+            border = if (message.fromUser) BorderStroke(1.dp, Color.White.copy(alpha = 0.25f)) else null,
+            modifier = Modifier
+                .fillMaxWidth(if (message.fromUser) .82f else .92f)
+                .then(
+                    if (message.fromUser) {
+                        Modifier.background(PocketGradientUserBubble, RoundedCornerShape(24.dp))
+                    } else {
+                        Modifier
+                    },
+                ),
         ) {
             Column(Modifier.padding(top = 12.dp)) {
                 SelectionContainer {
@@ -7074,7 +7094,7 @@ private fun MessageBubble(
                             text = message.text,
                             modifier = Modifier.padding(start = 14.dp, end = 14.dp, bottom = 8.dp),
                             style = MaterialTheme.typography.bodyMedium.copy(lineHeight = 22.sp),
-                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                            color = Color.White,
                         )
                     } else {
                         val parts = genUiParts

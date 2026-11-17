@@ -7,35 +7,54 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.SideEffect
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 
-val PocketOrange = Color(0xFFF28C52)
+// AMOLED "black + colourful" identity (user-chosen, 2026-11-17): pure black surfaces,
+// violet primary, pink secondary, green tertiary, with gradient brushes for hero elements.
+// PocketOrange keeps its historic name (164 call sites) but now holds the violet primary.
+val PocketOrange = Color(0xFF8B5CF6)
 val PocketBlue = Color(0xFF8EA8FF)
-val PocketGreen = Color(0xFF69D69E)
-val PocketBackground = Color(0xFF0B0E14)
-val PocketSurface = Color(0xFF131821)
-val PocketSurfaceVariant = Color(0xFF1B222D)
-val PocketOutline = Color(0xFF2A3240)
+val PocketGreen = Color(0xFF34D399)
+val PocketBackground = Color(0xFF000000)
+val PocketSurface = Color(0xFF0B0B10)
+val PocketSurfaceVariant = Color(0xFF15151D)
+val PocketOutline = Color(0xFF23232D)
+
+val PocketGradientPrimary: Brush = Brush.linearGradient(
+    listOf(Color(0xFF7C3AED), Color(0xFFDB2777)),
+)
+val PocketGradientUserBubble: Brush = Brush.linearGradient(
+    listOf(Color(0xFF7C3AED), Color(0xFF2563EB)),
+)
+val PocketGradientRainbow: Brush = Brush.horizontalGradient(
+    listOf(Color(0xFF7C3AED), Color(0xFFDB2777), Color(0xFFF59E0B)),
+)
+val PocketGradientTeal: Brush = Brush.linearGradient(
+    listOf(Color(0xFF0D9488), Color(0xFF2563EB)),
+)
 
 private val DarkColors = darkColorScheme(
     primary = PocketOrange,
-    onPrimary = Color(0xFF241107),
-    primaryContainer = Color(0xFF42281D),
-    onPrimaryContainer = Color(0xFFFFDDCC),
-    secondary = PocketBlue,
-    onSecondary = Color(0xFF001F58),
+    onPrimary = Color(0xFFFFFFFF),
+    primaryContainer = Color(0xFF2E1065),
+    onPrimaryContainer = Color(0xFFEDE9FE),
+    secondary = Color(0xFFEC4899),
+    onSecondary = Color(0xFFFFFFFF),
+    secondaryContainer = Color(0xFF3B1226),
+    onSecondaryContainer = Color(0xFFFBCFE8),
     tertiary = PocketGreen,
-    onTertiary = Color(0xFF00391E),
+    onTertiary = Color(0xFF022C22),
     background = PocketBackground,
-    onBackground = Color(0xFFE6EDF3),
+    onBackground = Color(0xFFF4F4F8),
     surface = PocketSurface,
-    onSurface = Color(0xFFE6EDF3),
+    onSurface = Color(0xFFF4F4F8),
     surfaceVariant = PocketSurfaceVariant,
-    onSurfaceVariant = Color(0xFF9AA0A6),
+    onSurfaceVariant = Color(0xFFA6A6B8),
     outline = PocketOutline,
-    outlineVariant = Color(0xFF333B4A),
+    outlineVariant = Color(0xFF2E2E3B),
 )
 
 private val LightColors = lightColorScheme(

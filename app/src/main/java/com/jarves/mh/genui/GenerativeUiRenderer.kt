@@ -44,7 +44,7 @@ fun GenerativeUiView(
                     Icons.Default.Check,
                     null,
                     Modifier.size(15.dp),
-                    tint = MaterialTheme.colorScheme.primary,
+                    tint = MaterialTheme.colorScheme.tertiary,
                 )
                 Spacer(Modifier.width(6.dp))
                 Text(

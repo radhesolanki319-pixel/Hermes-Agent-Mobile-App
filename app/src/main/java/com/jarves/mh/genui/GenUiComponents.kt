@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -24,6 +25,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -32,7 +34,9 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.RadioButton
+import androidx.compose.material3.RadioButtonDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -43,6 +47,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.res.stringResource
@@ -53,7 +58,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.jarves.mh.R
 import com.jarves.mh.ui.MarkdownText
-import com.jarves.mh.ui.theme.PocketOrange
+import com.jarves.mh.ui.theme.PocketGradientPrimary
+import com.jarves.mh.ui.theme.PocketGradientRainbow
+import com.jarves.mh.ui.theme.PocketGradientTeal
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -90,12 +97,13 @@ fun GenUiCardView(
     onEvent: (GenUiEvent) -> Unit,
 ) {
     Card(
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White.copy(alpha = 0.055f)),
+        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.13f)),
         modifier = Modifier.fillMaxWidth(),
     ) {
         Column(
-            Modifier.padding(14.dp),
+            Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             node.propText("title")?.takeIf { it.isNotBlank() }?.let { title ->
@@ -107,6 +115,36 @@ fun GenUiCardView(
             }
             node.children.forEach { child -> GenUiNodeView(child, payload, state, enabled, onEvent) }
         }
+    }
+}
+
+/** Primary action pill in the violet→pink brand gradient (AMOLED colourful style). */
+@Composable
+fun GradientPillButton(
+    label: String,
+    enabled: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(999.dp))
+            .background(
+                if (enabled) PocketGradientPrimary
+                else androidx.compose.ui.graphics.Brush.linearGradient(
+                    listOf(Color(0xFF3A3A46), Color(0xFF3A3A46)),
+                ),
+            )
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 22.dp, vertical = 13.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            label,
+            color = if (enabled) Color.White else Color.White.copy(alpha = 0.5f),
+            fontWeight = FontWeight.Bold,
+            style = MaterialTheme.typography.bodyLarge,
+        )
     }
 }
 
@@ -154,7 +192,7 @@ fun GenUiButtonView(
     val onClick: () -> Unit = { if (action != null) onEvent(GenUiEvent.ActionInvoked(action, node.id)) }
     when (node.propText("variant")) {
         "outline", "secondary" -> OutlinedButton(onClick = onClick, enabled = buttonEnabled) { Text(label) }
-        else -> Button(onClick = onClick, enabled = buttonEnabled) { Text(label) }
+        else -> GradientPillButton(label = label, enabled = buttonEnabled, onClick = onClick)
     }
 }
 
@@ -178,6 +216,14 @@ fun GenUiInputView(
         singleLine = !multiline,
         minLines = if (multiline) node.propNumber("min_lines")?.toInt()?.coerceIn(2, 8) ?: 3 else 1,
         modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = OutlinedTextFieldDefaults.colors(
+            focusedBorderColor = Color(0xFFA78BFA),
+            unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
+            focusedContainerColor = Color.White.copy(alpha = 0.04f),
+            unfocusedContainerColor = Color.White.copy(alpha = 0.03f),
+            disabledContainerColor = Color.White.copy(alpha = 0.02f),
+        ),
     )
 }
 
@@ -200,11 +246,11 @@ fun GenUiRadioGroupView(
         options.forEach { (value, label) ->
             val isSelected = value == selected
             Surface(
-                shape = RoundedCornerShape(12.dp),
-                color = MaterialTheme.colorScheme.surfaceVariant,
+                shape = RoundedCornerShape(16.dp),
+                color = if (isSelected) Color(0xFF7C3AED).copy(alpha = 0.16f) else Color.White.copy(alpha = 0.04f),
                 border = BorderStroke(
                     1.dp,
-                    if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant,
+                    if (isSelected) Color(0xFFA78BFA) else MaterialTheme.colorScheme.outlineVariant,
                 ),
                 modifier = Modifier
                     .fillMaxWidth()
@@ -214,7 +260,15 @@ fun GenUiRadioGroupView(
                     Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    RadioButton(selected = isSelected, onClick = null, enabled = interactive)
+                    RadioButton(
+                        selected = isSelected,
+                        onClick = null,
+                        enabled = interactive,
+                        colors = RadioButtonDefaults.colors(
+                            selectedColor = Color(0xFFA78BFA),
+                            unselectedColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                        ),
+                    )
                     Spacer(Modifier.width(8.dp))
                     Text(label, style = MaterialTheme.typography.bodyMedium)
                 }
@@ -239,7 +293,12 @@ fun GenUiCheckboxView(
             .fillMaxWidth()
             .clickable(enabled = interactive) { onEvent(GenUiEvent.FieldChanged(id, (!checked).toString())) },
     ) {
-        Checkbox(checked = checked, onCheckedChange = null, enabled = interactive)
+        Checkbox(
+            checked = checked,
+            onCheckedChange = null,
+            enabled = interactive,
+            colors = CheckboxDefaults.colors(checkedColor = MaterialTheme.colorScheme.primary),
+        )
         Spacer(Modifier.width(4.dp))
         Text(node.propText("label") ?: "", style = MaterialTheme.typography.bodyMedium)
     }
@@ -255,17 +314,26 @@ fun GenUiApprovalCardView(
     val id = node.id ?: return
     val decision = state.approvalDecisions[id]
     Card(
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White.copy(alpha = 0.055f)),
+        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.13f)),
         modifier = Modifier.fillMaxWidth(),
     ) {
         Column(
-            Modifier.padding(14.dp),
+            Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.Warning, null, tint = MaterialTheme.colorScheme.primary)
-                Spacer(Modifier.width(8.dp))
+                Box(
+                    Modifier
+                        .size(36.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(PocketGradientTeal),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Default.Warning, null, tint = Color.White, modifier = Modifier.size(19.dp))
+                }
+                Spacer(Modifier.width(10.dp))
                 Text(
                     node.propText("title") ?: stringResource(R.string.genui_approval_title),
                     fontWeight = FontWeight.Bold,
@@ -274,8 +342,9 @@ fun GenUiApprovalCardView(
             node.propText("text")?.takeIf { it.isNotBlank() }?.let { MarkdownText(markdown = it) }
             node.propText("command")?.takeIf { it.isNotBlank() }?.let { command ->
                 Surface(
-                    shape = RoundedCornerShape(10.dp),
-                    color = MaterialTheme.colorScheme.surface,
+                    shape = RoundedCornerShape(12.dp),
+                    color = Color.Black.copy(alpha = 0.5f),
+                    border = BorderStroke(1.dp, Color(0xFF34D399).copy(alpha = 0.35f)),
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Box(Modifier.horizontalScroll(rememberScrollState())) {
@@ -283,6 +352,7 @@ fun GenUiApprovalCardView(
                             command,
                             fontFamily = FontFamily.Monospace,
                             fontSize = 13.sp,
+                            color = Color(0xFF6EE7B7),
                             modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
                         )
                     }
@@ -305,16 +375,17 @@ fun GenUiApprovalCardView(
                 }
             } else {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    GradientPillButton(
+                        label = stringResource(R.string.genui_approve),
+                        enabled = enabled,
+                        onClick = { onEvent(GenUiEvent.ApprovalDecision(id, true)) },
+                        modifier = Modifier.weight(1f),
+                    )
                     OutlinedButton(
                         onClick = { onEvent(GenUiEvent.ApprovalDecision(id, false)) },
                         Modifier.weight(1f),
                         enabled = enabled,
                     ) { Text(stringResource(R.string.ws_reject)) }
-                    Button(
-                        onClick = { onEvent(GenUiEvent.ApprovalDecision(id, true)) },
-                        Modifier.weight(1f),
-                        enabled = enabled,
-                    ) { Text(stringResource(R.string.genui_approve)) }
                 }
             }
         }
@@ -326,10 +397,22 @@ fun GenUiProgressView(node: GenUiNode) {
     val value = node.propNumber("value") ?: node.propNumber("percent")?.div(100.0)
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         if (value != null) {
-            LinearProgressIndicator(
-                progress = { value.toFloat().coerceIn(0f, 1f) },
-                modifier = Modifier.fillMaxWidth(),
-            )
+            // Rainbow gradient bar on a translucent track (AMOLED colourful style).
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .height(8.dp)
+                    .clip(RoundedCornerShape(99.dp))
+                    .background(Color.White.copy(alpha = 0.12f)),
+            ) {
+                Box(
+                    Modifier
+                        .fillMaxWidth(value.toFloat().coerceIn(0f, 1f))
+                        .height(8.dp)
+                        .clip(RoundedCornerShape(99.dp))
+                        .background(PocketGradientRainbow),
+                )
+            }
         } else {
             LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
         }
@@ -346,16 +429,16 @@ fun GenUiCodeBlockView(node: GenUiNode) {
     var copied by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     Surface(
-        shape = RoundedCornerShape(12.dp),
-        color = Color(0xFF14171E),
-        border = BorderStroke(1.dp, Color(0xFF2A2E39)),
+        shape = RoundedCornerShape(16.dp),
+        color = Color(0xFF0A0A0E),
+        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.1f)),
         modifier = Modifier.fillMaxWidth(),
     ) {
         Column {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(Color(0xFF1C202B))
+                    .background(Color.White.copy(alpha = 0.05f))
                     .padding(horizontal = 12.dp, vertical = 2.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
@@ -381,7 +464,7 @@ fun GenUiCodeBlockView(node: GenUiNode) {
                     Icon(
                         imageVector = if (copied) Icons.Default.Check else Icons.Default.ContentCopy,
                         contentDescription = stringResource(R.string.genui_copy),
-                        tint = if (copied) PocketOrange else Color(0xFF9AA0A6),
+                        tint = if (copied) MaterialTheme.colorScheme.primary else Color(0xFF9AA0A6),
                         modifier = Modifier.size(16.dp),
                     )
                 }
