@@ -220,3 +220,14 @@ dependencies {
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
 }
+
+// CI (2026-11-17): .github/workflows/build.yml uploads app/build/outputs/apk/debug/*.apk,
+// but this app has online/offline flavors, so AGP writes the APKs to
+// outputs/apk/<flavor>/debug/ and the upload step found nothing. Copy both flavor
+// APKs into outputs/apk/debug/ after every assembleDebug so the upload works.
+val copyDebugApksForCi = tasks.register<Copy>("copyDebugApksForCi") {
+    from(layout.buildDirectory.dir("outputs/apk/online/debug")) { include("*.apk") }
+    from(layout.buildDirectory.dir("outputs/apk/offline/debug")) { include("*.apk") }
+    into(layout.buildDirectory.dir("outputs/apk/debug"))
+}
+tasks.matching { it.name == "assembleDebug" }.configureEach { finalizedBy(copyDebugApksForCi) }
