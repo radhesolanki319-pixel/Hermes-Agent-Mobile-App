@@ -42,7 +42,12 @@ enum class ProviderKind(
         fixedBaseUrl = true,
         fixedProtocol = true,
     ),
-    CUSTOM("Custom API", "Anthropic-compatible endpoint", ProviderProtocol.ANTHROPIC_GATEWAY, "", "", true),
+    // Custom API ships with the app's built-in endpoint pre-filled (the
+    // owner's FreeLLM gateway — endpoint and model only, never a key).
+    // HermesRouteMapper.CUSTOM_DEFAULT_BASE_URL / CUSTOM_DEFAULT_MODEL
+    // carry the same values for profiles already stored with blank
+    // fields; a unit test pins the two copies together.
+    CUSTOM("Custom API", "Anthropic-compatible endpoint", ProviderProtocol.ANTHROPIC_GATEWAY, "https://freellmapi-backup.onrender.com/v1", "claude-sonnet-5.5", true),
 }
 
 /**

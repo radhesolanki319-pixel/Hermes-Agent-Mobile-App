@@ -63,6 +63,18 @@ internal object HermesRouteMapper {
     const val CUSTOM_PROVIDER_NAME = "mh-custom"
     const val CUSTOM_KEY_ENV = "MH_HERMES_API_KEY"
 
+    /**
+     * Built-in defaults for the custom route: the owner's FreeLLM gateway.
+     * A custom profile stored with blank fields (the state older builds
+     * left behind) resolves to these at the point of use, so existing
+     * installs heal without a trip through Settings. Endpoint and model
+     * only — the API key is a secret and is never baked in; it stays in
+     * the vault, entered by the user. [ProviderKind.CUSTOM]'s defaults
+     * carry the same values for fresh profiles; a unit test pins them.
+     */
+    const val CUSTOM_DEFAULT_BASE_URL = "https://freellmapi-backup.onrender.com/v1"
+    const val CUSTOM_DEFAULT_MODEL = "claude-sonnet-5.5"
+
     fun forProfile(profile: ProviderProfile): HermesRoute = when (profile.kind) {
         ProviderKind.ANTHROPIC -> HermesRoute(
             provider = "anthropic",
@@ -96,12 +108,24 @@ internal object HermesRouteMapper {
         ProviderKind.CUSTOM -> HermesRoute(
             provider = CUSTOM_PROVIDER_NAME,
             keyEnv = CUSTOM_KEY_ENV,
-            baseUrl = profile.resolvedBaseUrl,
+            baseUrl = profile.resolvedBaseUrl.ifBlank { CUSTOM_DEFAULT_BASE_URL },
             custom = true,
         )
         ProviderKind.CLAUDE -> throw IllegalArgumentException("Claude subscription login is not supported by Hermes Agent")
         ProviderKind.OPENCODE_ZEN -> throw IllegalArgumentException("OpenCode Zen is not offered for Hermes Agent")
     }
+
+    /**
+     * The model a turn with [profile] actually runs: the profile's own
+     * model, else the kind's catalog default, else — for the custom
+     * route only — the built-in [CUSTOM_DEFAULT_MODEL]. Blank only when
+     * no layer has a model; with the current kinds that cannot happen
+     * (every first-class kind ships a default), so callers treat a blank
+     * result as a future-kind guard rather than a normal case.
+     */
+    fun resolvedModel(profile: ProviderProfile): String =
+        profile.model.ifBlank { profile.kind.defaultModel }
+            .ifBlank { if (profile.kind == ProviderKind.CUSTOM) CUSTOM_DEFAULT_MODEL else "" }
 
     /** Hermes speaks the OpenAI wire for these routes; that API lives under /v1. */
     private fun openAiBaseUrl(baseUrl: String): String {
@@ -713,11 +737,13 @@ class HermesRuntimeBridge(
             )
             return@withContext sessionId
         }
-        if (provider.model.isBlank() && provider.kind.defaultModel.isBlank()) {
-            // Only CUSTOM can reach this (every other kind ships a default
-            // model): a custom endpoint has no catalog default for Hermes
-            // to fall back to, so the run would go out with an empty model
-            // and die at the provider. Fail here with the way out instead.
+        // The model is resolved before this check: profile → kind default
+        // → the custom route's built-in default. No current kind reaches
+        // the failure blank, but the guard stays so a future kind with no
+        // model at any layer fails here with the way out instead of going
+        // out with an empty model and dying at the provider.
+        val model = HermesRouteMapper.resolvedModel(provider)
+        if (model.isBlank()) {
             eventBus.emit(
                 RuntimeEvent.SessionFailed(
                     sessionId,
@@ -767,7 +793,7 @@ class HermesRuntimeBridge(
                 add("--provider")
                 add(route.provider)
                 add("-m")
-                add(provider.model.ifBlank { provider.kind.defaultModel })
+                add(model)
                 add("-t")
                 add(HERMES_TOOLSETS)
                 add("--yolo")
@@ -777,7 +803,7 @@ class HermesRuntimeBridge(
                     add("--no-restore-cwd")
                 }
             }
-            Log.d("HermesBridge", "Route: ${route.provider}, Model: ${provider.model}, Resume: ${resumeId != null}")
+            Log.d("HermesBridge", "Route: ${route.provider}, Model: $model, Resume: ${resumeId != null}")
             val process = installer.process(
                 installed.proot,
                 installed.rootfs,
@@ -911,7 +937,7 @@ class HermesRuntimeBridge(
         try {
             val gatewaySessionId = remoteConversationId(projectId)?.takeIf(String::isNotBlank)
                 ?: "mh-${UUID.randomUUID()}".also { minted -> saveRemoteConversationId(projectId, minted) }
-            val model = provider.model.ifBlank { provider.kind.defaultModel }
+            val model = HermesRouteMapper.resolvedModel(provider)
             val outcome = client.streamChat(
                 config = host,
                 model = model,
@@ -1072,7 +1098,7 @@ class HermesRuntimeBridge(
         // makes sure the directories exist.
         File(home, "skills").mkdirs()
         File(home, "memories").mkdirs()
-        val model = provider.model.ifBlank { provider.kind.defaultModel }
+        val model = HermesRouteMapper.resolvedModel(provider)
         val configFile = File(home, "config.yaml")
         val existingConfig = configFile.takeIf(File::isFile)?.readText()
         configFile.writeText(
