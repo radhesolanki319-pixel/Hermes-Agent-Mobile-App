@@ -38,7 +38,7 @@ val generatedRuntimeAssets = layout.buildDirectory.dir("generated/runtime-assets
 // instead of failing the build. On a machine with the bundles present nothing changes.
 val agyBundleFile = runtimeBundleDir.file("pocketdev-agy-arm64-2026.09.1.tar.zst")
 val prepareBundledAgentAssets = tasks.register<Sync>("prepareBundledAgentAssets") {
-    onlyIf { agyBundleFile.get().asFile.isFile }
+    onlyIf { agyBundleFile.asFile.isFile }
     from(agyBundleFile)
     into(generatedRuntimeAssets.map { it.dir("shared/runtime") })
 }
@@ -51,8 +51,8 @@ val offlineBundleFiles = listOf(
     "pocketdev-dsh-arm64-2026.09.1.tar.zst",
 ).map { runtimeBundleDir.file(it) }
 val prepareOfflineRuntimeAssets = tasks.register<Sync>("prepareOfflineRuntimeAssets") {
-    onlyIf { offlineBundleFiles.any { it.get().asFile.isFile } }
-    from(offlineBundleFiles.filter { it.get().asFile.isFile })
+    onlyIf { offlineBundleFiles.any { it.asFile.isFile } }
+    from(offlineBundleFiles.filter { it.asFile.isFile })
     into(generatedRuntimeAssets.map { it.dir("offline/runtime") })
 }
 

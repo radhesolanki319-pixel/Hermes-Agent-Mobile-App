@@ -151,7 +151,7 @@ fun GenUiButtonView(
     val isSubmit = action?.type == GenUiActionTypes.SUBMIT_FORM
     val buttonEnabled = enabled && action != null && !(isSubmit && state.submitted)
     val label = node.propText("label") ?: action?.label ?: stringResource(R.string.genui_ok)
-    val onClick = { action?.let { onEvent(GenUiEvent.ActionInvoked(it, node.id)) } }
+    val onClick: () -> Unit = { if (action != null) onEvent(GenUiEvent.ActionInvoked(action, node.id)) }
     when (node.propText("variant")) {
         "outline", "secondary" -> OutlinedButton(onClick = onClick, enabled = buttonEnabled) { Text(label) }
         else -> Button(onClick = onClick, enabled = buttonEnabled) { Text(label) }
