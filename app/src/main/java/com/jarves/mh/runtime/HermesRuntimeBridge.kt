@@ -9,7 +9,6 @@ import com.jarves.mh.model.ChangeItem
 import com.jarves.mh.model.ChatMessage
 import com.jarves.mh.model.DevStack
 import com.jarves.mh.model.ProjectKind
-import com.jarves.mh.model.ProviderKind
 import com.jarves.mh.model.ProviderProfile
 import com.jarves.mh.model.RuntimeEvent
 import com.jarves.mh.model.ToolRequest
@@ -51,90 +50,6 @@ internal fun hermesToolDisplayName(name: String): String = when (name.lowercase(
     else -> name.replace('_', ' ').replaceFirstChar { it.uppercase() }
 }
 
-/** Hermes provider route resolved from our saved provider profile. */
-internal data class HermesRoute(
-    val provider: String,
-    val keyEnv: String,
-    val baseUrl: String,
-    val custom: Boolean = false,
-)
-
-internal object HermesRouteMapper {
-    const val CUSTOM_PROVIDER_NAME = "mh-custom"
-    const val CUSTOM_KEY_ENV = "MH_HERMES_API_KEY"
-
-    /**
-     * Built-in defaults for the custom route: the owner's FreeLLM gateway.
-     * A custom profile stored with blank fields (the state older builds
-     * left behind) resolves to these at the point of use, so existing
-     * installs heal without a trip through Settings. Endpoint and model
-     * only — the API key is a secret and is never baked in; it stays in
-     * the vault, entered by the user. [ProviderKind.CUSTOM]'s defaults
-     * carry the same values for fresh profiles; a unit test pins them.
-     */
-    const val CUSTOM_DEFAULT_BASE_URL = "https://freellmapi-backup.onrender.com/v1"
-    const val CUSTOM_DEFAULT_MODEL = "claude-sonnet-5.5"
-
-    fun forProfile(profile: ProviderProfile): HermesRoute = when (profile.kind) {
-        ProviderKind.ANTHROPIC -> HermesRoute(
-            provider = "anthropic",
-            keyEnv = "ANTHROPIC_API_KEY",
-            baseUrl = profile.resolvedBaseUrl,
-        )
-        ProviderKind.LLM_ROUTER -> HermesRoute(
-            provider = "openrouter",
-            keyEnv = "OPENROUTER_API_KEY",
-            baseUrl = openAiBaseUrl(profile.resolvedBaseUrl),
-        )
-        ProviderKind.DEEPSEEK -> HermesRoute(
-            provider = "deepseek",
-            keyEnv = "DEEPSEEK_API_KEY",
-            // Harness stores DeepSeek's Anthropic-gateway root; Hermes's
-            // first-class DeepSeek provider speaks the OpenAI wire instead.
-            baseUrl = openAiBaseUrl(profile.resolvedBaseUrl.removeSuffix("/anthropic")),
-        )
-        ProviderKind.KIMI -> HermesRoute(
-            provider = "kimi-coding",
-            keyEnv = "KIMI_API_KEY",
-            // Hermes auto-detects the Anthropic-messages transport for base
-            // URLs ending in /anthropic, which is the endpoint Harness stores.
-            baseUrl = profile.resolvedBaseUrl,
-        )
-        ProviderKind.NVIDIA_NIM -> HermesRoute(
-            provider = "nvidia",
-            keyEnv = "NVIDIA_API_KEY",
-            baseUrl = profile.resolvedBaseUrl,
-        )
-        ProviderKind.CUSTOM -> HermesRoute(
-            provider = CUSTOM_PROVIDER_NAME,
-            keyEnv = CUSTOM_KEY_ENV,
-            baseUrl = profile.resolvedBaseUrl.ifBlank { CUSTOM_DEFAULT_BASE_URL },
-            custom = true,
-        )
-        ProviderKind.CLAUDE -> throw IllegalArgumentException("Claude subscription login is not supported by Hermes Agent")
-        ProviderKind.OPENCODE_ZEN -> throw IllegalArgumentException("OpenCode Zen is not offered for Hermes Agent")
-    }
-
-    /**
-     * The model a turn with [profile] actually runs: the profile's own
-     * model, else the kind's catalog default, else — for the custom
-     * route only — the built-in [CUSTOM_DEFAULT_MODEL]. Blank only when
-     * no layer has a model; with the current kinds that cannot happen
-     * (every first-class kind ships a default), so callers treat a blank
-     * result as a future-kind guard rather than a normal case.
-     */
-    fun resolvedModel(profile: ProviderProfile): String =
-        profile.model.ifBlank { profile.kind.defaultModel }
-            .ifBlank { if (profile.kind == ProviderKind.CUSTOM) CUSTOM_DEFAULT_MODEL else "" }
-
-    /** Hermes speaks the OpenAI wire for these routes; that API lives under /v1. */
-    private fun openAiBaseUrl(baseUrl: String): String {
-        val trimmed = baseUrl.trim().trimEnd('/')
-        if (trimmed.isBlank()) return trimmed
-        return if (trimmed.endsWith("/v1")) trimmed else "$trimmed/v1"
-    }
-}
-
 /**
  * Owns the text of HERMES_HOME's `config.yaml` and `.env`.
  *
@@ -154,10 +69,14 @@ internal object HermesRouteMapper {
  *  - adds the app's unlock/safety keys (see [STATIC_SECTIONS]) only where
  *    they are absent — a value already present belongs to Hermes or the
  *    user and is preserved verbatim, like every other line of the file;
+ *  - applies the user's Hermes options (see [HermesConfigOptions]) with
+ *    set semantics — memory, skills/curator gates, coding posture,
+ *    tool_search, delegation cap and the approval policy are the app
+ *    settings' keys, so the settings screen is their source of truth
+ *    exactly as `hermes setup` / `hermes tools` would be on a desktop;
  *  - rewrites the `platform_toolsets` cli/acp lists it owns as a union
  *    with whatever is already there (see [ensurePlatformToolsets]), and
- *    ensures two keys that do not fit the section shape:
- *    `tools.tool_search.enabled` (nested) and the top-level
+ *    ensures a top-level key that does not fit the section shape:
  *    `hooks_auto_accept`;
  *  - never deletes sections, keys or comments it does not own.
  *
@@ -174,44 +93,37 @@ internal object HermesConfigFiles {
      * or an unlock:
      *  - `database.journal_mode "delete"`: PRoot's filesystem is not WAL
      *    crash-safe; Hermes documents "delete" for such backing stores.
-     *  - `approvals`: one-shot mode has no approval UI, so the policy is
-     *    the deterministic full-access equivalent (the guest is
-     *    PRoot-confined and the run launches with `--yolo`).
      *  - `updates.check false`: the app owns the pinned install; Hermes
      *    must never self-update behind the version marker.
-     *  - `memory`: persistent memory + user profile on, writes ungated,
-     *    so what Hermes learns in one message is there for the next.
-     *  - `skills.write_approval false` + `curator.enabled`: Hermes's
+     *  - `skills.inline_shell` + curator consolidation/pruning: Hermes's
      *    self-learning loop (author/patch skills, background curation of
-     *    agent-created skills) runs ungated.
-     *  - `delegation.oneshot_max_children 0` (0 = unlimited in Hermes's
-     *    schema): the default cap of 2 subagents per one-shot run would
-     *    throttle exactly the mode this bridge drives.
+     *    agent-created skills) runs at full strength.
      *
      * The activation pass (against HERMES_HIDDEN_POWERS.md) added the
      * remaining default-off unlocks below, each ensure-if-absent like
-     * the rest: delegation depth/approvals/completions (#38/#39/#40),
-     * skill inline shell (#41), curator consolidation + built-in
-     * pruning (#43/#44), coding posture pinned away from "focus" (#14),
-     * stop-time verification (#49), checkpoints (#36), cron
-     * self-scheduling (#37), private-URL access (#46), PII redaction
-     * (#47), session housekeeping (#50/#51), streaming STT (#52),
-     * voice auto-TTS (#53) and the tool-loop hard stop (#54).
-     * `platform_toolsets` is no longer here — it is app-owned policy
-     * and handled by [ensurePlatformToolsets].
+     * the rest: delegation depth/approvals (#38/#39), skill inline
+     * shell (#41), curator consolidation + built-in pruning (#43/#44),
+     * stop-time verification (#49), checkpoints (#36), private-URL
+     * access (#46), PII redaction (#47), session housekeeping (#50),
+     * streaming STT (#52), voice auto-TTS (#53) and the tool-loop hard
+     * stop (#54). Keys the user controls in the Hermes settings screen
+     * (memory gates, write approvals, curator on/off, coding posture,
+     * the approval policy, the delegation cap) are NOT here — they are
+     * applied from [HermesConfigOptions] by [applyOptions]. Three keys
+     * older builds wrote are gone because hermes-agent 0.19.0 does not
+     * have them (verified against the PyPI sdist): `approvals.
+     * single_query_mode`, `delegation.oneshot_max_children` (the real
+     * cap is `max_concurrent_children`) and `delegation.
+     * independent_completions`, plus the dead `cron.
+     * allow_agent_scheduling` and `sessions.auto_archive` /
+     * `show_subagents`. `platform_toolsets` is app-owned policy and
+     * handled by [ensurePlatformToolsets].
      */
     private val STATIC_SECTIONS: List<Pair<String, List<String>>> = listOf(
         "database" to listOf("  journal_mode: \"delete\""),
         "terminal" to listOf("  backend: \"local\""),
-        "approvals" to listOf("  mode: \"off\"", "  single_query_mode: \"approve\""),
         "updates" to listOf("  check: false"),
-        "memory" to listOf(
-            "  memory_enabled: true",
-            "  user_profile_enabled: true",
-            "  write_approval: false",
-        ),
         "skills" to listOf(
-            "  write_approval: false",
             // #41: skills may pre-execute !`cmd` snippets when they
             // load. Hermes never auto-executes community-hub installs;
             // only local/agent-authored skills gain this, and those
@@ -219,29 +131,20 @@ internal object HermesConfigFiles {
             "  inline_shell: true",
         ),
         "curator" to listOf(
-            "  enabled: true",
             // #43/#44: the full curation pass — LLM consolidation of
             // agent-created skills, and stale built-ins may be pruned.
             "  consolidate: true",
             "  prune_builtins: true",
         ),
         "delegation" to listOf(
-            "  oneshot_max_children: 0",
             "  orchestrator_enabled: true",
-            // #38/#39/#40: orchestrator→worker trees (depth 2 instead
-            // of flat-only), "once" prompts inside sub-agents
-            // auto-approved (the parent session already runs --yolo
-            // with approvals off), background completions delivered
-            // one by one instead of as a single batch.
+            // #38/#39: orchestrator→worker trees (depth 2 instead of
+            // flat-only), and "once" prompts inside sub-agents
+            // auto-approved (the parent session already runs --yolo).
             "  max_spawn_depth: 2",
             "  subagent_auto_approve: true",
-            "  independent_completions: true",
         ),
         "agent" to listOf(
-            // #14: "auto" adopts coding guidance in a code workspace
-            // but never strips a user-enabled toolset; "focus" would
-            // silently drop image-gen/TTS/cron/computer-use/kanban.
-            "  coding_context: \"auto\"",
             // #49: after code edits the agent must produce fresh
             // verification evidence before its final answer.
             "  verify_on_stop: true",
@@ -250,11 +153,6 @@ internal object HermesConfigFiles {
             // #36: snapshot the working dir once per turn; /rollback
             // restores it.
             "  enabled: true",
-        ),
-        "cron" to listOf(
-            // #37: cron-spawned agents may schedule jobs themselves.
-            // Firing still needs the gateway (host phase).
-            "  allow_agent_scheduling: true",
         ),
         "security" to listOf(
             // #46: localhost/LAN URLs become reachable for web
@@ -268,12 +166,8 @@ internal object HermesConfigFiles {
             "  redact_pii: true",
         ),
         "sessions" to listOf(
-            // #50/#51: prune ended sessions past Hermes's retention
-            // window, auto-archive idle ones, and list sub-agent runs
-            // in session lists.
+            // #50: prune ended sessions past Hermes's retention window.
             "  auto_prune: true",
-            "  auto_archive: true",
-            "  show_subagents: true",
         ),
         "stt" to listOf(
             // #52: live partial transcription while speaking (cloud
@@ -292,21 +186,22 @@ internal object HermesConfigFiles {
     )
 
     /**
-     * The cli platform's toolset list: the `hermes-cli` bundle plus
-     * every default-off toolset Hermes allows on this platform
-     * (inventory §1). `discord`/`discord_admin` are absent on purpose:
-     * Hermes restricts them to discord-platform sessions
-     * (`hermes_cli/toolset_scope.py`) and filters them out of cli
-     * resolution even when named — their unlock is a Discord bot token
-     * on a gateway surface (#5/#6/#24). Tools whose other half is
-     * missing still self-gate through their check functions (spotify
-     * needs its catalog plugin + login, a2a its platform plugin,
-     * kanban's worker tools the dispatcher), so naming them costs
-     * nothing today and activates them when the other half arrives.
+     * The cli platform's toolset list is the `hermes-cli` base bundle
+     * plus the extras the user selected in the Hermes options (see
+     * [HermesConfigOptions.cliToolsets]; the full-power defaults are
+     * the default-off toolsets Hermes allows on this platform).
+     * `discord`/`discord_admin` are absent on purpose: Hermes
+     * restricts them to discord-platform sessions and filters them out
+     * of cli resolution even when named — their unlock is a Discord
+     * bot token on a gateway surface (#5/#6/#24). Tools whose other
+     * half is missing still self-gate through their check functions
+     * (spotify needs its catalog plugin + login, kanban's worker tools
+     * the dispatcher), so naming them costs nothing today and
+     * activates them when the other half arrives. The `a2a` entry
+     * older builds wrote is gone: hermes-agent 0.19.0 has no such
+     * toolset (verified against the PyPI sdist).
      */
-    private val CLI_TOOLSETS = listOf(
-        "hermes-cli", "x_search", "video", "video_gen", "kanban", "spotify", "a2a",
-    )
+    private val CLI_BASE_TOOLSET = "hermes-cli"
 
     /**
      * Inventory #15, written ahead of the ACP bridge: the `hermes-acp`
@@ -321,29 +216,26 @@ internal object HermesConfigFiles {
         "video", "video_gen", "x_search",
     )
 
-    /** .env names the app owns (mirrors [HermesRouteMapper]'s key envs); any other line is user state. */
-    private val APP_ENV_KEYS = listOf(
-        "ANTHROPIC_API_KEY",
-        "OPENROUTER_API_KEY",
-        "DEEPSEEK_API_KEY",
-        "KIMI_API_KEY",
-        "NVIDIA_API_KEY",
-        "MH_HERMES_API_KEY",
-    )
+    /** .env names the app owns (the Hermes provider catalog's key envs); any other line is user state. */
+    private val APP_ENV_KEYS: List<String> = HermesProviderCatalog.ALL_KEY_ENVS
 
     private val TOP_LEVEL_KEY = Regex("^([A-Za-z_][A-Za-z0-9_.-]*):")
 
     /** Full default config.yaml for a HERMES_HOME that has none yet. */
-    fun freshConfig(route: HermesRoute, model: String): String {
+    fun freshConfig(
+        route: HermesRoute,
+        model: String,
+        options: HermesConfigOptions = HermesConfigOptions.FULL_POWER,
+    ): String {
         val lines = mutableListOf<String>()
         lines += modelSectionLines(route, model)
         if (route.custom) lines += customProviderSectionLines(route)
-        for ((section, children) in STATIC_SECTIONS) {
+        for ((section, children) in freshSections(options)) {
             lines += "$section:"
             lines += children
         }
-        ensurePlatformToolsets(lines)
-        ensureToolSearchOff(lines)
+        ensurePlatformToolsets(lines, options)
+        setToolSearch(lines, options.toolSearch)
         ensureHooksAutoAccept(lines)
         return lines.joinToString("\n", postfix = "\n")
     }
@@ -352,7 +244,12 @@ internal object HermesConfigFiles {
      * Merges [existing] config.yaml text per the contract above. The
      * result is stable: merging an already-merged file changes nothing.
      */
-    fun mergedConfig(existing: String, route: HermesRoute, model: String): String {
+    fun mergedConfig(
+        existing: String,
+        route: HermesRoute,
+        model: String,
+        options: HermesConfigOptions = HermesConfigOptions.FULL_POWER,
+    ): String {
         val lines = existing.split("\n").toMutableList()
         // Drop the artefactual empty entry a trailing newline produces;
         // the result is re-terminated below.
@@ -362,23 +259,134 @@ internal object HermesConfigFiles {
         for ((section, children) in STATIC_SECTIONS) {
             ensureSectionKeys(lines, section, children)
         }
-        ensurePlatformToolsets(lines)
-        ensureToolSearchOff(lines)
+        applyOptions(lines, options)
+        ensurePlatformToolsets(lines, options)
         ensureHooksAutoAccept(lines)
         return lines.joinToString("\n", postfix = "\n")
     }
 
     /**
-     * Merges .env text: lines carrying an app-owned key are replaced by
-     * the current route's secret; every other line (user-added keys,
-     * comments, blanks) survives verbatim.
+     * Merges .env text: lines carrying an app-owned key are removed and
+     * the current route's secret is appended under its own env name (only
+     * when a secret exists — a keyless route writes no empty assignment);
+     * every other line (user-added keys, comments, blanks) survives
+     * verbatim.
      */
     fun mergedEnv(existing: String, route: HermesRoute, secret: String): String {
         val lines = existing.split("\n").toMutableList()
         if (lines.isNotEmpty() && lines.last().isEmpty()) lines.removeAt(lines.lastIndex)
         lines.removeAll { line -> APP_ENV_KEYS.any { key -> line.trimStart().startsWith("$key=") } }
-        lines += "${route.keyEnv}=$secret"
+        if (secret.isNotBlank() && route.keyEnv.isNotBlank()) {
+            lines += "${route.keyEnv}=$secret"
+        }
         return lines.joinToString("\n", postfix = "\n")
+    }
+
+    /**
+     * The sections of a fresh config in canonical order: the static
+     * unlock sections interleaved with the option-controlled keys, so a
+     * fresh file reads exactly like the merge of an empty one.
+     */
+    private fun freshSections(options: HermesConfigOptions): List<Pair<String, List<String>>> {
+        val statics = STATIC_SECTIONS.toMap()
+        fun static(name: String): List<String> = statics[name].orEmpty()
+        return listOf(
+            "database" to static("database"),
+            "terminal" to static("terminal"),
+            "approvals" to listOf(
+                "  mode: \"${options.approvalsMode}\"",
+                "  cron_mode: \"${options.approvalsCronMode}\"",
+            ),
+            "updates" to static("updates"),
+            "memory" to listOf(
+                "  memory_enabled: ${options.memoryEnabled}",
+                "  user_profile_enabled: ${options.memoryUserProfile}",
+                "  write_approval: ${options.memoryWriteApproval}",
+            ),
+            "skills" to listOf(
+                "  write_approval: ${options.skillsWriteApproval}",
+            ) + static("skills"),
+            "curator" to listOf(
+                "  enabled: ${options.curatorEnabled}",
+            ) + static("curator"),
+            "delegation" to listOf(
+                "  max_concurrent_children: ${options.delegationMaxChildren}",
+            ) + static("delegation"),
+            "agent" to listOf(
+                "  coding_context: \"${options.codingContext}\"",
+            ) + static("agent"),
+            "checkpoints" to static("checkpoints"),
+            "security" to static("security"),
+            "privacy" to static("privacy"),
+            "sessions" to static("sessions"),
+            "stt" to static("stt"),
+            "voice" to static("voice"),
+            "tool_loop_guardrails" to static("tool_loop_guardrails"),
+        )
+    }
+
+    /**
+     * Applies the user's Hermes options to an existing config with set
+     * semantics: these keys belong to the app settings (their source of
+     * truth), so a value already in the file — from an older build, a
+     * guest-terminal edit, or Hermes itself — is replaced, and a missing
+     * section is appended whole in canonical order. Flow-style sections
+     * are left untouched, the same limit as every other rewrite here.
+     */
+    private fun applyOptions(lines: MutableList<String>, options: HermesConfigOptions) {
+        setSectionKeys(
+            lines, "approvals",
+            listOf(
+                "  mode: \"${options.approvalsMode}\"",
+                "  cron_mode: \"${options.approvalsCronMode}\"",
+            ),
+        )
+        setSectionKeys(
+            lines, "memory",
+            listOf(
+                "  memory_enabled: ${options.memoryEnabled}",
+                "  user_profile_enabled: ${options.memoryUserProfile}",
+                "  write_approval: ${options.memoryWriteApproval}",
+            ),
+        )
+        setSectionKeys(lines, "skills", listOf("  write_approval: ${options.skillsWriteApproval}"))
+        setSectionKeys(lines, "curator", listOf("  enabled: ${options.curatorEnabled}"))
+        setSectionKeys(
+            lines, "delegation",
+            listOf("  max_concurrent_children: ${options.delegationMaxChildren}"),
+        )
+        setSectionKeys(lines, "agent", listOf("  coding_context: \"${options.codingContext}\""))
+        setToolSearch(lines, options.toolSearch)
+    }
+
+    /**
+     * Sets every child of [section] to the given rendered line (see
+     * [applyOptions]): existing keys are replaced in place, missing keys
+     * are appended at the end of the section in the given order.
+     */
+    private fun setSectionKeys(lines: MutableList<String>, section: String, children: List<String>) {
+        val found = findSection(lines, section)
+        when {
+            found == null -> {
+                lines += "$section:"
+                lines += children
+            }
+            found.inlineValue -> Unit // Present in flow form; left to Hermes.
+            else -> {
+                var end = found.endIndex
+                for (child in children) {
+                    val indent = child.takeWhile { it == ' ' }.length
+                    val key = child.trim().substringBefore(':')
+                    val existing = childKeyIndex(lines, Section(found.headerIndex, end, inlineValue = false), indent, key)
+                    if (existing >= 0) {
+                        lines[existing] = child
+                    } else {
+                        lines.add(end, child)
+                        end++
+                    }
+                }
+            }
+        }
     }
 
     private fun modelSectionLines(route: HermesRoute, model: String): List<String> = buildList {
@@ -390,12 +398,22 @@ internal object HermesConfigFiles {
         }
     }
 
+    /**
+     * The custom endpoint as a keyed `providers:` entry — the shape
+     * hermes-agent 0.19.0's resolver reads (`api` is the canonical URL
+     * key of this shape; `key_env` names the .env variable holding the
+     * key, so the secret never lands inline in config.yaml).
+     */
     private fun customProviderSectionLines(route: HermesRoute): List<String> = listOf(
         "providers:",
         "  ${route.provider}:",
-        "    base_url: ${quote(route.baseUrl)}",
+        "    name: ${quote(HermesProviderCatalog.CUSTOM_PROVIDER_NAME)}",
+        "    api: ${quote(route.baseUrl)}",
         "    key_env: ${route.keyEnv}",
     )
+
+    /** Provider key older builds wrote for the custom endpoint; superseded by [HermesProviderCatalog.CUSTOM_PROVIDER_KEY]. */
+    private const val LEGACY_CUSTOM_PROVIDER_KEY = "mh-custom"
 
     private fun updateModelSection(lines: MutableList<String>, route: HermesRoute, model: String) {
         val section = findSection(lines, "model")
@@ -424,13 +442,19 @@ internal object HermesConfigFiles {
             section == null -> lines.addAll(customProviderSectionLines(route))
             section.inlineValue -> Unit // Same flow-style limit as the model section.
             else -> {
-                val nameIndex = childKeyIndex(lines, section, indent = 2, key = route.provider)
+                // The legacy app-owned block from older builds is removed:
+                // it is this writer's own artifact, and leaving it would
+                // keep a second, stale custom endpoint defined.
+                removeProviderBlock(lines, LEGACY_CUSTOM_PROVIDER_KEY)
+                val refreshed = findSection(lines, "providers") ?: return
+                val nameIndex = childKeyIndex(lines, refreshed, indent = 2, key = route.provider)
                 if (nameIndex < 0) {
-                    lines.add(section.headerIndex + 1, "  ${route.provider}:")
+                    lines.add(refreshed.headerIndex + 1, "  ${route.provider}:")
                     lines.addAll(
-                        section.headerIndex + 2,
+                        refreshed.headerIndex + 2,
                         listOf(
-                            "    base_url: ${quote(route.baseUrl)}",
+                            "    name: ${quote(HermesProviderCatalog.CUSTOM_PROVIDER_NAME)}",
+                            "    api: ${quote(route.baseUrl)}",
                             "    key_env: ${route.keyEnv}",
                         ),
                     )
@@ -438,15 +462,33 @@ internal object HermesConfigFiles {
                     // The named provider's sub-block runs to the first
                     // following line indented less than its own children.
                     var end = nameIndex + 1
-                    while (end < section.endIndex && (lines[end].isBlank() || lines[end].takeWhile { it == ' ' }.length >= 4)) {
+                    while (end < refreshed.endIndex && (lines[end].isBlank() || lines[end].takeWhile { it == ' ' }.length >= 4)) {
                         end++
                     }
                     val subBlock = Section(nameIndex, end, inlineValue = false)
-                    var current = setChildLine(lines, subBlock, indent = 4, key = "base_url", "    base_url: ${quote(route.baseUrl)}")
+                    var current = setChildLine(lines, subBlock, indent = 4, key = "name", "    name: ${quote(HermesProviderCatalog.CUSTOM_PROVIDER_NAME)}")
+                    current = setChildLine(lines, current, indent = 4, key = "api", "    api: ${quote(route.baseUrl)}")
+                    // An older build's `base_url` alias line is this
+                    // writer's own key; drop it so the entry carries one
+                    // canonical URL.
+                    current = removeChildLine(lines, current, indent = 4, key = "base_url")
                     setChildLine(lines, current, indent = 4, key = "key_env", "    key_env: ${route.keyEnv}")
                 }
             }
         }
+    }
+
+    /** Removes the named provider's sub-block (header + its children) from `providers:`, if present. */
+    private fun removeProviderBlock(lines: MutableList<String>, name: String) {
+        val section = findSection(lines, "providers") ?: return
+        if (section.inlineValue) return
+        val nameIndex = childKeyIndex(lines, section, indent = 2, key = name)
+        if (nameIndex < 0) return
+        var end = nameIndex + 1
+        while (end < section.endIndex && (lines[end].isBlank() || lines[end].takeWhile { it == ' ' }.length >= 4)) {
+            end++
+        }
+        for (i in end - 1 downTo nameIndex) lines.removeAt(i)
     }
 
     /** Adds [children] of [section] that are absent; present keys keep their existing values. */
@@ -476,11 +518,11 @@ internal object HermesConfigFiles {
      * toolset the user added by hand stays enabled. Lists for other
      * platforms (telegram, …) are user state and are never touched.
      */
-    private fun ensurePlatformToolsets(lines: MutableList<String>) {
+    private fun ensurePlatformToolsets(lines: MutableList<String>, options: HermesConfigOptions) {
         // acp first: a missing child is inserted directly under the
         // section header, so this order leaves cli above acp.
         setPlatformToolsets(lines, "acp", ACP_TOOLSETS)
-        setPlatformToolsets(lines, "cli", CLI_TOOLSETS)
+        setPlatformToolsets(lines, "cli", (listOf(CLI_BASE_TOOLSET) + options.cliToolsets).distinct())
     }
 
     private fun setPlatformToolsets(lines: MutableList<String>, platform: String, required: List<String>) {
@@ -520,17 +562,20 @@ internal object HermesConfigFiles {
     }
 
     /**
-     * Inventory #35: with `tools.tool_search.enabled: "off"` every
-     * tool is eager — no search-first bridge hides the 21
-     * default-deferred core tools or any MCP/plugin tool. This is an
-     * ensure-if-absent unlock like the others: a value Hermes or the
-     * user already set here is preserved.
+     * Sets `tools.tool_search.enabled` to the user's chosen mode
+     * (inventory #35: with "off" every tool is eager — no search-first
+     * bridge hides the default-deferred core tools or any MCP/plugin
+     * tool). Unlike the unlock keys this one is option-controlled, so
+     * an existing block-style value is replaced; a flow-style
+     * `tool_search:` line counts as configured and is left untouched,
+     * the same limit as every other rewrite here.
      */
-    private fun ensureToolSearchOff(lines: MutableList<String>) {
+    private fun setToolSearch(lines: MutableList<String>, mode: String) {
+        val rendered = "    enabled: \"$mode\""
         if (findSection(lines, "tools") == null) {
             lines += "tools:"
             lines += "  tool_search:"
-            lines += "    enabled: \"off\""
+            lines += rendered
             return
         }
         val section = findSection(lines, "tools") ?: return
@@ -538,7 +583,7 @@ internal object HermesConfigFiles {
         val childIndex = childKeyIndex(lines, section, indent = 2, key = "tool_search")
         if (childIndex < 0) {
             lines.add(section.headerIndex + 1, "  tool_search:")
-            lines.add(section.headerIndex + 2, "    enabled: \"off\"")
+            lines.add(section.headerIndex + 2, rendered)
             return
         }
         if (lines[childIndex].substringAfter(':').trim().isNotEmpty()) return // Flow form: configured.
@@ -551,9 +596,7 @@ internal object HermesConfigFiles {
             end++
         }
         val block = Section(childIndex, end, inlineValue = false)
-        if (childKeyIndex(lines, block, indent = 4, key = "enabled") < 0) {
-            lines.add(childIndex + 1, "    enabled: \"off\"")
-        }
+        setChildLine(lines, block, indent = 4, key = "enabled", rendered)
     }
 
     /**
@@ -676,7 +719,7 @@ internal fun hermesLaunchEnvironment(route: HermesRoute, secret: String): Map<St
  */
 class HermesRuntimeBridge(
     private val context: Context,
-    private val secretFor: (ProviderProfile) -> String?,
+    private val hermesSettings: () -> HermesRuntimeSettings,
     private val conversationId: (String) -> String?,
     private val saveConversationId: (String, String) -> Unit,
     private val hostConfig: () -> HermesHostConfig = { HermesHostConfig(remote = false, baseUrl = "", apiKey = "") },
@@ -712,9 +755,13 @@ class HermesRuntimeBridge(
         // host instead of the embedded copy. The embedded path below is
         // untouched — no local install, provider key or workspace is needed
         // for a remote turn, because the host owns all three.
+        // Hermes runs from its own settings (Agent → Hermes setup), not
+        // from the app provider profile the other agents use: provider,
+        // model and key all come from the Hermes-native store.
+        val settings = hermesSettings()
         val host = hostConfig()
         if (host.remote) {
-            runCatching { runRemoteTurn(sessionId, projectId, prompt, provider, host) }
+            runCatching { runRemoteTurn(sessionId, projectId, prompt, settings.setup.resolvedModel(), host) }
                 .onFailure { error ->
                     Log.e("HermesBridge", "Remote Hermes session failed", error)
                     emitFailureOnce(sessionId, friendlyError(error))
@@ -723,31 +770,30 @@ class HermesRuntimeBridge(
             RuntimeTaskController.stopAction = null
             return@withContext sessionId
         }
-        val secret = secretFor(provider).orEmpty().ifBlank { localServerPlaceholderKey(provider) }
-        if (secret.isBlank()) {
-            eventBus.emit(RuntimeEvent.SessionFailed(sessionId, "No API key is saved for ${provider.kind.title}."))
-            return@withContext sessionId
+        val route = settings.setup.route()
+        // A custom endpoint may legitimately run keyless (local servers);
+        // Hermes's own custom-provider resolution sends its literal
+        // "no-key-required" placeholder in that case. A first-class
+        // provider without a key can only fail at the API, so fail here
+        // with the way out instead.
+        val secret = settings.secret.ifBlank {
+            if (route.custom) "no-key-required" else ""
         }
-        if (provider.kind == ProviderKind.CLAUDE) {
+        if (secret.isBlank()) {
             eventBus.emit(
                 RuntimeEvent.SessionFailed(
                     sessionId,
-                    "Claude subscription login is not supported by Hermes Agent. Pick a key-based provider in Settings.",
+                    "No API key is saved for Hermes Agent. Open Agent → Hermes setup and add the provider's API key.",
                 ),
             )
             return@withContext sessionId
         }
-        // The model is resolved before this check: profile → kind default
-        // → the custom route's built-in default. No current kind reaches
-        // the failure blank, but the guard stays so a future kind with no
-        // model at any layer fails here with the way out instead of going
-        // out with an empty model and dying at the provider.
-        val model = HermesRouteMapper.resolvedModel(provider)
+        val model = settings.setup.resolvedModel()
         if (model.isBlank()) {
             eventBus.emit(
                 RuntimeEvent.SessionFailed(
                     sessionId,
-                    "No model is set for ${provider.kind.title}. Open Settings → AI provider and set a model name for this provider, then try again.",
+                    "No model is set for Hermes Agent. Open Agent → Hermes setup and set a model, then try again.",
                 ),
             )
             return@withContext sessionId
@@ -773,8 +819,7 @@ class HermesRuntimeBridge(
             val workspace = checkpoints.ensureWorkspace(projectId)
             checkpoints.createCheckpoint(projectId, workspace)
             val before = checkpoints.snapshot(workspace)
-            val route = HermesRouteMapper.forProfile(provider)
-            writeHermesConfig(installed.rootfs, route, provider, secret)
+            writeHermesConfig(installed.rootfs, route, model, secret, settings.options)
             val environment = hermesLaunchEnvironment(route, secret)
             val guestWorkspacePath = "/workspace/$projectSlug"
             // Hermes 0.19.0's one-shot transport is `-q` (the prompt travels
@@ -921,7 +966,7 @@ class HermesRuntimeBridge(
         sessionId: String,
         projectId: String,
         prompt: String,
-        provider: ProviderProfile,
+        model: String,
         host: HermesHostConfig,
     ) {
         if (host.baseUrl.isBlank()) throw HermesSessionException(HermesRemoteMessages.NO_URL)
@@ -937,7 +982,6 @@ class HermesRuntimeBridge(
         try {
             val gatewaySessionId = remoteConversationId(projectId)?.takeIf(String::isNotBlank)
                 ?: "mh-${UUID.randomUUID()}".also { minted -> saveRemoteConversationId(projectId, minted) }
-            val model = HermesRouteMapper.resolvedModel(provider)
             val outcome = client.streamChat(
                 config = host,
                 model = model,
@@ -1091,21 +1135,26 @@ class HermesRuntimeBridge(
      * same way, so unrelated keys a user added in the guest terminal
      * (web-search keys and the like) survive.
      */
-    private fun writeHermesConfig(rootfs: File, route: HermesRoute, provider: ProviderProfile, secret: String) {
+    private fun writeHermesConfig(
+        rootfs: File,
+        route: HermesRoute,
+        model: String,
+        secret: String,
+        options: HermesConfigOptions,
+    ) {
         val home = File(rootfs, HERMES_HOME_GUEST_PATH.removePrefix("/")).apply { mkdirs() }
         // Hermes's learned skills and persistent memories live under
         // HERMES_HOME; the bridge never deletes or resets them — it only
         // makes sure the directories exist.
         File(home, "skills").mkdirs()
         File(home, "memories").mkdirs()
-        val model = HermesRouteMapper.resolvedModel(provider)
         val configFile = File(home, "config.yaml")
         val existingConfig = configFile.takeIf(File::isFile)?.readText()
         configFile.writeText(
             if (existingConfig.isNullOrBlank()) {
-                HermesConfigFiles.freshConfig(route, model)
+                HermesConfigFiles.freshConfig(route, model, options)
             } else {
-                HermesConfigFiles.mergedConfig(existingConfig, route, model)
+                HermesConfigFiles.mergedConfig(existingConfig, route, model, options)
             },
         )
         val envFile = File(home, ".env")

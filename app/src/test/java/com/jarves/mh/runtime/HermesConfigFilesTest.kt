@@ -18,8 +18,8 @@ class HermesConfigFilesTest {
         baseUrl = "https://api.deepseek.com/v1",
     )
     private val customRoute = HermesRoute(
-        provider = "mh-custom",
-        keyEnv = "MH_HERMES_API_KEY",
+        provider = "custom-provider",
+        keyEnv = "CUSTOM_PROVIDER_API_KEY",
         baseUrl = "https://llm.example.com/v1",
         custom = true,
     )
@@ -31,7 +31,7 @@ class HermesConfigFilesTest {
         // Safety settings carried over from the Phase 1 generated config.
         assertTrue(config.contains("database:\n  journal_mode: \"delete\"\n"))
         assertTrue(config.contains("terminal:\n  backend: \"local\"\n"))
-        assertTrue(config.contains("approvals:\n  mode: \"off\"\n  single_query_mode: \"approve\"\n"))
+        assertTrue(config.contains("approvals:\n  mode: \"off\"\n  cron_mode: \"approve\"\n"))
         assertTrue(config.contains("updates:\n  check: false\n"))
         // Memory, self-learning skills and delegation unlocked.
         assertTrue(config.contains("memory:\n  memory_enabled: true\n  user_profile_enabled: true\n  write_approval: false\n"))
@@ -39,13 +39,17 @@ class HermesConfigFilesTest {
         assertTrue(config.contains("curator:\n  enabled: true\n  consolidate: true\n  prune_builtins: true\n"))
         assertTrue(
             config.contains(
-                "delegation:\n  oneshot_max_children: 0\n  orchestrator_enabled: true\n" +
-                    "  max_spawn_depth: 2\n  subagent_auto_approve: true\n  independent_completions: true\n",
+                "delegation:\n  max_concurrent_children: 10\n  orchestrator_enabled: true\n" +
+                    "  max_spawn_depth: 2\n  subagent_auto_approve: true\n",
             ),
         )
+        // Keys hermes-agent 0.19.0 does not have must not be written.
+        assertFalse(config.contains("oneshot_max_children"))
+        assertFalse(config.contains("single_query_mode"))
+        assertFalse(config.contains("independent_completions"))
         assertTrue(
             config.contains(
-                "platform_toolsets:\n  cli: [hermes-cli, x_search, video, video_gen, kanban, spotify, a2a]\n" +
+                "platform_toolsets:\n  cli: [hermes-cli, x_search, video, video_gen, kanban, spotify]\n" +
                     "  acp: [hermes-acp, image_gen, tts, cronjob, kanban, clarify, video, video_gen, x_search]\n",
             ),
         )
@@ -57,10 +61,9 @@ class HermesConfigFilesTest {
         // Posture pinned away from "focus", stop-time verification on.
         assertTrue(config.contains("agent:\n  coding_context: \"auto\"\n  verify_on_stop: true\n"))
         assertTrue(config.contains("checkpoints:\n  enabled: true\n"))
-        assertTrue(config.contains("cron:\n  allow_agent_scheduling: true\n"))
         assertTrue(config.contains("security:\n  allow_private_urls: true\n"))
         assertTrue(config.contains("privacy:\n  redact_pii: true\n"))
-        assertTrue(config.contains("sessions:\n  auto_prune: true\n  auto_archive: true\n  show_subagents: true\n"))
+        assertTrue(config.contains("sessions:\n  auto_prune: true\n"))
         assertTrue(config.contains("stt:\n  streaming: true\n"))
         assertTrue(config.contains("voice:\n  auto_tts: true\n"))
         assertTrue(config.contains("tool_loop_guardrails:\n  hard_stop_enabled: true\n"))
@@ -73,11 +76,12 @@ class HermesConfigFilesTest {
     @Test
     fun freshCustomConfigWritesNamedProviderWithoutModelBaseUrl() {
         val config = HermesConfigFiles.freshConfig(customRoute, "my-model")
-        assertTrue(config.contains("  provider: 'mh-custom'\n"))
-        assertFalse(config.contains("  base_url: 'https://llm.example.com/v1'\n  database:"))
+        assertTrue(config.contains("  provider: 'custom-provider'\n"))
+        assertFalse(config.contains("base_url"))
         assertTrue(
             config.contains(
-                "providers:\n  mh-custom:\n    base_url: 'https://llm.example.com/v1'\n    key_env: MH_HERMES_API_KEY\n",
+                "providers:\n  custom-provider:\n    name: 'Custom endpoint'\n" +
+                    "    api: 'https://llm.example.com/v1'\n    key_env: CUSTOM_PROVIDER_API_KEY\n",
             ),
         )
     }
@@ -125,18 +129,19 @@ class HermesConfigFilesTest {
     fun mergeToCustomRemovesStaleModelBaseUrlAndAddsProviderBlock() {
         val existing = HermesConfigFiles.freshConfig(anthropicRoute, "claude-sonnet-4")
         val merged = HermesConfigFiles.mergedConfig(existing, customRoute, "my-model")
-        assertTrue(merged.contains("  provider: 'mh-custom'\n"))
+        assertTrue(merged.contains("  provider: 'custom-provider'\n"))
         // The Anthropic endpoint must not leak into the custom route.
         assertFalse(merged.contains("api.anthropic.com"))
         assertTrue(
             merged.contains(
-                "providers:\n  mh-custom:\n    base_url: 'https://llm.example.com/v1'\n    key_env: MH_HERMES_API_KEY\n",
+                "providers:\n  custom-provider:\n    name: 'Custom endpoint'\n" +
+                    "    api: 'https://llm.example.com/v1'\n    key_env: CUSTOM_PROVIDER_API_KEY\n",
             ),
         )
     }
 
     @Test
-    fun mergeKeepsUserChangedApprovalsButAddsMissingKeys() {
+    fun mergeAppliesAppApprovalPolicyOverExistingValues() {
         val existing = """
             model:
               provider: 'anthropic'
@@ -145,9 +150,13 @@ class HermesConfigFilesTest {
               mode: "smart"
         """.trimIndent() + "\n"
         val merged = HermesConfigFiles.mergedConfig(existing, anthropicRoute, "claude-sonnet-4")
-        // A value Hermes or the user set is theirs: not overwritten.
-        assertTrue(merged.contains("approvals:\n  single_query_mode: \"approve\"\n  mode: \"smart\"\n"))
-        assertFalse(merged.contains("  mode: \"off\""))
+        // approvals is an app-settings key (Hermes options card): the
+        // stored policy wins over a value left by an older build or a
+        // guest-terminal edit, exactly as re-running `hermes setup`
+        // would rewrite it.
+        assertTrue(merged.contains("approvals:\n  mode: \"off\"\n  cron_mode: \"approve\"\n"))
+        assertFalse(merged.contains("\"smart\""))
+        assertFalse(merged.contains("single_query_mode"))
     }
 
     @Test
@@ -159,10 +168,14 @@ class HermesConfigFilesTest {
         """.trimIndent() + "\n"
         val merged = HermesConfigFiles.mergedConfig(existing, anthropicRoute, "claude-sonnet-4")
         assertTrue(merged.contains("memory:\n  memory_enabled: true\n"))
-        assertTrue(merged.contains("delegation:\n  oneshot_max_children: 0\n"))
-        assertTrue(merged.contains("platform_toolsets:\n  cli: [hermes-cli, x_search, video, video_gen, kanban, spotify, a2a]\n"))
+        // Controlled keys append at the end of an existing section on
+        // merge (fresh configs write them first); both shapes are the
+        // same YAML mapping.
+        assertTrue(merged.contains("delegation:\n"))
+        assertTrue(merged.contains("  max_concurrent_children: 10\n"))
+        assertTrue(merged.contains("platform_toolsets:\n  cli: [hermes-cli, x_search, video, video_gen, kanban, spotify]\n"))
         assertTrue(merged.contains("database:\n  journal_mode: \"delete\"\n"))
-        assertTrue(merged.contains("agent:\n  coding_context: \"auto\"\n"))
+        assertTrue(merged.contains("  coding_context: \"auto\"\n"))
         assertTrue(merged.contains("tools:\n  tool_search:\n    enabled: \"off\"\n"))
         assertTrue(merged.contains("hooks_auto_accept: true\n"))
     }
@@ -182,7 +195,7 @@ class HermesConfigFilesTest {
         val merged = HermesConfigFiles.mergedConfig(existing, anthropicRoute, "claude-sonnet-4")
         assertTrue(
             merged.contains(
-                "  cli: [hermes-cli, x_search, video, video_gen, kanban, spotify, a2a, debugging]\n",
+                "  cli: [hermes-cli, x_search, video, video_gen, kanban, spotify, debugging]\n",
             ),
         )
         assertTrue(
@@ -208,7 +221,7 @@ class HermesConfigFilesTest {
         """.trimIndent() + "\n"
         val merged = HermesConfigFiles.mergedConfig(existing, anthropicRoute, "claude-sonnet-4")
         assertTrue(
-            merged.contains("  cli: [hermes-cli, x_search, video, video_gen, kanban, spotify, a2a]\n"),
+            merged.contains("  cli: [hermes-cli, x_search, video, video_gen, kanban, spotify]\n"),
         )
         assertFalse(merged.contains("- hermes-cli"))
         // And the converted shape is stable under a second merge.
@@ -216,7 +229,7 @@ class HermesConfigFilesTest {
     }
 
     @Test
-    fun mergePreservesUserToolSearchAndPostureChoices() {
+    fun mergeAppliesAppPostureAndToolSearchButKeepsUncontrolledKeys() {
         val existing = """
             model:
               provider: 'anthropic'
@@ -229,10 +242,12 @@ class HermesConfigFilesTest {
             hooks_auto_accept: false
         """.trimIndent() + "\n"
         val merged = HermesConfigFiles.mergedConfig(existing, anthropicRoute, "claude-sonnet-4")
-        // Ensure-if-absent unlocks never override a value already set.
-        assertTrue(merged.contains("  coding_context: \"focus\"\n"))
-        assertTrue(merged.contains("    enabled: \"on\"\n"))
-        assertFalse(merged.contains("    enabled: \"off\""))
+        // coding_context and tool_search are app-settings keys: the
+        // stored options replace values left in the file.
+        assertTrue(merged.contains("  coding_context: \"auto\"\n"))
+        assertTrue(merged.contains("    enabled: \"off\"\n"))
+        assertFalse(merged.contains("\"focus\""))
+        // Keys the settings do not own keep their ensure-if-absent contract.
         assertEquals(1, merged.split("hooks_auto_accept").size - 1)
         assertTrue(merged.contains("hooks_auto_accept: false\n"))
     }

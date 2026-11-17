@@ -66,11 +66,15 @@ import com.jarves.mh.runtime.AntigravityAuthState
 import com.jarves.mh.runtime.AntigravityAuthStatus
 import com.jarves.mh.runtime.AntigravityRuntimeBridge
 import com.jarves.mh.runtime.HERMES_GATEWAY_VAULT_ID
+import com.jarves.mh.runtime.HERMES_SETUP_VAULT_ID
+import com.jarves.mh.runtime.HermesConfigOptions
 import com.jarves.mh.runtime.HermesGatewayUrls
 import com.jarves.mh.runtime.HermesHostConfig
 import com.jarves.mh.runtime.HermesHostProbe
 import com.jarves.mh.runtime.HermesRemoteMessages
 import com.jarves.mh.runtime.HermesRuntimeBridge
+import com.jarves.mh.runtime.HermesRuntimeSettings
+import com.jarves.mh.runtime.HermesSetupSettings
 import com.jarves.mh.runtime.probeHermesHost
 import com.jarves.mh.runtime.NativeSpawnProcess
 import com.jarves.mh.runtime.RuntimeInstallProgress
@@ -396,6 +400,10 @@ data class AppUiState(
     val antigravityEffort: String = "high",
     val hermesHostRemote: Boolean = false,
     val hermesHostUrl: String = "",
+    val hermesProviderId: String = "anthropic",
+    val hermesModel: String = "",
+    val hermesCustomBaseUrl: String = "",
+    val hermesOptions: HermesConfigOptions = HermesConfigOptions.FULL_POWER,
     val antigravityModels: List<String> = emptyList(),
     val antigravityModelsLoading: Boolean = false,
     val androidBuildRunning: Boolean = false,
@@ -448,7 +456,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     )
     private val hermesRuntime = HermesRuntimeBridge(
         application,
-        secretFor = { profile -> vault.get(profile.kind.name) },
+        hermesSettings = {
+            HermesRuntimeSettings(
+                setup = HermesSetupSettings(
+                    providerId = preferences.hermesProviderId,
+                    model = preferences.hermesModel,
+                    customBaseUrl = preferences.hermesCustomBaseUrl,
+                ),
+                secret = vault.get(HERMES_SETUP_VAULT_ID).orEmpty(),
+                options = preferences.hermesConfigOptions(),
+            )
+        },
         conversationId = { projectId ->
             _state.value.activeChatId?.let { preferences.loadAgentConversation(AgentKind.HERMES, projectId, it) }
         },
@@ -538,6 +556,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             antigravityEffort = preferences.antigravityEffort,
             hermesHostRemote = preferences.hermesHostRemote,
             hermesHostUrl = preferences.hermesHostUrl,
+            hermesProviderId = preferences.hermesProviderId,
+            hermesModel = preferences.hermesModel,
+            hermesCustomBaseUrl = preferences.hermesCustomBaseUrl,
+            hermesOptions = preferences.hermesConfigOptions(),
             themeMode = runCatching { com.jarves.mh.ui.theme.AppThemeMode.valueOf(preferences.themeMode.uppercase()) }
                 .getOrDefault(com.jarves.mh.ui.theme.AppThemeMode.DARK),
             languageCode = preferences.languageCode,
@@ -2083,6 +2105,59 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             HermesHostProbe.Awake -> ConnectionValidation.Success(HermesRemoteMessages.PROBE_OK)
             is HermesHostProbe.Failed -> ConnectionValidation.Failure(probe.message)
         }
+    }
+
+    fun getSavedHermesApiKey(): String = vault.get(HERMES_SETUP_VAULT_ID).orEmpty()
+
+    /**
+     * Persists the Hermes-native setup (Hermes's own provider/model/base
+     * URL); the API key goes to the encrypted vault under its Hermes pool
+     * id. A blank key clears the saved one, mirroring the host card.
+     */
+    fun saveHermesSetup(providerId: String, model: String, baseUrl: String, key: String) {
+        preferences.hermesProviderId = providerId
+        preferences.hermesModel = model.trim()
+        preferences.hermesCustomBaseUrl = baseUrl.trim()
+        if (key.isBlank()) vault.remove(HERMES_SETUP_VAULT_ID) else vault.put(HERMES_SETUP_VAULT_ID, key)
+        _state.update {
+            it.copy(
+                hermesProviderId = providerId,
+                hermesModel = model.trim(),
+                hermesCustomBaseUrl = baseUrl.trim(),
+            )
+        }
+    }
+
+    /** Persists the Hermes config options; they are written into config.yaml on the next launch. */
+    fun saveHermesOptions(options: HermesConfigOptions) {
+        preferences.saveHermesConfigOptions(options)
+        _state.update { it.copy(hermesOptions = preferences.hermesConfigOptions()) }
+    }
+
+    /**
+     * Reads one of Hermes's own files (`config.yaml` / `.env`) from the
+     * guest's HERMES_HOME for the raw editor. Null when the runtime is not
+     * installed or the file does not exist yet (both are created by the
+     * first Hermes launch).
+     */
+    suspend fun readHermesFile(fileName: String): String? = withContext(Dispatchers.IO) {
+        if (fileName !in HERMES_EDITABLE_FILES) return@withContext null
+        runCatching {
+            val rootfs = RuntimeInstaller(application).installedRuntime().rootfs
+            File(rootfs, "${HermesRuntimeBridge.HERMES_HOME_GUEST_PATH.removePrefix("/")}/$fileName")
+                .takeIf(File::isFile)?.readText()
+        }.getOrNull()
+    }
+
+    /** Writes a raw-editor file back into the guest's HERMES_HOME. False when the runtime is absent. */
+    suspend fun writeHermesFile(fileName: String, text: String): Boolean = withContext(Dispatchers.IO) {
+        if (fileName !in HERMES_EDITABLE_FILES) return@withContext false
+        runCatching {
+            val rootfs = RuntimeInstaller(application).installedRuntime().rootfs
+            val home = File(rootfs, HermesRuntimeBridge.HERMES_HOME_GUEST_PATH.removePrefix("/")).apply { mkdirs() }
+            File(home, fileName).writeText(text)
+            true
+        }.getOrDefault(false)
     }
 
     fun getSavedApiKey(kind: ProviderKind): String = vault.get(kind.name).orEmpty()
@@ -5632,6 +5707,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     companion object {
+        /** The only guest files the Hermes raw editor may touch. */
+        private val HERMES_EDITABLE_FILES = setOf("config.yaml", ".env")
         /** A long-running agent can poll a managed command hundreds of times. Keep the chat
          * responsive by retaining the latest useful steps instead of composing an unbounded list. */
         private const val MAX_VISIBLE_WORK_ITEMS = 32

@@ -2580,6 +2580,11 @@ private fun RootScreenHost(
                     getSavedHermesHostKey = viewModel::getSavedHermesHostKey,
                     onSaveHermesHost = viewModel::saveHermesHost,
                     onTestHermesHost = viewModel::testHermesHost,
+                    getSavedHermesApiKey = viewModel::getSavedHermesApiKey,
+                    onSaveHermesSetup = viewModel::saveHermesSetup,
+                    onSaveHermesOptions = viewModel::saveHermesOptions,
+                    onReadHermesFile = viewModel::readHermesFile,
+                    onWriteHermesFile = viewModel::writeHermesFile,
                 )
                 RootScreen.SETTINGS -> SettingsScreen(
                     state = state,

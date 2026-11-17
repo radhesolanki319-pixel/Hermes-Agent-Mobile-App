@@ -42,12 +42,7 @@ enum class ProviderKind(
         fixedBaseUrl = true,
         fixedProtocol = true,
     ),
-    // Custom API ships with the app's built-in endpoint pre-filled (the
-    // owner's FreeLLM gateway — endpoint and model only, never a key).
-    // HermesRouteMapper.CUSTOM_DEFAULT_BASE_URL / CUSTOM_DEFAULT_MODEL
-    // carry the same values for profiles already stored with blank
-    // fields; a unit test pins the two copies together.
-    CUSTOM("Custom API", "Anthropic-compatible endpoint", ProviderProtocol.ANTHROPIC_GATEWAY, "https://freellmapi-backup.onrender.com/v1", "claude-sonnet-5.5", true),
+    CUSTOM("Custom API", "Anthropic-compatible endpoint", ProviderProtocol.ANTHROPIC_GATEWAY, "", "", true),
 }
 
 /**
@@ -93,10 +88,12 @@ enum class AgentKind(
 }
 
 /**
- * Provider kinds usable with [AgentKind.HERMES]. Claude subscription login has no
- * Hermes equivalent, and OpenCode Zen is not offered to any agent (see
- * [providersForAgent]). DeepSeek, Kimi and NVIDIA NIM map to Hermes's first-class
- * providers; CUSTOM becomes a named OpenAI/Anthropic-compatible provider entry.
+ * Provider kinds the app profile system keeps for [AgentKind.HERMES] chats.
+ * Hermes itself no longer runs from these profiles — it uses its own native
+ * settings (see runtime/HermesNativeSettings.kt) — so this set now only
+ * governs the stored chat-header profile of a Hermes chat. Claude
+ * subscription login has no Hermes equivalent, and OpenCode Zen is not
+ * offered to any agent (see [providersForAgent]).
  */
 val HERMES_PROVIDERS: Set<ProviderKind> = setOf(
     ProviderKind.ANTHROPIC,
