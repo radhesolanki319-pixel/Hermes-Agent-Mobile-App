@@ -2577,6 +2577,9 @@ private fun RootScreenHost(
                     onRefreshAntigravityModels = viewModel::refreshAntigravityModels,
                     onSetAntigravityModel = viewModel::setAntigravityModel,
                     onSetAntigravityEffort = viewModel::setAntigravityEffort,
+                    getSavedHermesHostKey = viewModel::getSavedHermesHostKey,
+                    onSaveHermesHost = viewModel::saveHermesHost,
+                    onTestHermesHost = viewModel::testHermesHost,
                 )
                 RootScreen.SETTINGS -> SettingsScreen(
                     state = state,

@@ -92,7 +92,8 @@ class AppPreferences(private val context: Context) {
         val stable = agent.stableId
         val keys = preferences.all.keys.filter { key ->
             key.startsWith("agent_conversation_${stable}_") ||
-                key.startsWith("agent_conversation_v2_${stable}_")
+                key.startsWith("agent_conversation_v2_${stable}_") ||
+                (agent == AgentKind.HERMES && key.startsWith("hermes_remote_conversation_"))
         }
         if (keys.isEmpty()) return
         preferences.edit().apply { keys.forEach(::remove) }.apply()
@@ -129,6 +130,34 @@ class AppPreferences(private val context: Context) {
     var lastHermesUpdateCheckMillis: Long
         get() = preferences.getLong("last_hermes_update_check_millis", 0L)
         set(value) { preferences.edit().putLong("last_hermes_update_check_millis", value).apply() }
+
+    /** Hermes runs embedded on this phone (false) or against a remote gateway host (true). */
+    var hermesHostRemote: Boolean
+        get() = preferences.getBoolean("hermes_host_remote", false)
+        set(value) { preferences.edit().putBoolean("hermes_host_remote", value).apply() }
+
+    /** Base URL of the remote Hermes gateway ("" when unset). The gateway key lives in ApiKeyVault. */
+    var hermesHostUrl: String
+        get() = preferences.getString("hermes_host_url", "") ?: ""
+        set(value) { preferences.edit().putString("hermes_host_url", value).apply() }
+
+    /**
+     * Gateway session ids for remote Hermes, keyed per project chat like
+     * [loadAgentConversation] but in their own namespace: an id minted by
+     * the gateway host means nothing to the embedded Hermes and vice versa.
+     */
+    fun loadHermesRemoteConversation(projectId: String, chatId: String): String? =
+        preferences.getString(hermesRemoteConversationKey(projectId, chatId), null)
+
+    fun saveHermesRemoteConversation(projectId: String, chatId: String, conversationId: String?) {
+        val key = hermesRemoteConversationKey(projectId, chatId)
+        preferences.edit().apply {
+            if (conversationId.isNullOrBlank()) remove(key) else putString(key, conversationId)
+        }.commit()
+    }
+
+    private fun hermesRemoteConversationKey(projectId: String, chatId: String): String =
+        "hermes_remote_conversation_${projectId}_$chatId"
 
     /**
      * Debug-only manifest URL override. Empty in release builds; populated via

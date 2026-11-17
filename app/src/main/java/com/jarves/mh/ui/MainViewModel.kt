@@ -65,7 +65,13 @@ import com.jarves.mh.runtime.AntigravityAuthController
 import com.jarves.mh.runtime.AntigravityAuthState
 import com.jarves.mh.runtime.AntigravityAuthStatus
 import com.jarves.mh.runtime.AntigravityRuntimeBridge
+import com.jarves.mh.runtime.HERMES_GATEWAY_VAULT_ID
+import com.jarves.mh.runtime.HermesGatewayUrls
+import com.jarves.mh.runtime.HermesHostConfig
+import com.jarves.mh.runtime.HermesHostProbe
+import com.jarves.mh.runtime.HermesRemoteMessages
 import com.jarves.mh.runtime.HermesRuntimeBridge
+import com.jarves.mh.runtime.probeHermesHost
 import com.jarves.mh.runtime.NativeSpawnProcess
 import com.jarves.mh.runtime.RuntimeInstallProgress
 import com.jarves.mh.runtime.RuntimeInstaller
@@ -388,6 +394,8 @@ data class AppUiState(
     val antigravityAuth: AntigravityAuthState = AntigravityAuthState(),
     val antigravityModel: String = "",
     val antigravityEffort: String = "high",
+    val hermesHostRemote: Boolean = false,
+    val hermesHostUrl: String = "",
     val antigravityModels: List<String> = emptyList(),
     val antigravityModelsLoading: Boolean = false,
     val androidBuildRunning: Boolean = false,
@@ -446,6 +454,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         },
         saveConversationId = { projectId, id ->
             _state.value.activeChatId?.let { preferences.saveAgentConversation(AgentKind.HERMES, projectId, it, id) }
+        },
+        hostConfig = {
+            HermesHostConfig(
+                remote = preferences.hermesHostRemote,
+                baseUrl = preferences.hermesHostUrl,
+                apiKey = <redacted> ?: "",
+            )
+        },
+        remoteConversationId = { projectId ->
+            _state.value.activeChatId?.let { preferences.loadHermesRemoteConversation(projectId, it) }
+        },
+        saveRemoteConversationId = { projectId, id ->
+            _state.value.activeChatId?.let { preferences.saveHermesRemoteConversation(projectId, it, id) }
         },
     )
     private val agentRegistry = AgentRegistry.builtIns(hermesRuntime, claudeRuntime, antigravityRuntime)
@@ -515,6 +536,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             ),
             antigravityModel = preferences.antigravityModel,
             antigravityEffort = preferences.antigravityEffort,
+            hermesHostRemote = preferences.hermesHostRemote,
+            hermesHostUrl = preferences.hermesHostUrl,
             themeMode = runCatching { com.jarves.mh.ui.theme.AppThemeMode.valueOf(preferences.themeMode.uppercase()) }
                 .getOrDefault(com.jarves.mh.ui.theme.AppThemeMode.DARK),
             languageCode = preferences.languageCode,
@@ -2041,6 +2064,25 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun reopenInitialLanguageSetup() {
         preferences.initialLanguageSelected = false
         _state.update { it.copy(initialLanguageSelected = false) }
+    }
+
+    fun getSavedHermesHostKey(): String = vault.get(HERMES_GATEWAY_VAULT_ID).orEmpty()
+
+    /** Persists the Hermes host choice; the gateway key is stored in the encrypted vault like provider keys. */
+    fun saveHermesHost(remote: Boolean, url: String, key: String) {
+        val normalized = HermesGatewayUrls.normalizeBaseUrl(url)
+        preferences.hermesHostRemote = remote
+        preferences.hermesHostUrl = normalized
+        if (key.isBlank()) vault.remove(HERMES_GATEWAY_VAULT_ID) else vault.put(HERMES_GATEWAY_VAULT_ID, key)
+        _state.update { it.copy(hermesHostRemote = remote, hermesHostUrl = normalized) }
+    }
+
+    suspend fun testHermesHost(url: String, key: String): ConnectionValidation {
+        val effectiveKey = key.ifBlank { getSavedHermesHostKey() }
+        return when (val probe = probeHermesHost(url, effectiveKey)) {
+            HermesHostProbe.Awake -> ConnectionValidation.Success(HermesRemoteMessages.PROBE_OK)
+            is HermesHostProbe.Failed -> ConnectionValidation.Failure(probe.message)
+        }
     }
 
     fun getSavedApiKey(kind: ProviderKind): String = vault.get(kind.name).orEmpty()
@@ -5487,6 +5529,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             "No Claude subscription token is saved. Add one from Agent → AI provider." -> str(R.string.md_reason_no_claude_token)
             "Antigravity CLI is not installed. Open Settings → Coding agent to install it." -> str(R.string.md_reason_antigravity_not_installed)
             "Antigravity did not answer. Try again." -> str(R.string.vm_antigravity_no_answer)
+            HermesRemoteMessages.KEY_REJECTED -> str(R.string.md_reason_hermes_host_key_rejected)
+            HermesRemoteMessages.NO_URL -> str(R.string.md_reason_hermes_host_no_url)
+            HermesRemoteMessages.NO_KEY -> str(R.string.md_reason_hermes_host_no_key)
+            HermesRemoteMessages.UNREACHABLE -> str(R.string.md_reason_hermes_host_unreachable)
+            HermesRemoteMessages.STILL_WAKING -> str(R.string.md_reason_hermes_host_still_waking)
+            HermesRemoteMessages.DROPPED -> str(R.string.md_reason_hermes_host_dropped)
             else -> reason
         }
     }

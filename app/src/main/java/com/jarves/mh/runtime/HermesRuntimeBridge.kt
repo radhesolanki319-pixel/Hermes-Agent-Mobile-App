@@ -23,66 +23,19 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.withContext
-import org.json.JSONObject
 
 /**
- * One classified line of Hermes's stream-json output. Schemas are pinned from
- * `hermes_cli/stream_json.py` in Hermes v0.19.0: `system/init` → `text` deltas /
- * `tool_use` / `tool_result` → one terminal `result` envelope. Diagnostics go to
- * stderr, which the native launcher merges into the same capture file, so any
- * line that is not a JSON object is ignored.
+ * The embedded transport is Hermes 0.19.0's quiet one-shot mode
+ * (`hermes chat -q <prompt> -Q`); its merged stdout/stderr stream is
+ * classified by [HermesQuietOutput]. The stream-json protocol this bridge
+ * was first written against (`--format stream-json`, `--query-file`)
+ * exists only in post-0.19.0 Hermes source — the pinned 0.19.0 release
+ * rejects both flags in argparse (exit 2, empty stdout), which is why
+ * every on-device turn used to die before Hermes started. See
+ * HermesQuietOutput's doc for the verified 0.19.0 output contract.
  */
-internal sealed interface HermesParsedEvent {
-    data class Initialized(val model: String) : HermesParsedEvent
-    data class Text(val value: String) : HermesParsedEvent
-    data class ToolStarted(val name: String, val detail: String) : HermesParsedEvent
-    data class ToolCompleted(val name: String, val summary: String, val isError: Boolean) : HermesParsedEvent
-    data class Result(
-        val sessionId: String,
-        val exitCode: Int,
-        val text: String,
-        val error: String?,
-    ) : HermesParsedEvent
-}
 
-internal object HermesEventParser {
-    fun parse(line: String): HermesParsedEvent? {
-        val root = runCatching { JSONObject(line) }.getOrNull() ?: return null
-        return when (root.optString("type")) {
-            "system" -> if (root.optString("subtype") == "init") {
-                // The init event's session_id is always empty in one-shot mode
-                // (verified in the Phase 0 spike); the real id only arrives on
-                // the terminal result event, so it is deliberately not read here.
-                HermesParsedEvent.Initialized(root.optString("model"))
-            } else {
-                null
-            }
-            "text" -> root.optString("text")
-                .takeIf(String::isNotEmpty)
-                ?.let(HermesParsedEvent::Text)
-            "tool_use" -> HermesParsedEvent.ToolStarted(
-                hermesToolDisplayName(root.optString("name").ifBlank { "Tool" }),
-                hermesToolDetail(root.optJSONObject("input")),
-            )
-            "tool_result" -> {
-                val name = hermesToolDisplayName(root.optString("name").ifBlank { "Tool" })
-                val isError = root.optBoolean("is_error", false)
-                val summary = compactToolText(root.optString("output"), MAX_HERMES_TOOL_RAW_TEXT, 300)
-                    .ifBlank { if (isError) "$name failed" else "$name completed" }
-                HermesParsedEvent.ToolCompleted(name, summary, isError)
-            }
-            "result" -> HermesParsedEvent.Result(
-                sessionId = root.optString("session_id"),
-                exitCode = root.optInt("exit_code", 1),
-                text = root.optString("text"),
-                error = root.optString("error").takeIf(String::isNotBlank),
-            )
-            else -> null // Forward compatible with new Hermes event types.
-        }
-    }
-}
-
-private fun hermesToolDisplayName(name: String): String = when (name.lowercase()) {
+internal fun hermesToolDisplayName(name: String): String = when (name.lowercase()) {
     "terminal" -> "Bash"
     "read_file" -> "Read"
     "write_file" -> "Write"
@@ -96,40 +49,6 @@ private fun hermesToolDisplayName(name: String): String = when (name.lowercase()
     "todo" -> "Plan"
     "clarify" -> "Clarify"
     else -> name.replace('_', ' ').replaceFirstChar { it.uppercase() }
-}
-
-private fun hermesToolDetail(input: JSONObject?): String {
-    if (input == null) return "Working in the project"
-    val detail = listOf("command", "path", "file_path", "pattern", "query", "url", "task", "question")
-        .firstNotNullOfOrNull { key -> input.optString(key).takeIf(String::isNotBlank) }
-        ?: input.toString()
-    return compactToolText(redactHermesToolText(detail), MAX_HERMES_TOOL_RAW_TEXT, 240)
-        .ifBlank { "Working in the project" }
-}
-
-private fun redactHermesToolText(value: String): String = value
-    .replace(Regex("(?i)(api[_-]?key|token|secret|password)(\\s*[=:]\\s*)([^\\s'\"]+)"), "$1$2••••")
-    .replace(Regex("(?i)(authorization:\\s*bearer\\s+)[^\\s'\"]+"), "$1••••")
-
-private const val MAX_HERMES_TOOL_RAW_TEXT = 4_000
-
-/**
- * Stream-json's result event is terminal, but Hermes may linger while its
- * session database closes. Stop the spawned process once the result is in so
- * completion is driven by the protocol, not by process exit timing.
- */
-private suspend fun stopHermesAfterTerminalResult(process: Process) {
-    if (!process.isAlive) return
-    process.destroy()
-    repeat(20) {
-        if (!process.isAlive) return
-        delay(50)
-    }
-    if (process.isAlive) process.destroyForcibly()
-    repeat(20) {
-        if (!process.isAlive) return
-        delay(50)
-    }
 }
 
 /** Hermes provider route resolved from our saved provider profile. */
@@ -715,14 +634,17 @@ internal fun hermesLaunchEnvironment(route: HermesRoute, secret: String): Map<St
 
 /**
  * [RuntimeBridge] driving Nous Research's Hermes Agent in one-shot mode:
- * `hermes chat --query-file <file> --format stream-json` per message.
+ * `hermes chat -q <prompt> -Q` per message (Hermes 0.19.0's quiet
+ * automation transport — see [HermesQuietOutput] for why this replaced
+ * the stream-json launch and for the verified output contract).
  *
- * The context prompt travels through a file inside HERMES_HOME instead of
- * argv, because a single argv entry is capped near 128 KB while the shared
- * conversation budget allows 160 K characters. Continuity across messages
- * uses Hermes's own session store: the terminal `result` event carries the
- * real session id (the `init` event's is empty), the bridge persists it per
- * project chat, and later messages pass it back with `--resume`.
+ * The context prompt travels as a single argv entry: the launcher spawns
+ * an argv array (never a shell), so the only limit is the kernel's
+ * 128 KiB per-argument exec cap, which [buildHermesPrompt] stays under
+ * by shedding the oldest history first. Continuity across messages uses
+ * Hermes's own session store: the run prints its real session id in a
+ * `session_id:` trailer, the bridge persists it per project chat, and
+ * later messages pass it back with `--resume`.
  *
  * Approvals are config-only in this mode: the generated config.yaml sets a
  * deterministic one-shot approval policy and the run is launched with
@@ -733,6 +655,9 @@ class HermesRuntimeBridge(
     private val secretFor: (ProviderProfile) -> String?,
     private val conversationId: (String) -> String?,
     private val saveConversationId: (String, String) -> Unit,
+    private val hostConfig: () -> HermesHostConfig = { HermesHostConfig(remote = false, baseUrl = "", apiKey = "") },
+    private val remoteConversationId: (String) -> String? = { null },
+    private val saveRemoteConversationId: (String, String) -> Unit = { _, _ -> },
 ) : RuntimeBridge {
     private val installer = RuntimeInstaller(context)
     private val checkpoints = WorkspaceCheckpoints(context.filesDir, context)
@@ -740,6 +665,7 @@ class HermesRuntimeBridge(
     override val events: Flow<RuntimeEvent> = eventBus
     private val finishedSessions = ConcurrentHashMap.newKeySet<String>()
     @Volatile private var activeProcess: Process? = null
+    @Volatile private var activeGatewayClient: HermesGatewayClient? = null
     @Volatile private var activeSessionId: String? = null
     @Volatile private var userStopRequested: Boolean = false
     @Volatile private var activeProjectSlug: String? = null
@@ -758,6 +684,21 @@ class HermesRuntimeBridge(
         foregroundResultPosted = false
         eventBus.emit(RuntimeEvent.SessionStarted(sessionId))
         pushForegroundProgress(R.string.rt_bridge_starting, "Hermes Agent")
+        // Phase 4: in remote mode the turn goes to the user's Hermes gateway
+        // host instead of the embedded copy. The embedded path below is
+        // untouched — no local install, provider key or workspace is needed
+        // for a remote turn, because the host owns all three.
+        val host = hostConfig()
+        if (host.remote) {
+            runCatching { runRemoteTurn(sessionId, projectId, prompt, provider, host) }
+                .onFailure { error ->
+                    Log.e("HermesBridge", "Remote Hermes session failed", error)
+                    emitFailureOnce(sessionId, friendlyError(error))
+                }
+            activeSessionId = null
+            RuntimeTaskController.stopAction = null
+            return@withContext sessionId
+        }
         val secret = secretFor(provider).orEmpty().ifBlank { localServerPlaceholderKey(provider) }
         if (secret.isBlank()) {
             eventBus.emit(RuntimeEvent.SessionFailed(sessionId, "No API key is saved for ${provider.kind.title}."))
@@ -768,6 +709,19 @@ class HermesRuntimeBridge(
                 RuntimeEvent.SessionFailed(
                     sessionId,
                     "Claude subscription login is not supported by Hermes Agent. Pick a key-based provider in Settings.",
+                ),
+            )
+            return@withContext sessionId
+        }
+        if (provider.model.isBlank() && provider.kind.defaultModel.isBlank()) {
+            // Only CUSTOM can reach this (every other kind ships a default
+            // model): a custom endpoint has no catalog default for Hermes
+            // to fall back to, so the run would go out with an empty model
+            // and die at the provider. Fail here with the way out instead.
+            eventBus.emit(
+                RuntimeEvent.SessionFailed(
+                    sessionId,
+                    "No model is set for ${provider.kind.title}. Open Settings → AI provider and set a model name for this provider, then try again.",
                 ),
             )
             return@withContext sessionId
@@ -797,19 +751,19 @@ class HermesRuntimeBridge(
             writeHermesConfig(installed.rootfs, route, provider, secret)
             val environment = hermesLaunchEnvironment(route, secret)
             val guestWorkspacePath = "/workspace/$projectSlug"
-            val contextPrompt = buildContextPrompt(prompt, conversationHistory, guestWorkspacePath, projectKind)
-            // The prompt can exceed the per-argument exec limit, so it goes
-            // through a file in HERMES_HOME, which --query-file reads verbatim.
-            File(installed.rootfs, "${HERMES_HOME_GUEST_PATH.removePrefix("/")}/mh-query.txt")
-                .writeText(contextPrompt)
+            // Hermes 0.19.0's one-shot transport is `-q` (the prompt travels
+            // as one argv entry — the launcher spawns an argv array, never a
+            // shell, so no quoting hazard) in quiet mode `-Q`. The prompt is
+            // byte-capped below the kernel's 128 KiB per-argument exec limit;
+            // see buildHermesPrompt.
+            val contextPrompt = buildHermesPrompt(prompt, conversationHistory, guestWorkspacePath, projectKind)
             val resumeId = conversationId(projectId)?.takeIf(String::isNotBlank)
             val command = buildList {
                 add(RuntimeInstaller.HERMES_GUEST_PATH)
                 add("chat")
-                add("--query-file")
-                add("$HERMES_HOME_GUEST_PATH/mh-query.txt")
-                add("--format")
-                add("stream-json")
+                add("-q")
+                add(contextPrompt)
+                add("-Q")
                 add("--provider")
                 add(route.provider)
                 add("-m")
@@ -837,55 +791,25 @@ class HermesRuntimeBridge(
             )
             activeProcess = process
             if (userStopRequested) process.destroy()
+            pushForegroundProgress(R.string.rt_bridge_working, "Hermes Agent")
             val nativeProcess = process as? NativeSpawnProcess
                 ?: error("Unsupported Android runtime process")
             var outputOffset = 0L
             val pendingOutput = StringBuilder()
-            var terminalResult: HermesParsedEvent.Result? = null
-            var assistantTextSeen = false
+            val output = HermesQuietOutput.Collector()
             var providerError: String? = null
 
-            suspend fun handleLine(line: String) {
-                if (providerError == null) {
+            fun handleLine(line: String) {
+                if (providerError == null && line.isNotBlank()) {
                     providerError = ProviderRuntimeErrorDetector.detect(line)
                 }
-                when (val event = HermesEventParser.parse(line)) {
-                    is HermesParsedEvent.Initialized -> {
-                        pushForegroundProgress(R.string.rt_bridge_working, "Hermes Agent")
-                    }
-                    is HermesParsedEvent.Text -> {
-                        assistantTextSeen = true
-                        pushForegroundProgress(R.string.rt_bridge_working, "Hermes Agent")
-                        eventBus.emit(RuntimeEvent.AssistantDelta(sessionId, event.value))
-                    }
-                    is HermesParsedEvent.ToolStarted -> {
-                        pushForegroundProgress(
-                            AppStrings.get(context, R.string.rt_bridge_running_tool, event.name, event.detail),
-                        )
-                        eventBus.emit(RuntimeEvent.ToolStarted(sessionId, event.name, event.detail))
-                    }
-                    is HermesParsedEvent.ToolCompleted -> {
-                        pushForegroundProgress(R.string.rt_bridge_working, "Hermes Agent")
-                        eventBus.emit(RuntimeEvent.ToolCompleted(sessionId, event.name, event.summary))
-                    }
-                    is HermesParsedEvent.Result -> {
-                        // Spike correction: this terminal event is the only
-                        // place the real session id exists. Persist it so the
-                        // next message in this chat can --resume the session.
-                        if (event.sessionId.isNotBlank()) {
-                            saveConversationId(projectId, event.sessionId)
-                        }
-                        if (event.exitCode == 0 && !assistantTextSeen && event.text.isNotBlank()) {
-                            assistantTextSeen = true
-                            eventBus.emit(RuntimeEvent.AssistantDelta(sessionId, event.text))
-                        }
-                        terminalResult = event
-                    }
-                    null -> Unit
-                }
+                output.accept(line)
             }
 
-            outputLoop@ while (process.isAlive || nativeProcess.outputFile.length() > outputOffset) {
+            // Quiet mode prints nothing until the turn ends, so this loop
+            // only drains the merged capture into the classifier; the
+            // outcome is decided from the process exit code below.
+            while (process.isAlive || nativeProcess.outputFile.length() > outputOffset) {
                 val available = nativeProcess.outputFile.length() - outputOffset
                 if (available <= 0) {
                     delay(50)
@@ -903,17 +827,11 @@ class HermesRuntimeBridge(
                 while (newline >= 0) {
                     val line = pendingOutput.substring(0, newline).trimEnd('\r')
                     pendingOutput.delete(0, newline + 1)
-                    if (line.isNotBlank()) handleLine(line)
-                    if (terminalResult != null) break@outputLoop
+                    handleLine(line)
                     newline = pendingOutput.indexOf("\n")
                 }
             }
-            if (terminalResult == null) {
-                pendingOutput.toString().trim().takeIf(String::isNotBlank)?.let { handleLine(it) }
-            }
-            if (terminalResult != null) {
-                stopHermesAfterTerminalResult(process)
-            }
+            pendingOutput.toString().takeIf(String::isNotEmpty)?.let { handleLine(it) }
             val exit = process.waitFor()
             Log.d("HermesBridge", "Hermes process exited with code $exit")
             val changed = checkpoints.changedFiles(workspace, before)
@@ -925,22 +843,30 @@ class HermesRuntimeBridge(
             } else if (!File(checkpoints.checkpointDir(projectId), "changes.json").isFile) {
                 acceptLastChanges(projectId)
             }
-            // The terminal `result` event is the authoritative outcome, not the
-            // process exit code: cleanup after a completed turn can end the
-            // wrapper with SIGKILL (137) even though the turn succeeded.
-            val result = terminalResult
+            // Quiet mode's outcome contract: the process exit code decides
+            // (0 = turn completed, 1 = turn/credentials/init failed, 130 =
+            // interrupted), the `session_id:` trailer carries the real
+            // session id, and a failed turn leaves its explanation in the
+            // output — HermesQuietOutput.failureMessage surfaces it, so a
+            // failure never again degrades to a bare exit code.
+            val outcome = output.finish()
+            if (!outcome.sessionId.isNullOrBlank()) {
+                saveConversationId(projectId, outcome.sessionId)
+            }
             when {
                 userStopRequested -> throw HermesSessionException("Stopped by user")
-                result == null -> error(
-                    providerError ?: "Hermes Agent exited with code $exit without reporting a result",
-                )
-                result.exitCode != 0 -> {
+                exit == 0 -> {
+                    if (outcome.responseText.isNotBlank()) {
+                        eventBus.emit(RuntimeEvent.AssistantDelta(sessionId, outcome.responseText))
+                    }
+                    emitCompletedOnce(sessionId)
+                }
+                else -> {
                     // A session Hermes no longer knows fails every resume;
                     // forget the stored id so the next message starts fresh.
                     if (resumeId != null) saveConversationId(projectId, "")
-                    error(result.error ?: providerError ?: "Hermes Agent stopped with exit code ${result.exitCode}")
+                    error(HermesQuietOutput.failureMessage(outcome, exit, providerError))
                 }
-                else -> emitCompletedOnce(sessionId)
             }
         }.onFailure { error ->
             Log.e("HermesBridge", "Session failed", error)
@@ -952,6 +878,94 @@ class HermesRuntimeBridge(
         sessionId
     }
 
+    /**
+     * One chat turn against the remote Hermes gateway. The [prompt] arrives
+     * exactly as the embedded path receives it — MainViewModel has already
+     * appended the GenUI capability block — and is sent as the turn's single
+     * user message; the gateway keeps the conversation server-side under a
+     * session id this bridge mints per project chat (`mh-<uuid>`, persisted
+     * through [remoteConversationId]/[saveRemoteConversationId], separate
+     * from the embedded session store so the two backends never hand each
+     * other foreign ids). Tool and status frames render through the same
+     * RuntimeEvents the embedded stream produces, so chat UI, activity feed
+     * and GenUI rendering are identical. Host-side file changes are not
+     * checkpointed: the workspace they touch is the host's, not the phone's.
+     */
+    private suspend fun runRemoteTurn(
+        sessionId: String,
+        projectId: String,
+        prompt: String,
+        provider: ProviderProfile,
+        host: HermesHostConfig,
+    ) {
+        if (host.baseUrl.isBlank()) throw HermesSessionException(HermesRemoteMessages.NO_URL)
+        if (host.apiKey.isBlank()) throw HermesSessionException(HermesRemoteMessages.NO_KEY)
+        startForegroundRuntime(activeProjectSlug ?: "")
+        pushForegroundProgress(R.string.rt_bridge_working, "Hermes Agent")
+        val client = HermesGatewayClient()
+        activeGatewayClient = client
+        RuntimeTaskController.stopAction = {
+            userStopRequested = true
+            client.disconnect()
+        }
+        try {
+            val gatewaySessionId = remoteConversationId(projectId)?.takeIf(String::isNotBlank)
+                ?: "mh-${UUID.randomUUID()}".also { minted -> saveRemoteConversationId(projectId, minted) }
+            val model = provider.model.ifBlank { provider.kind.defaultModel }
+            val outcome = client.streamChat(
+                config = host,
+                model = model,
+                prompt = prompt,
+                sessionId = gatewaySessionId,
+                isStopped = { userStopRequested },
+                onWaking = { pushForegroundProgress(HOST_WAKING_PROGRESS) },
+                onEvent = { event ->
+                    when (event) {
+                        is HermesGatewayEvent.TextDelta -> {
+                            pushForegroundProgress(R.string.rt_bridge_working, "Hermes Agent")
+                            eventBus.emit(RuntimeEvent.AssistantDelta(sessionId, event.text))
+                        }
+                        is HermesGatewayEvent.ToolProgress -> {
+                            val displayName = hermesToolDisplayName(event.tool.ifBlank { "Tool" })
+                            if (event.status == "running") {
+                                pushForegroundProgress(
+                                    AppStrings.get(context, R.string.rt_bridge_running_tool, displayName, event.label),
+                                )
+                                eventBus.emit(
+                                    RuntimeEvent.ToolStarted(
+                                        sessionId,
+                                        displayName,
+                                        event.label.ifBlank { "Working on the host" },
+                                    ),
+                                )
+                            } else if (event.status == "completed") {
+                                // The gateway sends no result text for a
+                                // completed tool; use the placeholder the UI
+                                // already localizes for empty summaries.
+                                eventBus.emit(RuntimeEvent.ToolCompleted(sessionId, displayName, "Completed successfully"))
+                            }
+                        }
+                        is HermesGatewayEvent.Status -> pushForegroundProgress(event.text)
+                        else -> Unit // Reasoning deltas and approval requests have no remote UI yet.
+                    }
+                },
+            )
+            if (userStopRequested) throw HermesSessionException("Stopped by user")
+            when (outcome) {
+                is HermesGatewayOutcome.Completed -> {
+                    // The gateway echoes the live session id in a response
+                    // header (it can rotate under compression); persist
+                    // whatever it reports so the next turn continues there.
+                    outcome.sessionId?.takeIf(String::isNotBlank)?.let { saveRemoteConversationId(projectId, it) }
+                    emitCompletedOnce(sessionId)
+                }
+                is HermesGatewayOutcome.Failed -> throw HermesSessionException(outcome.message)
+            }
+        } finally {
+            if (activeGatewayClient === client) activeGatewayClient = null
+        }
+    }
+
     override suspend fun respondToApproval(request: ToolRequest, approved: Boolean) {
         // One-shot runs expose no approval channel; the generated config.yaml
         // carries the deterministic approval policy for this mode. Interactive
@@ -961,6 +975,7 @@ class HermesRuntimeBridge(
     override suspend fun stopSession(sessionId: String) = withContext(Dispatchers.IO) {
         if (activeSessionId == sessionId) {
             userStopRequested = true
+            activeGatewayClient?.disconnect()
             activeProcess?.destroy()
             delay(500)
             if (activeProcess?.isAlive == true) activeProcess?.destroyForcibly()
@@ -1070,6 +1085,24 @@ class HermesRuntimeBridge(
         val envFile = File(home, ".env")
         val existingEnv = envFile.takeIf(File::isFile)?.readText().orEmpty()
         envFile.writeText(HermesConfigFiles.mergedEnv(existingEnv, route, secret))
+    }
+
+    /**
+     * Assembles the context prompt for the `-q` argv transport. The shared
+     * history budget allows 160 K characters, but a single argv entry is
+     * capped by the kernel at 128 KiB (including the NUL), so the oldest
+     * history is shed until the assembled prompt fits the byte budget;
+     * the final hard truncation only fires for a pathological current
+     * message and never splits a UTF-8 sequence.
+     */
+    private fun buildHermesPrompt(currentPrompt: String, history: List<ChatMessage>, guestWorkspacePath: String, projectKind: ProjectKind): String {
+        var remaining = history
+        var assembled = buildContextPrompt(currentPrompt, remaining, guestWorkspacePath, projectKind)
+        while (utf8ByteCount(assembled) > MAX_HERMES_PROMPT_BYTES && remaining.size > 1) {
+            remaining = remaining.drop(1)
+            assembled = buildContextPrompt(currentPrompt, remaining, guestWorkspacePath, projectKind)
+        }
+        return truncateToUtf8Bytes(assembled, MAX_HERMES_PROMPT_BYTES)
     }
 
     private fun buildContextPrompt(currentPrompt: String, history: List<ChatMessage>, guestWorkspacePath: String, projectKind: ProjectKind): String {
@@ -1257,8 +1290,11 @@ class HermesRuntimeBridge(
 
     companion object {
         const val HERMES_HOME_GUEST_PATH = "/root/.hermes"
+        private const val HOST_WAKING_PROGRESS = "Waking the Hermes host…"
         private const val FOREGROUND_PROGRESS_MIN_INTERVAL_MS = 750L
         private const val MAX_CONVERSATION_HISTORY_CHARACTERS = 160_000
+        /** Byte budget for the `-q` prompt: under the kernel's 128 KiB per-argument exec cap, with headroom. */
+        private const val MAX_HERMES_PROMPT_BYTES = 120_000
         /**
          * Full power, no trimming: "all" is Hermes's own maximal selector —
          * `resolve_toolset` spans every toolset except the ones gated to
