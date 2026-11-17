@@ -305,6 +305,77 @@ class HermesNativeSettingsTest {
     }
 
     @Test
+    fun fusionResetRewritesALeftoverNonCustomProvider() {
+        // The on-device case (2026-11-18): a provider stored while exploring
+        // an early build — "openrouter" — survived the fusion defaults and
+        // the anthropic-only migration, and Hermes ran against it. On this
+        // migration's first check it is reset to the fusion triple.
+        val reset = HermesFusionResetMigration.resetSetup(
+            alreadyMigrated = false,
+            providerId = "openrouter",
+            model = "anthropic/claude-sonnet-4.6",
+            customBaseUrl = "",
+        )
+        assertEquals(
+            HermesSetupSettings(
+                providerId = HermesProviderCatalog.DEFAULT_PROVIDER_ID,
+                model = HermesProviderCatalog.DEFAULT_MODEL,
+                customBaseUrl = HermesProviderCatalog.DEFAULT_CUSTOM_BASE_URL,
+            ),
+            reset,
+        )
+        // And the reset setup really resolves to the fusion route.
+        assertEquals("fusion", reset!!.resolvedModel())
+        assertTrue(reset.isCustom())
+        // Any other stored non-Custom provider resets the same way.
+        assertEquals(
+            reset,
+            HermesFusionResetMigration.resetSetup(false, "anthropic", "claude-sonnet-4.6", ""),
+        )
+    }
+
+    @Test
+    fun fusionResetLeavesCustomSetupsAlone() {
+        // A stored Custom setup is a live deliberate configuration: whatever
+        // base URL and model it carries, the reset never touches it.
+        assertNull(
+            HermesFusionResetMigration.resetSetup(
+                alreadyMigrated = false,
+                providerId = HermesProviderCatalog.CUSTOM_ID,
+                model = "my-own-model",
+                customBaseUrl = "https://llm.example.com/v1",
+            ),
+        )
+        // The fusion configuration itself is Custom, so it is left alone too.
+        assertNull(
+            HermesFusionResetMigration.resetSetup(
+                alreadyMigrated = false,
+                providerId = HermesProviderCatalog.DEFAULT_PROVIDER_ID,
+                model = HermesProviderCatalog.DEFAULT_MODEL,
+                customBaseUrl = HermesProviderCatalog.DEFAULT_CUSTOM_BASE_URL,
+            ),
+        )
+        // Nothing stored: the getters already resolve to fusion — no reset.
+        assertNull(HermesFusionResetMigration.resetSetup(false, null, null, null))
+    }
+
+    @Test
+    fun fusionResetNeverRunsOnceItsFlagIsSet() {
+        // The flag is already set: even a stored non-Custom provider is now
+        // a deliberate later choice and persists untouched.
+        assertNull(
+            HermesFusionResetMigration.resetSetup(
+                alreadyMigrated = true,
+                providerId = "openrouter",
+                model = "",
+                customBaseUrl = "",
+            ),
+        )
+        assertNull(HermesFusionResetMigration.resetSetup(true, "anthropic", "", ""))
+        assertNull(HermesFusionResetMigration.resetSetup(true, null, null, null))
+    }
+
+    @Test
     fun modelChoicesAreExactlyFusionAndAuto() {
         assertEquals(
             listOf("fusion", "auto"),

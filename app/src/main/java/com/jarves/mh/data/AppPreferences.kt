@@ -16,6 +16,7 @@ import com.jarves.mh.model.providersForAgent
 import com.jarves.mh.genui.GenUiStateCodec
 import com.jarves.mh.runtime.HermesConfigOptions
 import com.jarves.mh.runtime.HermesProviderCatalog
+import com.jarves.mh.runtime.HermesFusionResetMigration
 import com.jarves.mh.runtime.HermesSetupMigration
 import org.json.JSONArray
 import org.json.JSONObject
@@ -27,6 +28,7 @@ class AppPreferences(private val context: Context) {
 
     init {
         migrateHermesSetupToFusionDefaultIfNeeded()
+        resetHermesSetupToFusionIfNeeded()
     }
 
     /**
@@ -53,6 +55,38 @@ class AppPreferences(private val context: Context) {
                 putString("hermes_custom_base_url", migrated.customBaseUrl)
             }
             putBoolean(HERMES_FUSION_MIGRATION_FLAG, true)
+        }.apply()
+    }
+
+    /**
+     * Stronger one-time reset (2026-11-18, v14): the migration above only
+     * rewrote the exact old untouched setup, but a LEFTOVER provider stored
+     * while exploring an early build (seen on-device: "openrouter")
+     * survived it, and Hermes kept running against that provider with a
+     * key it rejects. The user's only ever stated Hermes choice is the
+     * FreeLLM fusion configuration, so on this migration's first check any
+     * stored provider other than Custom is reset to the fusion defaults.
+     * A stored Custom setup — whatever URL/model it carries — is left
+     * untouched. This migration has its OWN flag, separate from the one
+     * above; once it has run it never runs again, so any provider the
+     * user deliberately picks afterwards persists.
+     */
+    private fun resetHermesSetupToFusionIfNeeded() {
+        val alreadyMigrated = preferences.getBoolean(HERMES_FUSION_RESET_FLAG, false)
+        val reset = HermesFusionResetMigration.resetSetup(
+            alreadyMigrated = alreadyMigrated,
+            providerId = preferences.getString("hermes_provider_id", null),
+            model = preferences.getString("hermes_model", null),
+            customBaseUrl = preferences.getString("hermes_custom_base_url", null),
+        )
+        if (reset == null && alreadyMigrated) return
+        preferences.edit().apply {
+            if (reset != null) {
+                putString("hermes_provider_id", reset.providerId)
+                putString("hermes_model", reset.model)
+                putString("hermes_custom_base_url", reset.customBaseUrl)
+            }
+            putBoolean(HERMES_FUSION_RESET_FLAG, true)
         }.apply()
     }
 
@@ -701,6 +735,9 @@ class AppPreferences(private val context: Context) {
         /** SharedPreferences key of the one-time Hermes fusion-default migration flag. */
         const val HERMES_FUSION_MIGRATION_FLAG = "hermes_fusion_default_migrated"
 
+        /** SharedPreferences key of the one-time Hermes fusion-reset migration flag (v14). */
+        const val HERMES_FUSION_RESET_FLAG = "hermes_fusion_reset_migrated"
+
         /** Install and update state that describes this phone, not the user's work. */
         val DEVICE_ONLY_KEYS = setOf(
             "runtime_setup_complete",
@@ -708,6 +745,7 @@ class AppPreferences(private val context: Context) {
             "last_app_update_check_millis",
             "last_hermes_update_check_millis",
             "hermes_fusion_default_migrated",
+            "hermes_fusion_reset_migrated",
             "debug_update_manifest_url",
             "test_provider_defaults_version",
             "whats_new_seen_code",

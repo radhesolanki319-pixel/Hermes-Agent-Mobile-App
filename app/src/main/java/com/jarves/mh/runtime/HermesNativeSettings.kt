@@ -241,6 +241,48 @@ object HermesSetupMigration {
 }
 
 /**
+ * Stronger one-time reset to the fusion configuration (v14), for installs
+ * carrying a LEFTOVER stored Hermes provider from before the fusion
+ * defaults existed.
+ *
+ * The v12 migration above only rewrote the exact old untouched state
+ * (Anthropic + no model + no base URL). On-device evidence (2026-11-18)
+ * showed a stored provider picked while exploring an early build —
+ * "openrouter" — surviving both the fusion getter defaults and that
+ * migration, so Hermes kept running against the leftover provider, whose
+ * saved key it rejected. The user's only ever stated Hermes choice is the
+ * FreeLLM fusion configuration, so on the FIRST check of this migration
+ * any stored provider that is not the Custom id is treated as such a
+ * leftover: [resetSetup] returns the fusion configuration to overwrite
+ * the stored triple with. A stored Custom setup — whatever base URL and
+ * model the user put there — is a live deliberate configuration and is
+ * left untouched, as is an install with nothing stored (the getters
+ * already resolve to fusion). [alreadyMigrated] is this migration's own
+ * one-time flag: once it has run, the decision never fires again, so any
+ * provider the user deliberately picks afterwards persists. Pure and
+ * side-effect free; `AppPreferences` owns the stored values and the flag.
+ */
+object HermesFusionResetMigration {
+
+    /** The fusion setup to store, or null when no reset applies. */
+    fun resetSetup(
+        alreadyMigrated: Boolean,
+        providerId: String?,
+        model: String?,
+        customBaseUrl: String?,
+    ): HermesSetupSettings? =
+        if (!alreadyMigrated && providerId != null && providerId != HermesProviderCatalog.CUSTOM_ID) {
+            HermesSetupSettings(
+                providerId = HermesProviderCatalog.DEFAULT_PROVIDER_ID,
+                model = HermesProviderCatalog.DEFAULT_MODEL,
+                customBaseUrl = HermesProviderCatalog.DEFAULT_CUSTOM_BASE_URL,
+            )
+        } else {
+            null
+        }
+}
+
+/**
  * The config.yaml options the app exposes as working controls. Every field
  * maps to a real hermes-agent 0.19.0 config key (see the per-field notes) and
  * is applied with set semantics by [HermesConfigFiles] on every launch — the
