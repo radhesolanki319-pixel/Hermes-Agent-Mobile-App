@@ -32,19 +32,27 @@ val appUpdateManifestUrl =
 val runtimeBundleDir = rootProject.layout.projectDirectory.dir("dist/runtime-bundles")
 val generatedRuntimeAssets = layout.buildDirectory.dir("generated/runtime-assets")
 
+// CI note (2026-11-17): the *.tar.zst runtime bundles live in dist/runtime-bundles/
+// but are gitignored — this repo copy only has manifest.json. The app downloads
+// missing runtimes at first run (RUNTIME_RELEASE_BASE_URL), so skip absent bundles
+// instead of failing the build. On a machine with the bundles present nothing changes.
+val agyBundleFile = runtimeBundleDir.file("pocketdev-agy-arm64-2026.09.1.tar.zst")
 val prepareBundledAgentAssets = tasks.register<Sync>("prepareBundledAgentAssets") {
-    from(runtimeBundleDir.file("pocketdev-agy-arm64-2026.09.1.tar.zst"))
+    onlyIf { agyBundleFile.get().asFile.isFile }
+    from(agyBundleFile)
     into(generatedRuntimeAssets.map { it.dir("shared/runtime") })
 }
 
+val offlineBundleFiles = listOf(
+    "pocketdev-core-arm64-2026.09.5.tar.zst",
+    "pocketdev-claude-arm64-2026.11.1.tar.zst",
+    "pocketdev-python-arm64-2026.09.2.tar.zst",
+    "pocketdev-android-arm64-2026.09.1.tar.zst",
+    "pocketdev-dsh-arm64-2026.09.1.tar.zst",
+).map { runtimeBundleDir.file(it) }
 val prepareOfflineRuntimeAssets = tasks.register<Sync>("prepareOfflineRuntimeAssets") {
-    from(
-        runtimeBundleDir.file("pocketdev-core-arm64-2026.09.5.tar.zst"),
-        runtimeBundleDir.file("pocketdev-claude-arm64-2026.11.1.tar.zst"),
-        runtimeBundleDir.file("pocketdev-python-arm64-2026.09.2.tar.zst"),
-        runtimeBundleDir.file("pocketdev-android-arm64-2026.09.1.tar.zst"),
-        runtimeBundleDir.file("pocketdev-dsh-arm64-2026.09.1.tar.zst"),
-    )
+    onlyIf { offlineBundleFiles.any { it.get().asFile.isFile } }
+    from(offlineBundleFiles.filter { it.get().asFile.isFile })
     into(generatedRuntimeAssets.map { it.dir("offline/runtime") })
 }
 
