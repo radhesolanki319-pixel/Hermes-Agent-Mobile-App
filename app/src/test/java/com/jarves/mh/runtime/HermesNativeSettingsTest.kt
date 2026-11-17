@@ -303,4 +303,38 @@ class HermesNativeSettingsTest {
             ),
         )
     }
+
+    @Test
+    fun modelChoicesAreExactlyFusionAndAuto() {
+        assertEquals(
+            listOf("fusion", "auto"),
+            HermesModelChoice.entries.map { it.storedValue },
+        )
+        // Fusion is the standing default: its stored value is the catalog default model.
+        assertEquals(HermesProviderCatalog.DEFAULT_MODEL, HermesModelChoice.FUSION.storedValue)
+    }
+
+    @Test
+    fun modelChoiceMappingRoundTripsThroughTheStoredValue() {
+        HermesModelChoice.entries.forEach { choice ->
+            assertEquals(choice, HermesModelChoice.fromStored(choice.storedValue))
+        }
+        assertEquals(HermesModelChoice.FUSION, HermesModelChoice.fromStored("fusion"))
+        assertEquals(HermesModelChoice.AUTO, HermesModelChoice.fromStored("auto"))
+        // Surrounding whitespace from a hand-typed value still maps.
+        assertEquals(HermesModelChoice.AUTO, HermesModelChoice.fromStored("  auto  "))
+        // A manual model from the advanced setup is not a simple-surface choice.
+        assertNull(HermesModelChoice.fromStored("claude-sonnet-4.6"))
+        assertNull(HermesModelChoice.fromStored(""))
+    }
+
+    @Test
+    fun modelChoiceStoredValueFlowsIntoTheLaunchModel() {
+        val setup = HermesSetupSettings(
+            providerId = HermesProviderCatalog.DEFAULT_PROVIDER_ID,
+            model = HermesModelChoice.AUTO.storedValue,
+            customBaseUrl = HermesProviderCatalog.DEFAULT_CUSTOM_BASE_URL,
+        )
+        assertEquals("auto", setup.resolvedModel())
+    }
 }

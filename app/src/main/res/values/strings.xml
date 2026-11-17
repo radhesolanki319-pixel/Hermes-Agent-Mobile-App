@@ -45,6 +45,30 @@
     <string name="settings_update_available">Update available: v%1$s</string>
     <string name="vm_up_to_date">You\'re on the latest version</string>
 
+    <!-- Simple API Keys screen (Settings) -->
+    <string name="api_keys_title">API Keys</string>
+    <string name="api_keys_subtitle">All your keys in one place</string>
+    <string name="api_keys_freellm_label">FreeLLM API Key</string>
+    <string name="api_keys_provider_label">%1$s API Key</string>
+    <string name="api_keys_freellm_hint">This one key runs Hermes — all models together (fusion).</string>
+    <string name="api_keys_hermes_provider_hint">Hermes is set to %1$s in the advanced setup.</string>
+    <string name="api_keys_agent_provider_hint">%1$s is set to %2$s.</string>
+    <string name="api_keys_host_label">Hermes host key</string>
+    <string name="api_keys_host_hint">The key for your Hermes host computer — remote mode is on.</string>
+    <string name="api_keys_status_saved">Key saved</string>
+    <string name="api_keys_status_none">No key saved yet</string>
+    <string name="api_keys_model_title">AI model</string>
+    <string name="api_keys_model_fusion">Fusion</string>
+    <string name="api_keys_model_fusion_desc">All models answer together, one best reply.</string>
+    <string name="api_keys_model_auto">Auto</string>
+    <string name="api_keys_model_auto_desc">The best model is picked for each message.</string>
+    <string name="api_keys_model_custom_note">A custom model is set in Advanced: %1$s</string>
+    <string name="api_keys_advanced_title">Advanced</string>
+    <string name="api_keys_advanced_hermes">Hermes full setup</string>
+    <string name="api_keys_advanced_hermes_desc">Provider, model, options and files</string>
+    <string name="api_keys_advanced_profiles">Providers &amp; multiple keys</string>
+    <string name="api_keys_advanced_profiles_desc">Change provider or manage key lists</string>
+
     <!-- Theme Modes -->
     <string name="theme_dark">Dark</string>
     <string name="theme_light">Light</string>

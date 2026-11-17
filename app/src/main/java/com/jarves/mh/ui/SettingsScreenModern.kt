@@ -34,6 +34,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.DeleteSweep
+import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.LightMode
@@ -93,6 +94,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.jarves.mh.BuildConfig
 import com.jarves.mh.data.ApiKeyInfo
+import com.jarves.mh.data.ApiKeysPlan
+import com.jarves.mh.data.SimpleKeyFieldKind
 import com.jarves.mh.model.AgentKind
 import com.jarves.mh.model.DevStack
 import com.jarves.mh.model.ProviderKind
@@ -105,12 +108,14 @@ import androidx.compose.material.icons.filled.Language
 import androidx.compose.ui.res.stringResource
 import com.jarves.mh.R
 import com.jarves.mh.runtime.AntigravityAuthStatus
+import com.jarves.mh.runtime.HermesModelChoice
+import com.jarves.mh.runtime.HermesSetupSettings
 import com.jarves.mh.ui.theme.AppLanguage
 import com.jarves.mh.ui.theme.AppThemeMode
 import com.jarves.mh.ui.theme.PocketOrange
 import kotlinx.coroutines.launch
 
-private enum class SettingsSection { APPEARANCE, LANGUAGE, TOOLS, RUNTIME, DIAGNOSTICS, BACKUP, UPDATE_CHANNEL }
+private enum class SettingsSection { API_KEYS, APPEARANCE, LANGUAGE, TOOLS, RUNTIME, DIAGNOSTICS, BACKUP, UPDATE_CHANNEL }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -146,6 +151,14 @@ fun SettingsScreen(
     onStopInactiveProcesses: () -> Unit = {},
     onClearRuntimeCache: () -> Unit = {},
     onCheckForAppUpdate: () -> Unit = {},
+    getSavedHermesApiKey: () -> String = { "" },
+    onSaveHermesApiKey: (String) -> Unit = {},
+    getSavedHermesHostKey: () -> String = { "" },
+    onSaveHermesHostKey: (String) -> Unit = {},
+    getAgentProfile: (AgentKind) -> ProviderProfile = { ProviderProfile(ProviderKind.ANTHROPIC) },
+    onSaveAgentApiKey: (ProviderKind, String) -> Unit = { _, _ -> },
+    onSaveHermesModel: (String) -> Unit = {},
+    onOpenAgentSettings: () -> Unit = {},
     showBackupDot: Boolean = false,
     onBackupOpened: () -> Unit = {},
     openBackup: Boolean = false,
@@ -228,6 +241,29 @@ fun SettingsScreen(
             contentPadding = PaddingValues(horizontal = 18.dp, vertical = 10.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+
+            item {
+                SettingsAccordion(
+                    title = stringResource(R.string.api_keys_title),
+                    subtitle = stringResource(R.string.api_keys_subtitle),
+                    icon = Icons.Default.Key,
+                    expanded = expanded == SettingsSection.API_KEYS,
+                    onClick = { toggle(SettingsSection.API_KEYS) },
+                ) {
+                    ApiKeysSimpleContent(
+                        state = state,
+                        getSavedApiKey = getSavedApiKey,
+                        getSavedHermesApiKey = getSavedHermesApiKey,
+                        getSavedHermesHostKey = getSavedHermesHostKey,
+                        getAgentProfile = getAgentProfile,
+                        onSaveHermesApiKey = onSaveHermesApiKey,
+                        onSaveHermesHostKey = onSaveHermesHostKey,
+                        onSaveAgentApiKey = onSaveAgentApiKey,
+                        onSaveHermesModel = onSaveHermesModel,
+                        onOpenAgentSettings = onOpenAgentSettings,
+                    )
+                }
+            }
 
             item {
                 SettingsAccordion(
@@ -752,6 +788,273 @@ private fun SettingsAccordion(
                 }
             }
         }
+    }
+}
+
+/**
+ * The simple "API Keys" surface: one plain-language field per active key —
+ * no provider jargon, no env-var names. Every field reads and writes the
+ * SAME vault pool the advanced surfaces use (see [ApiKeysPlan]), so a key
+ * entered here is the key the Agent screen shows, and vice versa. The
+ * Fusion/Auto model choice sits under the Hermes field; the full setup
+ * stays one tap away under "Advanced" (it lives on the Agent screen).
+ */
+@Composable
+private fun ApiKeysSimpleContent(
+    state: AppUiState,
+    getSavedApiKey: (ProviderKind) -> String,
+    getSavedHermesApiKey: () -> String,
+    getSavedHermesHostKey: () -> String,
+    getAgentProfile: (AgentKind) -> ProviderProfile,
+    onSaveHermesApiKey: (String) -> Unit,
+    onSaveHermesHostKey: (String) -> Unit,
+    onSaveAgentApiKey: (ProviderKind, String) -> Unit,
+    onSaveHermesModel: (String) -> Unit,
+    onOpenAgentSettings: () -> Unit,
+) {
+    val hermesSetup = remember(state.hermesProviderId, state.hermesModel, state.hermesCustomBaseUrl) {
+        HermesSetupSettings(state.hermesProviderId, state.hermesModel, state.hermesCustomBaseUrl)
+    }
+    val claudeProfile = remember(state.agentKind) { getAgentProfile(AgentKind.CLAUDE_CODE) }
+    val antigravityProfile = remember(state.agentKind) { getAgentProfile(AgentKind.ANTIGRAVITY) }
+    val fields = remember(hermesSetup, state.hermesHostRemote, claudeProfile, antigravityProfile) {
+        ApiKeysPlan.fields(hermesSetup, state.hermesHostRemote, claudeProfile, antigravityProfile)
+    }
+
+    fields.forEach { field ->
+        when (field.kind) {
+            SimpleKeyFieldKind.HERMES -> {
+                SimpleKeyFieldEditor(
+                    heading = AgentKind.HERMES.localizedTitle(),
+                    label = if (field.hermesFusion) {
+                        stringResource(R.string.api_keys_freellm_label)
+                    } else {
+                        stringResource(R.string.api_keys_provider_label, field.providerName)
+                    },
+                    hint = if (field.hermesFusion) {
+                        stringResource(R.string.api_keys_freellm_hint)
+                    } else {
+                        stringResource(R.string.api_keys_hermes_provider_hint, field.providerName)
+                    },
+                    initialValue = getSavedHermesApiKey(),
+                    fieldKey = field.vaultId,
+                    onSave = onSaveHermesApiKey,
+                )
+                if (field.showModelSelector) {
+                    HermesModelSelector(
+                        currentModel = state.hermesModel,
+                        onSelect = onSaveHermesModel,
+                    )
+                }
+            }
+            SimpleKeyFieldKind.CLAUDE_CODE, SimpleKeyFieldKind.ANTIGRAVITY -> {
+                val kind = field.providerKind ?: return@forEach
+                val agent = if (field.kind == SimpleKeyFieldKind.CLAUDE_CODE) {
+                    AgentKind.CLAUDE_CODE
+                } else {
+                    AgentKind.ANTIGRAVITY
+                }
+                SimpleKeyFieldEditor(
+                    heading = agent.localizedTitle(),
+                    label = if (kind == ProviderKind.CLAUDE) {
+                        stringResource(R.string.provider_claude_token)
+                    } else {
+                        stringResource(R.string.api_keys_provider_label, kind.localizedTitle())
+                    },
+                    hint = stringResource(
+                        R.string.api_keys_agent_provider_hint,
+                        agent.localizedTitle(),
+                        kind.localizedTitle(),
+                    ),
+                    initialValue = getSavedApiKey(kind),
+                    fieldKey = field.vaultId,
+                    onSave = { secret -> onSaveAgentApiKey(kind, secret) },
+                )
+            }
+            SimpleKeyFieldKind.HERMES_HOST -> {
+                SimpleKeyFieldEditor(
+                    heading = stringResource(R.string.hermes_host_title),
+                    label = stringResource(R.string.api_keys_host_label),
+                    hint = stringResource(R.string.api_keys_host_hint),
+                    initialValue = getSavedHermesHostKey(),
+                    fieldKey = field.vaultId,
+                    onSave = onSaveHermesHostKey,
+                )
+            }
+        }
+    }
+
+    Spacer(Modifier.height(4.dp))
+    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+    Text(
+        stringResource(R.string.api_keys_advanced_title),
+        fontSize = 12.sp,
+        fontWeight = FontWeight.SemiBold,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    ApiKeysAdvancedRow(
+        title = stringResource(R.string.api_keys_advanced_hermes),
+        desc = stringResource(R.string.api_keys_advanced_hermes_desc),
+        onClick = onOpenAgentSettings,
+    )
+    ApiKeysAdvancedRow(
+        title = stringResource(R.string.api_keys_advanced_profiles),
+        desc = stringResource(R.string.api_keys_advanced_profiles_desc),
+        onClick = onOpenAgentSettings,
+    )
+}
+
+/** One masked key field with saved status, Save and Remove — the whole simple surface in one shape. */
+@Composable
+private fun SimpleKeyFieldEditor(
+    heading: String,
+    label: String,
+    hint: String,
+    initialValue: String,
+    fieldKey: String,
+    onSave: (String) -> Unit,
+) {
+    var text by rememberSaveable(fieldKey) { mutableStateOf(initialValue) }
+    var visible by rememberSaveable(fieldKey) { mutableStateOf(false) }
+    var saved by rememberSaveable(fieldKey) { mutableStateOf(initialValue.isNotBlank()) }
+
+    Text(heading, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+    OutlinedTextField(
+        value = text,
+        onValueChange = { text = it },
+        label = { Text(label) },
+        supportingText = { Text(hint) },
+        singleLine = true,
+        visualTransformation = if (visible) VisualTransformation.None else PasswordVisualTransformation(),
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+        trailingIcon = {
+            IconButton(onClick = { visible = !visible }) {
+                Icon(
+                    if (visible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                    contentDescription = null,
+                )
+            }
+        },
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+    )
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        if (saved) {
+            Icon(Icons.Default.Check, null, Modifier.size(14.dp), tint = MaterialTheme.colorScheme.primary)
+            Spacer(Modifier.width(5.dp))
+        }
+        Text(
+            stringResource(if (saved) R.string.api_keys_status_saved else R.string.api_keys_status_none),
+            fontSize = 12.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.weight(1f))
+        if (saved) {
+            TextButton(
+                onClick = {
+                    onSave("")
+                    text = ""
+                    saved = false
+                },
+            ) {
+                Text(stringResource(R.string.action_remove), color = MaterialTheme.colorScheme.error)
+            }
+        }
+        Button(
+            onClick = {
+                onSave(text.trim())
+                saved = text.isNotBlank()
+            },
+            shape = RoundedCornerShape(12.dp),
+        ) {
+            Text(stringResource(R.string.action_save))
+        }
+    }
+}
+
+/**
+ * The only two Hermes model choices on the simple surface — FreeLLM's
+ * virtual models. Tapping one writes `hermes_model` immediately (the same
+ * value the advanced setup edits). A model typed manually in Advanced is
+ * shown as a note instead of silently replacing it.
+ */
+@Composable
+private fun HermesModelSelector(
+    currentModel: String,
+    onSelect: (String) -> Unit,
+) {
+    val selected = HermesModelChoice.fromStored(currentModel)
+    Text(
+        stringResource(R.string.api_keys_model_title),
+        fontSize = 12.sp,
+        fontWeight = FontWeight.SemiBold,
+    )
+    HermesModelChoice.entries.forEach { choice ->
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .clickable { onSelect(choice.storedValue) }
+                .padding(vertical = 7.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    stringResource(
+                        when (choice) {
+                            HermesModelChoice.FUSION -> R.string.api_keys_model_fusion
+                            HermesModelChoice.AUTO -> R.string.api_keys_model_auto
+                        },
+                    ),
+                    fontWeight = FontWeight.Medium,
+                    fontSize = 14.sp,
+                )
+                Text(
+                    stringResource(
+                        when (choice) {
+                            HermesModelChoice.FUSION -> R.string.api_keys_model_fusion_desc
+                            HermesModelChoice.AUTO -> R.string.api_keys_model_auto_desc
+                        },
+                    ),
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            SelectionDot(selected == choice)
+        }
+    }
+    if (selected == null && currentModel.isNotBlank()) {
+        Text(
+            stringResource(R.string.api_keys_model_custom_note, currentModel),
+            fontSize = 11.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+/** A tappable link row from the simple surface into the full (advanced) setup. */
+@Composable
+private fun ApiKeysAdvancedRow(
+    title: String,
+    desc: String,
+    onClick: () -> Unit,
+) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(title, fontWeight = FontWeight.Medium, fontSize = 14.sp)
+            Text(desc, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Icon(
+            Icons.AutoMirrored.Filled.OpenInNew,
+            contentDescription = null,
+            modifier = Modifier.size(17.dp),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 

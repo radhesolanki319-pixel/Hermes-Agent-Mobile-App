@@ -2637,6 +2637,14 @@ private fun RootScreenHost(
                             viewModel.checkForAppUpdateFromSettings()
                         }
                     },
+                    getSavedHermesApiKey = viewModel::getSavedHermesApiKey,
+                    onSaveHermesApiKey = viewModel::updateHermesApiKey,
+                    getSavedHermesHostKey = viewModel::getSavedHermesHostKey,
+                    onSaveHermesHostKey = viewModel::updateHermesHostKey,
+                    getAgentProfile = viewModel::providerProfileFor,
+                    onSaveAgentApiKey = viewModel::updateAgentApiKey,
+                    onSaveHermesModel = viewModel::updateHermesModel,
+                    onOpenAgentSettings = { screen = RootScreen.AGENT },
                 )
             }
         }

@@ -163,6 +163,7 @@ data class HermesSetupSettings(
     fun resolvedModel(): String =
         model.trim().ifBlank { providerDef()?.defaultModel.orEmpty() }
 
+
     /** The launch route for these settings. */
     fun route(): HermesRoute =
         if (isCustom()) {
@@ -180,6 +181,27 @@ data class HermesSetupSettings(
                 baseUrl = def?.baseUrl.orEmpty(),
             )
         }
+}
+
+/**
+ * The only two model choices the simple surfaces offer for Hermes: the
+ * FreeLLM endpoint's virtual models. [FUSION] (the default) fans a prompt
+ * out to a panel of models and synthesizes one answer; [AUTO] lets the
+ * endpoint's own smart routing pick the best model per request. Each maps
+ * to the exact string stored in `hermes_model`, so [HermesSetupSettings]
+ * and the launch path pick the choice up unchanged. Any other stored value
+ * is a manual model entered in the advanced setup and maps to null here.
+ */
+enum class HermesModelChoice(val storedValue: String) {
+    FUSION(HermesProviderCatalog.DEFAULT_MODEL),
+    AUTO("auto"),
+    ;
+
+    companion object {
+        /** The choice a stored `hermes_model` value represents, or null for a manual model. */
+        fun fromStored(model: String): HermesModelChoice? =
+            entries.firstOrNull { it.storedValue == model.trim() }
+    }
 }
 
 /**

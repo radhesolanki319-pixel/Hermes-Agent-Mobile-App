@@ -2130,6 +2130,36 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    // --- Simple "API Keys" screen (Settings) ---------------------------------
+    // Key-only writes onto the SAME vault pools the advanced surfaces use, so
+    // a key entered on either surface is the same key. A blank value clears
+    // the saved key, mirroring the Hermes cards' save behaviour.
+
+    /** The stored provider profile for any agent (the simple screen shows each agent's active key). */
+    fun providerProfileFor(agent: AgentKind): ProviderProfile = preferences.loadProvider(vault, agent)
+
+    /** Saves only the Hermes setup key (HERMES_SETUP pool); provider/model/base URL are untouched. */
+    fun updateHermesApiKey(secret: String) {
+        if (secret.isBlank()) vault.remove(HERMES_SETUP_VAULT_ID) else vault.put(HERMES_SETUP_VAULT_ID, secret)
+    }
+
+    /** Saves only the Hermes host gateway key (HERMES_GATEWAY pool); host mode/URL are untouched. */
+    fun updateHermesHostKey(secret: String) {
+        if (secret.isBlank()) vault.remove(HERMES_GATEWAY_VAULT_ID) else vault.put(HERMES_GATEWAY_VAULT_ID, secret)
+    }
+
+    /** Saves only a profile agent's active key, into the pool named by its provider kind. */
+    fun updateAgentApiKey(kind: ProviderKind, secret: String) {
+        if (secret.isBlank()) vault.remove(kind.name) else vault.put(kind.name, secret)
+        refreshActiveApiKey(kind)
+    }
+
+    /** Persists the Fusion/Auto model choice into the same `hermes_model` the advanced setup edits. */
+    fun updateHermesModel(model: String) {
+        preferences.hermesModel = model.trim()
+        _state.update { it.copy(hermesModel = model.trim()) }
+    }
+
     /** Persists the Hermes config options; they are written into config.yaml on the next launch. */
     fun saveHermesOptions(options: HermesConfigOptions) {
         preferences.saveHermesConfigOptions(options)
