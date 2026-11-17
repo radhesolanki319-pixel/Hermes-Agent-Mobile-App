@@ -606,7 +606,7 @@ private fun InitialLanguageSetupScreen(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         BrandMark(compact = true)
                         Spacer(Modifier.width(9.dp))
-                        Text("Mobile Harness", fontWeight = FontWeight.Bold)
+                        Text("Hermes Agent", fontWeight = FontWeight.Bold)
                     }
                 },
                 actions = {
@@ -898,7 +898,7 @@ private fun BackgroundTaskSetupScreen(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         BrandMark(compact = true)
                         Spacer(Modifier.width(9.dp))
-                        Text("Mobile Harness", fontWeight = FontWeight.Bold)
+                        Text("Hermes Agent", fontWeight = FontWeight.Bold)
                     }
                 },
                 actions = {
@@ -1174,7 +1174,7 @@ private fun RuntimeSetupPromptScreen(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         BrandMark(compact = true)
                         Spacer(Modifier.width(9.dp))
-                        Text("Mobile Harness", fontWeight = FontWeight.Bold)
+                        Text("Hermes Agent", fontWeight = FontWeight.Bold)
                     }
                 },
                 navigationIcon = {
@@ -1888,7 +1888,7 @@ private fun localizeRuntimeMessage(message: String): String {
         trimmed.equals("Setup complete", ignoreCase = true) -> {
             stringResource(R.string.runtime_msg_setup_complete)
         }
-        trimmed.contains("Resuming Mobile Harness setup", ignoreCase = true) -> {
+        trimmed.contains("Resuming Hermes Agent setup", ignoreCase = true) -> {
             stringResource(R.string.runtime_msg_resuming_setup)
         }
         trimmed.startsWith("Downloading ") && !trimmed.startsWith("Downloading: ") -> {
@@ -2393,7 +2393,7 @@ private fun StartupErrorScreen(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         BrandMark(compact = true)
                         Spacer(Modifier.width(9.dp))
-                        Text("Mobile Harness", fontWeight = FontWeight.Bold)
+                        Text("Hermes Agent", fontWeight = FontWeight.Bold)
                     }
                 },
                 actions = {
@@ -3586,7 +3586,7 @@ private fun ProjectsScreen(
         topBar = {
             TopAppBar(
                 modifier = Modifier.padding(top = 8.dp),
-                title = { Row(verticalAlignment = Alignment.CenterVertically) { BrandMark(compact = true); Spacer(Modifier.width(9.dp)); Text("Mobile Harness", fontWeight = FontWeight.Bold) } },
+                title = { Row(verticalAlignment = Alignment.CenterVertically) { BrandMark(compact = true); Spacer(Modifier.width(9.dp)); Text("Hermes Agent", fontWeight = FontWeight.Bold) } },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
             )
         },
@@ -3752,7 +3752,7 @@ private fun ProjectsScreen(
                             }
                             Spacer(Modifier.width(12.dp))
                             Column(Modifier.weight(1f)) {
-                                Text("Mobile Harness ${update.versionName}", fontWeight = FontWeight.Bold)
+                                Text("Hermes Agent ${update.versionName}", fontWeight = FontWeight.Bold)
                                 Text(stringResource(R.string.ws_update_ready), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                             Text(stringResource(R.string.ws_update), color = PocketOrange, fontWeight = FontWeight.Bold, fontSize = 13.sp)
@@ -7508,7 +7508,7 @@ private fun BrandMark(modifier: Modifier = Modifier, compact: Boolean = false) {
     ) {
         Icon(
             imageVector = Icons.Default.Terminal,
-            contentDescription = "Mobile Harness",
+            contentDescription = "Hermes Agent",
             modifier = Modifier.size(iconSize),
             tint = primary,
         )

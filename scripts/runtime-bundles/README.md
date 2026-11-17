@@ -32,6 +32,17 @@ partitions, Magisk files, device identifiers, or user data are included.
   excludes OAuth credentials, settings, conversations, projects, and all device
   data. Review Google's redistribution terms before publishing an APK containing
   this binary.
+- `hermes`: Nous Research's Hermes Agent (pinned PyPI release, core + acp
+  extras) together with its standalone CPython 3.14, laid out under
+  `/root/.pocket-hermes` exactly as the in-guest uv install would leave it.
+  Build it with `scripts/runtime-bundles/build-hermes-bundle.sh` — uniquely,
+  this bundle is assembled on any host from prebuilt aarch64 artifacts
+  (python-build-standalone + binary wheels only); no ARM64 machine and no
+  aarch64 execution are involved. The overlay contains no credentials,
+  settings, conversations, or user data: Hermes's home state is created on
+  the device at first run. The app embeds this bundle in both flavors when
+  the file is present, so Hermes is pre-installed; without it the app falls
+  back to the in-guest network install.
 
 The current artifact metadata and SHA-256 checksums live in
 `dist/runtime-bundles/manifest.json`. Large `.tar.zst` files and downloaded

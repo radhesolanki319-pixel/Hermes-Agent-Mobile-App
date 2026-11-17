@@ -2281,8 +2281,47 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
             autoPingApi()
             checkForAppUpdate()
+            maybeAutoInstallHermes()
+            autoUpdateHermesIfNeeded()
         } else {
             showStartupError(result.exceptionOrNull() ?: IllegalStateException(str(R.string.vm_initialization_failed)))
+        }
+    }
+
+    /**
+     * Hermes ships pre-installed in the APK and is the default agent, so if
+     * the runtime is ready but Hermes itself is missing (for example the
+     * runtime was set up by an older app version), install it automatically
+     * through the normal agent install flow — the user never has to find a
+     * separate "install Hermes" action. The install itself is a local bundle
+     * extraction; [installAgent] applies all the usual guards.
+     */
+    private fun maybeAutoInstallHermes() {
+        if (_state.value.agentKind != AgentKind.HERMES) return
+        if (installer.isAgentInstalled(AgentKind.HERMES)) return
+        installAgent(AgentKind.HERMES)
+    }
+
+    /**
+     * Hermes auto-update (default on): once a day, after the runtime is
+     * ready, check PyPI for a newer Hermes release and, when one exists,
+     * apply it through the same [updateAgent] path as the manual flow — the
+     * installer verifies the new install in the guest before recording its
+     * version marker, so a failed update changes nothing. Other agents keep
+     * their manual check-and-tap update flow.
+     */
+    private fun autoUpdateHermesIfNeeded() {
+        if (_state.value.isRunning || _state.value.agentUpdating != null || _state.value.agentInstalling != null) return
+        if (System.currentTimeMillis() - preferences.lastHermesUpdateCheckMillis < HERMES_AUTO_UPDATE_CHECK_INTERVAL_MS) return
+        if (!installer.isAgentInstalled(AgentKind.HERMES)) return
+        viewModelScope.launch {
+            val updates = withContext(Dispatchers.IO) {
+                runCatching { installer.checkAgentUpdates() }.getOrNull()
+            } ?: return@launch
+            preferences.lastHermesUpdateCheckMillis = System.currentTimeMillis()
+            if (!updates.containsKey(AgentKind.HERMES)) return@launch
+            _state.update { it.copy(agentUpdates = updates) }
+            updateAgent(AgentKind.HERMES)
         }
     }
 
@@ -5555,6 +5594,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         private const val DIAGNOSTICS_REFRESH_COOLDOWN_MS = 1_000L
         private const val RECENT_EXIT_CACHE_MS = 60_000L
         private const val MINIMUM_INITIALIZATION_SCREEN_MS = 3_000L
+        private const val HERMES_AUTO_UPDATE_CHECK_INTERVAL_MS = 24L * 60L * 60L * 1_000L
         private const val MAX_EDITABLE_FILE_BYTES = 512_000L
         private const val MAX_PROJECT_TERMINAL_HISTORY = 100
         private const val MAX_PROJECT_TERMINAL_OUTPUT = 200_000

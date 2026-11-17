@@ -40,11 +40,11 @@
     <string name="backup_error_open_output">Could not write the backup file</string>
     <string name="backup_error_open_input">Could not open the backup file</string>
     <string name="backup_error_wrong_password">Wrong password</string>
-    <string name="backup_error_newer">This backup is from a newer version of Mobile Harness. Update the app first.</string>
+    <string name="backup_error_newer">This backup is from a newer version of Hermes Agent. Update the app first.</string>
     <string name="backup_error_space">Not enough free storage. It needs about %1$s.</string>
-    <string name="backup_error_invalid">This file isn\'t a Mobile Harness backup, or it is damaged.</string>
-    <string name="backup_notification_backing_up">Backing up Mobile Harness</string>
-    <string name="backup_notification_restoring">Restoring Mobile Harness</string>
+    <string name="backup_error_invalid">This file isn\'t a Hermes Agent backup, or it is damaged.</string>
+    <string name="backup_notification_backing_up">Backing up Hermes Agent</string>
+    <string name="backup_notification_restoring">Restoring Hermes Agent</string>
     <string name="backup_notification_backup_done">Backup complete</string>
     <string name="backup_notification_restore_done">Restore complete</string>
     <string name="backup_notification_backup_failed">Backup failed</string>

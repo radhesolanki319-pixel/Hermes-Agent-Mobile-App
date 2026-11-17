@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="rt_install_incomplete">Η εγκατάσταση του βασικού περιβάλλοντος εκτέλεσης δεν ολοκληρώθηκε. Ανοίξτε ξανά το Mobile Harness για να επιδιορθωθεί.</string>
-    <string name="rt_install_unsupported_arch">Μη υποστηριζόμενη αρχιτεκτονική: το Mobile Harness απαιτεί συσκευή ARM64 ή εξομοιωτή ARM64</string>
+    <string name="rt_install_incomplete">Η εγκατάσταση του βασικού περιβάλλοντος εκτέλεσης δεν ολοκληρώθηκε. Ανοίξτε ξανά το Hermes Agent για να επιδιορθωθεί.</string>
+    <string name="rt_install_unsupported_arch">Μη υποστηριζόμενη αρχιτεκτονική: το Hermes Agent απαιτεί συσκευή ARM64 ή εξομοιωτή ARM64</string>
     <string name="rt_install_preparing_runtime">Προετοιμασία του ιδιωτικού περιβάλλοντος ανάπτυξης</string>
     <string name="rt_install_unpacking_core">Επαλήθευση και αποσυμπίεση του βασικού περιβάλλοντος</string>
     <string name="rt_install_git_base_tools">Εγκατάσταση του Git και βασικών εργαλείων</string>
@@ -44,28 +44,28 @@
     <string name="rt_install_runtime_ready">Το ιδιωτικό περιβάλλον είναι έτοιμο</string>
     <string name="rt_install_download_failed_http">Η λήψη απέτυχε με HTTP %1$d</string>
     <string name="rt_setup_preparing_workspace">Προετοιμασία του ιδιωτικού χώρου εργασίας προγραμματισμού</string>
-    <string name="rt_setup_ready">Το Mobile Harness είναι έτοιμο</string>
+    <string name="rt_setup_ready">Το Hermes Agent είναι έτοιμο</string>
     <string name="rt_setup_offline">Συνδεθείτε σε Wi-Fi ή δεδομένα κινητής και συνεχίστε την εγκατάσταση.</string>
-    <string name="rt_setup_dpkg_interrupted">Το Android διέκοψε την εγκατάσταση του Linux. Το Mobile Harness θα την επιδιορθώσει όταν δοκιμάσετε ξανά.</string>
-    <string name="rt_setup_failed_generic">Το Mobile Harness δεν μπόρεσε να ολοκληρώσει την εγκατάσταση.</string>
+    <string name="rt_setup_dpkg_interrupted">Το Android διέκοψε την εγκατάσταση του Linux. Το Hermes Agent θα την επιδιορθώσει όταν δοκιμάσετε ξανά.</string>
+    <string name="rt_setup_failed_generic">Το Hermes Agent δεν μπόρεσε να ολοκληρώσει την εγκατάσταση.</string>
     <string name="rt_setup_paused">Η εγκατάσταση σε παύση</string>
-    <string name="rt_setup_notification_title">Ρύθμιση του Mobile Harness</string>
+    <string name="rt_setup_notification_title">Ρύθμιση του Hermes Agent</string>
     <string name="rt_setup_stop">Διακοπή εγκατάστασης</string>
     <string name="rt_setup_needs_attention">Η εγκατάσταση χρειάζεται προσοχή</string>
     <string name="rt_setup_ready_detail">Ο ιδιωτικός χώρος εργασίας προγραμματισμού είναι έτοιμος.</string>
-    <string name="rt_setup_channel_name">Εγκατάσταση Mobile Harness</string>
+    <string name="rt_setup_channel_name">Εγκατάσταση Hermes Agent</string>
     <string name="rt_setup_channel_description">Εμφανίζει την πρόοδο λήψης και εγκατάστασης του ιδιωτικού περιβάλλοντος προγραμματισμού</string>
     <string name="rt_exec_default_project">το έργο σας</string>
-    <string name="rt_exec_default_title">Το Mobile Harness εργάζεται</string>
+    <string name="rt_exec_default_title">Το Hermes Agent εργάζεται</string>
     <string name="rt_exec_stopping">Ασφαλής διακοπή…</string>
     <string name="rt_exec_working_in">Εργασία σε %1$s</string>
     <string name="rt_exec_task_completed">Η εργασία ολοκληρώθηκε</string>
-    <string name="rt_exec_finished_in">Το Mobile Harness ολοκλήρωσε την εργασία σε %1$s.</string>
+    <string name="rt_exec_finished_in">Το Hermes Agent ολοκλήρωσε την εργασία σε %1$s.</string>
     <string name="rt_exec_task_attention">Η εργασία χρειάζεται προσοχή</string>
-    <string name="rt_exec_could_not_finish">Το Mobile Harness δεν μπόρεσε να ολοκληρώσει την εργασία.</string>
+    <string name="rt_exec_could_not_finish">Το Hermes Agent δεν μπόρεσε να ολοκληρώσει την εργασία.</string>
     <string name="rt_exec_stop_task">Διακοπή εργασίας</string>
     <string name="rt_exec_channel_running">Εργασίες προγραμματισμού σε εξέλιξη</string>
-    <string name="rt_exec_channel_running_description">Εμφανίζει την πρόοδο όσο το Mobile Harness εργάζεται στο παρασκήνιο</string>
+    <string name="rt_exec_channel_running_description">Εμφανίζει την πρόοδο όσο το Hermes Agent εργάζεται στο παρασκήνιο</string>
     <string name="rt_exec_channel_results">Αποτελέσματα εργασιών</string>
     <string name="rt_exec_channel_results_description">Σας ειδοποιεί όταν μια εργασία προγραμματισμού ολοκληρώνεται ή χρειάζεται προσοχή</string>
     <string name="rt_bridge_starting">Εκκίνηση %1$s…</string>
@@ -135,7 +135,7 @@
     <string name="rt_update_checksum_failed">Το APK που λήφθηκε απέτυχε στην επαλήθευση SHA-256</string>
     <string name="rt_update_prepare_failed">Δεν ήταν δυνατή η προετοιμασία της ενημέρωσης που λήφθηκε</string>
     <string name="rt_update_invalid_apk">Το αρχείο που λήφθηκε δεν είναι έγκυρο APK</string>
-    <string name="rt_update_package_mismatch">Το όνομα πακέτου της ενημέρωσης δεν αντιστοιχεί στο Mobile Harness</string>
+    <string name="rt_update_package_mismatch">Το όνομα πακέτου της ενημέρωσης δεν αντιστοιχεί στο Hermes Agent</string>
     <string name="rt_update_version_mismatch">Η έκδοση της ενημέρωσης δεν αντιστοιχεί στο manifest της</string>
     <string name="rt_update_signature_mismatch">Η ενημέρωση δεν έχει υπογραφεί με το κλειδί υπογραφής της εγκατεστημένης εφαρμογής</string>
     <string name="rt_api_http_public">Το απλό http:// επιτρέπεται μόνο για διευθύνσεις τοπικού δικτύου (όπως 192.168.x.x, 10.x.x.x, Tailscale ή .local). Χρησιμοποιήστε https:// για αυτόν τον διακομιστή.</string>

@@ -16,6 +16,7 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.security.MessageDigest
 import java.util.zip.ZipInputStream
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withTimeout
@@ -628,18 +629,21 @@ class RuntimeInstaller(private val context: Context) {
     }
 
     /**
-     * Phase 1 (development/fallback) Hermes install. Two routes, both ending
-     * in the same venv under /root/.pocket-hermes (HERMES_GUEST_PATH):
+     * Hermes install. All routes end in the same venv under
+     * /root/.pocket-hermes (HERMES_GUEST_PATH):
      *
-     * - If a Hermes source checkout exists in the guest at
+     * - First, the prebuilt bundle that ships inside the APK (both flavors) —
+     *   see [installHermesFromBundle]. This is the normal first-run path: a
+     *   local extraction during the regular setup sequence, with no network
+     *   access and no separate install step for the user.
+     * - On any bundle failure, the Phase 1 network routes run unchanged:
+     *   if a Hermes source checkout exists in the guest at
      *   [HERMES_SOURCE_GUEST_PATH] (recognised by its `pyproject.toml` and
      *   `hermes_cli` package), it is installed from source — see
      *   [installHermesFromSource]. This is the modification-unlocked route:
      *   the venv resolves its packages from the checkout itself, so edits
-     *   there take effect without a reinstall.
-     * - Otherwise the pinned PyPI release is installed — see
-     *   [installHermesFromPyPi]. A prebuilt runtime bundle replaces this
-     *   download route in a later phase.
+     *   there take effect without a reinstall. Otherwise the pinned PyPI
+     *   release is installed — see [installHermesFromPyPi].
      *
      * An already-installed Hermes is left untouched whatever version its
      * marker records — in particular an install that was upgraded past the
@@ -651,6 +655,15 @@ class RuntimeInstaller(private val context: Context) {
         onProgress: suspend (RuntimeInstallProgress) -> Unit,
     ) {
         if (isAgentInstalled(com.jarves.mh.model.AgentKind.HERMES)) return
+        val bundled = try {
+            installHermesFromBundle(proot, fraction, onProgress)
+            true
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Throwable) {
+            false
+        }
+        if (bundled) return
         check(!BuildConfig.OFFLINE_RUNTIME_BUNDLES) {
             str(R.string.rt_install_hermes_needs_online)
         }
@@ -659,6 +672,37 @@ class RuntimeInstaller(private val context: Context) {
             installHermesFromSource(proot, sourceCheckout, fraction, onProgress)
         } else {
             installHermesFromPyPi(proot, HERMES_VERSION, fraction, onProgress)
+        }
+    }
+
+    /**
+     * Bundle route (Phase 2): the prebuilt Hermes overlay ships inside the
+     * APK, so installation is a local extraction of the standalone CPython
+     * 3.14 tree and the pinned release's site-packages into
+     * /root/.pocket-hermes, followed by the same in-guest verification and
+     * marker discipline as the PyPI route (the marker records the pinned
+     * version only after the installed binary verifies). Throws on any
+     * problem — a missing embedded asset (CI builds made without the bundle
+     * file), a checksum mismatch, or a binary that does not run — and the
+     * caller falls back to the network routes.
+     */
+    private suspend fun installHermesFromBundle(
+        proot: File,
+        fraction: Float,
+        onProgress: suspend (RuntimeInstallProgress) -> Unit,
+    ) {
+        installRuntimeOverlay(
+            bundle = HERMES_BUNDLE,
+            message = str(R.string.rt_install_installing_version, "Hermes Agent", HERMES_VERSION),
+            from = fraction,
+            to = 0.995f,
+            onProgress = onProgress,
+            forceEmbedded = true,
+        )
+        verifyGuest(proot, "$HERMES_GUEST_PATH --version", str(R.string.rt_install_verify_failed, "Hermes Agent"))
+        hermesMarker.writeText(HERMES_VERSION)
+        require(isAgentInstalled(com.jarves.mh.model.AgentKind.HERMES)) {
+            "Hermes Agent installation is incomplete"
         }
     }
 
@@ -2088,6 +2132,12 @@ printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decis
             fileName = "pocketdev-agy-arm64-2026.09.1.tar.zst",
             sha256 = "a659ab9188956fc4721ca86fb21b5118e0e489f47a5e02ae6b4f2fb423659d78",
             compressedBytes = 41_870_025L,
+        )
+        private val HERMES_BUNDLE = RuntimeBundle(
+            label = "Hermes Agent",
+            fileName = "pocketdev-hermes-arm64-0.19.0.tar.zst",
+            sha256 = "081addd1a8f4560e4738160dda135521f6631a48247211e2ec6aadda52d1752f",
+            compressedBytes = 51_983_819L,
         )
         private const val MAX_TERMINAL_LINE = 500
         private const val MAX_COLLECTED_OUTPUT = 24_000

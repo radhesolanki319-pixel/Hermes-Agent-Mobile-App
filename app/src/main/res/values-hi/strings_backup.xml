@@ -40,11 +40,11 @@
     <string name="backup_error_open_output">बैकअप फ़ाइल नहीं लिखी जा सकी</string>
     <string name="backup_error_open_input">बैकअप फ़ाइल नहीं खोली जा सकी</string>
     <string name="backup_error_wrong_password">गलत पासवर्ड</string>
-    <string name="backup_error_newer">यह बैकअप Mobile Harness के नए संस्करण का है। पहले ऐप अपडेट करें।</string>
+    <string name="backup_error_newer">यह बैकअप Hermes Agent के नए संस्करण का है। पहले ऐप अपडेट करें।</string>
     <string name="backup_error_space">पर्याप्त खाली स्टोरेज नहीं है। लगभग %1$s चाहिए।</string>
-    <string name="backup_error_invalid">यह फ़ाइल Mobile Harness का बैकअप नहीं है, या खराब हो चुकी है।</string>
-    <string name="backup_notification_backing_up">Mobile Harness का बैकअप हो रहा है</string>
-    <string name="backup_notification_restoring">Mobile Harness रीस्टोर हो रहा है</string>
+    <string name="backup_error_invalid">यह फ़ाइल Hermes Agent का बैकअप नहीं है, या खराब हो चुकी है।</string>
+    <string name="backup_notification_backing_up">Hermes Agent का बैकअप हो रहा है</string>
+    <string name="backup_notification_restoring">Hermes Agent रीस्टोर हो रहा है</string>
     <string name="backup_notification_backup_done">बैकअप पूरा हुआ</string>
     <string name="backup_notification_restore_done">रीस्टोर पूरा हुआ</string>
     <string name="backup_notification_backup_failed">बैकअप विफल रहा</string>

@@ -48,7 +48,7 @@
     <string name="ws_setup_expand_details">Ανάπτυξη λεπτομερειών ρύθμισης</string>
     <string name="ws_jump_to_latest">Μετάβαση στο πιο πρόσφατο</string>
     <string name="ws_error_offline">Είστε εκτός σύνδεσης</string>
-    <string name="ws_error_start_failed">Η εκκίνηση του Mobile Harness δεν ολοκληρώθηκε</string>
+    <string name="ws_error_start_failed">Η εκκίνηση του Hermes Agent δεν ολοκληρώθηκε</string>
     <string name="ws_error_try_again_msg">Δοκιμάστε ξανά.</string>
     <string name="ws_setup_log_copied">Το αρχείο καταγραφής ρύθμισης αντιγράφηκε</string>
     <string name="ws_copy_setup_logs">Αντιγραφή αρχείων καταγραφής ρύθμισης</string>
@@ -70,7 +70,7 @@
     <string name="ws_github_signin">Σύνδεση με GitHub</string>
     <string name="ws_github_starting">Έναρξη σύνδεσης GitHub…</string>
     <string name="ws_github_enter_code">Εισαγάγετε αυτόν τον κωδικό μίας χρήσης στη σελίδα GitHub που άνοιξε στο πρόγραμμα περιήγησης.</string>
-    <string name="ws_github_tap_code">Πατήστε τον κωδικό για να τον αντιγράψετε. Το Mobile Harness θα συνδεθεί αυτόματα μετά την έγκριση.</string>
+    <string name="ws_github_tap_code">Πατήστε τον κωδικό για να τον αντιγράψετε. Το Hermes Agent θα συνδεθεί αυτόματα μετά την έγκριση.</string>
     <string name="ws_github_new_code">Δημιουργία νέου κωδικού</string>
     <string name="ws_github_select_repo">Επιλέξτε αποθετήριο</string>
     <string name="ws_github_refresh_repos">Ανανέωση αποθετηρίων</string>
@@ -79,9 +79,9 @@
     <string name="ws_repo_public">Δημόσιο</string>
     <string name="ws_disconnect">Αποσύνδεση</string>
     <string name="ws_update_to">Ενημέρωση σε %1$s</string>
-    <string name="ws_update_default_notes">Λάβετε τις τελευταίες βελτιώσεις και διορθώσεις για το Mobile Harness.</string>
+    <string name="ws_update_default_notes">Λάβετε τις τελευταίες βελτιώσεις και διορθώσεις για το Hermes Agent.</string>
     <string name="ws_update_download_size">Μέγεθος λήψης: %1$s</string>
-    <string name="ws_update_allow_unknown_apps">Επιτρέψτε την «Εγκατάσταση άγνωστων εφαρμογών» για το Mobile Harness. Χωρίς αυτή την άδεια, το Android δεν θα εγκαταστήσει την ενημέρωση.</string>
+    <string name="ws_update_allow_unknown_apps">Επιτρέψτε την «Εγκατάσταση άγνωστων εφαρμογών» για το Hermes Agent. Χωρίς αυτή την άδεια, το Android δεν θα εγκαταστήσει την ενημέρωση.</string>
     <string name="ws_update_downloading_progress">Λήψη %1$s / %2$s · %3$d%%</string>
     <string name="ws_update_downloading">Λήψη %1$s</string>
     <string name="ws_update_verified_installing">Η λήψη επαληθεύτηκε. Άνοιγμα του προγράμματος εγκατάστασης Android…</string>
@@ -148,7 +148,7 @@
     <string name="ws_project_files">Αρχεία έργου</string>
     <string name="ws_review_ai_changes">Ελέγξτε όλες τις αλλαγές του AI.</string>
     <string name="ws_no_changes_yet">Δεν υπάρχουν αλλαγές ακόμη</string>
-    <string name="ws_no_changes_desc">Ζητήστε από το Mobile Harness να ενημερώσει το έργο σας.</string>
+    <string name="ws_no_changes_desc">Ζητήστε από το Hermes Agent να ενημερώσει το έργο σας.</string>
     <string name="ws_hide_diff">Απόκρυψη διαφορών ανά γραμμή</string>
     <string name="ws_tap_review_diff">Πατήστε για έλεγχο διαφορών</string>
     <string name="ws_undo_file">Αναίρεση αρχείου</string>

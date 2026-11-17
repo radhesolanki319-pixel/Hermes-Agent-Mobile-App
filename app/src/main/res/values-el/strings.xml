@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">Mobile Harness</string>
+    <string name="app_name">Hermes Agent</string>
 
     <!-- Navigation / Bottom Tabs -->
     <string name="tab_projects">Έργα</string>
@@ -107,7 +107,7 @@
 
     <!-- Background & Runtime Onboarding -->
     <string name="bg_setup_title">Προετοιμασία για αξιόπιστη εγκατάσταση</string>
-    <string name="bg_setup_subtitle">Ο χρόνος εγκατάστασης εξαρτάται από τα toolchains που θα επιλέξετε στη συνέχεια. Μπορείτε να αφήσετε το Mobile Harness στο παρασκήνιο όσο εργάζεται.</string>
+    <string name="bg_setup_subtitle">Ο χρόνος εγκατάστασης εξαρτάται από τα toolchains που θα επιλέξετε στη συνέχεια. Μπορείτε να αφήσετε το Hermes Agent στο παρασκήνιο όσο εργάζεται.</string>
     <string name="bg_step_notifications">Ειδοποιήσεις</string>
     <string name="bg_step_background">Παρασκήνιο</string>
     <string name="bg_step_task_protection">Προστασία εργασιών</string>
@@ -122,7 +122,7 @@
     <string name="bg_notifications_settings">Άνοιγμα ρυθμίσεων ειδοποιήσεων</string>
     <string name="bg_notifications_skip">Συνέχεια χωρίς ειδοποιήσεις</string>
     <string name="bg_reliability_title">Αξιοπιστία στο παρασκήνιο</string>
-    <string name="bg_reliability_desc">Επιτρέψτε στο Mobile Harness να συνεχίζει μια εργασία όταν κλειδώνετε το τηλέφωνο ή μεταβαίνετε σε άλλη εφαρμογή.</string>
+    <string name="bg_reliability_desc">Επιτρέψτε στο Hermes Agent να συνεχίζει μια εργασία όταν κλειδώνετε το τηλέφωνο ή μεταβαίνετε σε άλλη εφαρμογή.</string>
     <string name="bg_reliability_privacy">Έχετε τον έλεγχο και μπορείτε να διακόψετε κάθε εργασία από την ειδοποίησή της.</string>
     <string name="bg_reliability_settings">Άνοιγμα ρυθμίσεων μπαταρίας</string>
     <string name="bg_reliability_skip">Συνέχεια χωρίς εξαίρεση μπαταρίας</string>
@@ -134,7 +134,7 @@
 
     <string name="runtime_setup_device_check_badge">ΕΛΕΓΧΟΣ ΣΥΣΚΕΥΗΣ</string>
     <string name="runtime_setup_device_ready_title">Έτοιμο για ανάπτυξη σε αυτό το τηλέφωνο</string>
-    <string name="runtime_setup_device_ready_desc">Το τηλέφωνό σας πληροί τις απαιτήσεις. Επιλέξτε στη συνέχεια τα εργαλεία προγραμματισμού και το Mobile Harness θα αναλάβει την εγκατάσταση.</string>
+    <string name="runtime_setup_device_ready_desc">Το τηλέφωνό σας πληροί τις απαιτήσεις. Επιλέξτε στη συνέχεια τα εργαλεία προγραμματισμού και το Hermes Agent θα αναλάβει την εγκατάσταση.</string>
     <string name="runtime_setup_sys_compat">Συμβατότητα συστήματος</string>
     <string name="runtime_setup_device_ready">Η συσκευή σας είναι έτοιμη</string>
     <string name="runtime_setup_device_unsupported">Αυτή η συσκευή δεν υποστηρίζεται</string>
@@ -157,17 +157,17 @@
     <string name="runtime_setup_coding_agent_badge">CODING AGENT</string>
     <string name="runtime_setup_coding_agent_note">Γίνεται λήψη μόνο του επιλεγμένου προαιρετικού agent. Μπορείτε να εγκαταστήσετε ή να αλλάξετε agents αργότερα από τις Ρυθμίσεις.</string>
     <string name="runtime_setup_optional_toolchains_badge">ΠΡΟΑΙΡΕΤΙΚΑ TOOLCHAINS</string>
-    <string name="runtime_setup_install_btn">Εγκατάσταση Mobile Harness</string>
+    <string name="runtime_setup_install_btn">Εγκατάσταση Hermes Agent</string>
 
     <!-- Setup and Runtime Installation Screens -->
-    <string name="setup_mobile_harness">Ρύθμιση Mobile Harness</string>
+    <string name="setup_mobile_harness">Ρύθμιση Hermes Agent</string>
     <string name="setup_local_badge">Τοπική εγκατάσταση</string>
     <string name="setup_build_workspace">Δημιουργήστε τον χώρο εργασίας σας</string>
     <string name="setup_installation_progress">Πρόοδος εγκατάστασης</string>
     <string name="setup_estimated_time">Εκτίμηση: %1$s</string>
     <string name="setup_time_minutes">%1$d–%2$d λεπτά</string>
     <string name="setup_live_terminal">Τερματικό εγκατάστασης σε πραγματικό χρόνο</string>
-    <string name="setup_background_note">Μπορείτε να αφήσετε το Mobile Harness στο παρασκήνιο και να παρακολουθείτε την εγκατάσταση από την ειδοποίηση.</string>
+    <string name="setup_background_note">Μπορείτε να αφήσετε το Hermes Agent στο παρασκήνιο και να παρακολουθείτε την εγκατάσταση από την ειδοποίηση.</string>
     <string name="startup_msg_setting_up">Ρύθμιση του χώρου εργασίας σας</string>
     <string name="startup_msg_preparing_tools">Προετοιμασία των εργαλείων προγραμματισμού</string>
     <string name="startup_msg_almost_ready">Σχεδόν έτοιμο</string>
@@ -186,14 +186,14 @@
     <string name="runtime_msg_preparing_bridge">Προετοιμασία της γέφυρας περιβάλλοντος Android</string>
     <string name="runtime_msg_runtime_ready">Το ιδιωτικό περιβάλλον είναι έτοιμο</string>
     <string name="runtime_msg_setup_complete">Η εγκατάσταση ολοκληρώθηκε</string>
-    <string name="runtime_msg_resuming_setup">Συνέχιση εγκατάστασης Mobile Harness</string>
+    <string name="runtime_msg_resuming_setup">Συνέχιση εγκατάστασης Hermes Agent</string>
     <string name="runtime_msg_downloading_generic">Λήψη %1$s</string>
     <string name="runtime_msg_installing_generic">Εγκατάσταση %1$s</string>
     <!-- Provider onboarding -->
     <string name="theme_toggle">Εναλλαγή θέματος</string>
     <string name="provider_setup_settings_title">Πάροχος AI &amp; ρυθμίσεις</string>
     <string name="provider_device_title">Το τηλέφωνό σας είναι ο χώρος εργασίας</string>
-    <string name="provider_device_desc">Το Mobile Harness ελέγχει τη συμβατότητα πριν από τη λήψη του ιδιωτικού περιβάλλοντος Linux.</string>
+    <string name="provider_device_desc">Το Hermes Agent ελέγχει τη συμβατότητα πριν από τη λήψη του ιδιωτικού περιβάλλοντος Linux.</string>
     <string name="provider_memory">Μνήμη</string>
     <string name="provider_memory_mode">%1$s GB διαθέσιμα · %2$s</string>
     <string name="provider_full_mode">Πλήρης λειτουργία</string>
@@ -204,7 +204,7 @@
     <string name="provider_step_of">ΒΗΜΑ %1$d ΑΠΟ %2$d</string>
     <string name="provider_secure_setup">Ασφαλής ρύθμιση</string>
     <string name="provider_connect_ai">Συνδέστε το AI σας</string>
-    <string name="provider_connect_ai_desc">Επιλέξτε πώς θα αποκτά πρόσβαση το Mobile Harness στο μοντέλο προγραμματισμού σας.</string>
+    <string name="provider_connect_ai_desc">Επιλέξτε πώς θα αποκτά πρόσβαση το Hermes Agent στο μοντέλο προγραμματισμού σας.</string>
     <string name="provider_keys_secure">Τα κλειδιά API κρυπτογραφούνται στον ασφαλή χώρο αποθήκευσης του Android.</string>
     <string name="provider_continue">Συνέχεια</string>
     <string name="provider_use_another_agent">Χρήση άλλου coding agent</string>
@@ -233,7 +233,7 @@
     <string name="provider_no_matching_models">Δεν βρέθηκαν μοντέλα</string>
     <string name="provider_free"> ΔΩΡΕΑΝ</string>
     <string name="provider_encrypted_locally">Κρυπτογραφημένο τοπικά</string>
-    <string name="provider_endpoint_translate">Το Mobile Harness θα μετατρέπει τα αιτήματα του Claude Code για αυτόν τον πάροχο.</string>
+    <string name="provider_endpoint_translate">Το Hermes Agent θα μετατρέπει τα αιτήματα του Claude Code για αυτόν τον πάροχο.</string>
     <string name="provider_endpoint_claude">Το Claude Code θα συνδεθεί μέσω αυτού του endpoint API.</string>
     <string name="provider_fixed_by">Ορίζεται από %1$s</string>
     <string name="provider_saved_key_placeholder">Αποθηκεύτηκε με ασφάλεια — αφήστε κενό για διατήρηση</string>
@@ -311,7 +311,7 @@
     <string name="workspace_no_files">Δεν υπάρχουν αρχεία ακόμα</string>
     <string name="workspace_no_files_description">Ζητήστε από τον coding agent να δημιουργήσει κάτι σε αυτό το έργο.</string>
     <string name="workspace_project_terminal">Τερματικό έργου</string>
-    <string name="workspace_terminal_ready">Το Τερματικό του Mobile Harness είναι έτοιμο.\nΠληκτρολογήστε μια εντολή bash παρακάτω ή πατήστε μια γρήγορη εντολή επάνω.</string>
+    <string name="workspace_terminal_ready">Το Τερματικό του Hermes Agent είναι έτοιμο.\nΠληκτρολογήστε μια εντολή bash παρακάτω ή πατήστε μια γρήγορη εντολή επάνω.</string>
     <string name="workspace_preview_url">URL προεπισκόπησης</string>
     <string name="workspace_preview_not_running">Η προεπισκόπηση δεν εκτελείται</string>
     <string name="workspace_preview_not_running_description">Εισαγάγετε ένα URL localhost παραπάνω ή ξεκινήστε έναν τοπικό web server στο Τερματικό του έργου.</string>

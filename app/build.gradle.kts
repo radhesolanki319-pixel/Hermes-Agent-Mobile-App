@@ -36,10 +36,15 @@ val generatedRuntimeAssets = layout.buildDirectory.dir("generated/runtime-assets
 // but are gitignored — this repo copy only has manifest.json. The app downloads
 // missing runtimes at first run (RUNTIME_RELEASE_BASE_URL), so skip absent bundles
 // instead of failing the build. On a machine with the bundles present nothing changes.
+// The Hermes bundle follows the same rule: when present it is embedded in BOTH
+// flavors (shared assets) so Hermes is pre-installed on first run; when absent
+// (CI), the build stays green and Hermes falls back to its network install.
 val agyBundleFile = runtimeBundleDir.file("pocketdev-agy-arm64-2026.09.1.tar.zst")
+val hermesBundleFile = runtimeBundleDir.file("pocketdev-hermes-arm64-0.19.0.tar.zst")
+val sharedBundleFiles = listOf(agyBundleFile, hermesBundleFile)
 val prepareBundledAgentAssets = tasks.register<Sync>("prepareBundledAgentAssets") {
-    onlyIf { agyBundleFile.asFile.isFile }
-    from(agyBundleFile)
+    onlyIf { sharedBundleFiles.any { it.asFile.isFile } }
+    from(sharedBundleFiles.filter { it.asFile.isFile })
     into(generatedRuntimeAssets.map { it.dir("shared/runtime") })
 }
 

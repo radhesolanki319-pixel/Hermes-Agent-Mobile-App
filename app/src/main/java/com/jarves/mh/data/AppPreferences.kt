@@ -125,6 +125,11 @@ class AppPreferences(private val context: Context) {
         get() = preferences.getLong("last_app_update_check_millis", 0L)
         set(value) { preferences.edit().putLong("last_app_update_check_millis", value).apply() }
 
+    /** Last automatic Hermes agent update check; Hermes updates itself by default. */
+    var lastHermesUpdateCheckMillis: Long
+        get() = preferences.getLong("last_hermes_update_check_millis", 0L)
+        set(value) { preferences.edit().putLong("last_hermes_update_check_millis", value).apply() }
+
     /**
      * Debug-only manifest URL override. Empty in release builds; populated via
      * Settings → Update channel in debug builds so a local server (exposed via
@@ -521,6 +526,7 @@ class AppPreferences(private val context: Context) {
             "runtime_setup_complete",
             "background_setup_complete",
             "last_app_update_check_millis",
+            "last_hermes_update_check_millis",
             "debug_update_manifest_url",
             "test_provider_defaults_version",
             "whats_new_seen_code",

@@ -40,11 +40,11 @@
     <string name="backup_error_open_output">تعذرت كتابة ملف النسخة الاحتياطية</string>
     <string name="backup_error_open_input">تعذر فتح ملف النسخة الاحتياطية</string>
     <string name="backup_error_wrong_password">كلمة المرور غير صحيحة</string>
-    <string name="backup_error_newer">هذه النسخة الاحتياطية من إصدار أحدث من Mobile Harness. حدّث التطبيق أولًا.</string>
+    <string name="backup_error_newer">هذه النسخة الاحتياطية من إصدار أحدث من Hermes Agent. حدّث التطبيق أولًا.</string>
     <string name="backup_error_space">لا توجد مساحة تخزين كافية. يلزم نحو %1$s.</string>
-    <string name="backup_error_invalid">هذا الملف ليس نسخة احتياطية من Mobile Harness أو أنه تالف.</string>
-    <string name="backup_notification_backing_up">جارٍ النسخ الاحتياطي لـ Mobile Harness</string>
-    <string name="backup_notification_restoring">جارٍ استعادة Mobile Harness</string>
+    <string name="backup_error_invalid">هذا الملف ليس نسخة احتياطية من Hermes Agent أو أنه تالف.</string>
+    <string name="backup_notification_backing_up">جارٍ النسخ الاحتياطي لـ Hermes Agent</string>
+    <string name="backup_notification_restoring">جارٍ استعادة Hermes Agent</string>
     <string name="backup_notification_backup_done">اكتمل النسخ الاحتياطي</string>
     <string name="backup_notification_restore_done">اكتملت الاستعادة</string>
     <string name="backup_notification_backup_failed">فشل النسخ الاحتياطي</string>

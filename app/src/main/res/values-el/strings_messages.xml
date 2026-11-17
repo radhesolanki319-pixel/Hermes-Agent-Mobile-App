@@ -31,7 +31,7 @@
     <string name="vm_installer_start_failed">Δεν ήταν δυνατή η εκκίνηση του προγράμματος εγκατάστασης Android</string>
     <string name="vm_update_download_failed">Η λήψη της ενημέρωσης απέτυχε</string>
     <string name="vm_setup_offline">Συνδεθείτε σε Wi-Fi ή δεδομένα κινητής και δοκιμάστε ξανά. Απαιτείται σύνδεση στο Internet για την ολοκλήρωση της αρχικής ρύθμισης.</string>
-    <string name="vm_setup_generic_error">Παρουσιάστηκε πρόβλημα κατά την προετοιμασία του Mobile Harness. Δοκιμάστε ξανά.</string>
+    <string name="vm_setup_generic_error">Παρουσιάστηκε πρόβλημα κατά την προετοιμασία του Hermes Agent. Δοκιμάστε ξανά.</string>
     <string name="vm_antigravity_sign_in_first">Συνδεθείτε πρώτα στο Antigravity</string>
     <string name="vm_stop_agent_before_switching">Σταματήστε τον τρέχοντα agent πριν από την εναλλαγή.</string>
     <string name="vm_preparing_named">Προετοιμασία %1$s…</string>

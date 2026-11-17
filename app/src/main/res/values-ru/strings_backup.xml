@@ -40,11 +40,11 @@
     <string name="backup_error_open_output">Не удалось записать файл копии</string>
     <string name="backup_error_open_input">Не удалось открыть файл копии</string>
     <string name="backup_error_wrong_password">Неверный пароль</string>
-    <string name="backup_error_newer">Эта копия создана в более новой версии Mobile Harness. Сначала обновите приложение.</string>
+    <string name="backup_error_newer">Эта копия создана в более новой версии Hermes Agent. Сначала обновите приложение.</string>
     <string name="backup_error_space">Недостаточно свободного места. Требуется около %1$s.</string>
-    <string name="backup_error_invalid">Этот файл не является резервной копией Mobile Harness или повреждён.</string>
-    <string name="backup_notification_backing_up">Создание копии Mobile Harness</string>
-    <string name="backup_notification_restoring">Восстановление Mobile Harness</string>
+    <string name="backup_error_invalid">Этот файл не является резервной копией Hermes Agent или повреждён.</string>
+    <string name="backup_notification_backing_up">Создание копии Hermes Agent</string>
+    <string name="backup_notification_restoring">Восстановление Hermes Agent</string>
     <string name="backup_notification_backup_done">Копия создана</string>
     <string name="backup_notification_restore_done">Восстановление завершено</string>
     <string name="backup_notification_backup_failed">Не удалось создать копию</string>

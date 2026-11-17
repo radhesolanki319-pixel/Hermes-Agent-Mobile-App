@@ -40,11 +40,11 @@
     <string name="backup_error_open_output">无法写入备份文件</string>
     <string name="backup_error_open_input">无法打开备份文件</string>
     <string name="backup_error_wrong_password">密码错误</string>
-    <string name="backup_error_newer">此备份来自更新版本的 Mobile Harness。请先更新应用。</string>
+    <string name="backup_error_newer">此备份来自更新版本的 Hermes Agent。请先更新应用。</string>
     <string name="backup_error_space">可用存储空间不足，大约需要 %1$s。</string>
-    <string name="backup_error_invalid">此文件不是 Mobile Harness 备份，或已损坏。</string>
-    <string name="backup_notification_backing_up">正在备份 Mobile Harness</string>
-    <string name="backup_notification_restoring">正在恢复 Mobile Harness</string>
+    <string name="backup_error_invalid">此文件不是 Hermes Agent 备份，或已损坏。</string>
+    <string name="backup_notification_backing_up">正在备份 Hermes Agent</string>
+    <string name="backup_notification_restoring">正在恢复 Hermes Agent</string>
     <string name="backup_notification_backup_done">备份完成</string>
     <string name="backup_notification_restore_done">恢复完成</string>
     <string name="backup_notification_backup_failed">备份失败</string>

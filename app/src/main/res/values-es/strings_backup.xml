@@ -40,11 +40,11 @@
     <string name="backup_error_open_output">No se pudo escribir el archivo de copia</string>
     <string name="backup_error_open_input">No se pudo abrir el archivo de copia</string>
     <string name="backup_error_wrong_password">Contraseña incorrecta</string>
-    <string name="backup_error_newer">Esta copia es de una versión más reciente de Mobile Harness. Actualiza primero la aplicación.</string>
+    <string name="backup_error_newer">Esta copia es de una versión más reciente de Hermes Agent. Actualiza primero la aplicación.</string>
     <string name="backup_error_space">No hay suficiente almacenamiento libre. Se necesitan unos %1$s.</string>
-    <string name="backup_error_invalid">Este archivo no es una copia de seguridad de Mobile Harness o está dañado.</string>
-    <string name="backup_notification_backing_up">Haciendo copia de Mobile Harness</string>
-    <string name="backup_notification_restoring">Restaurando Mobile Harness</string>
+    <string name="backup_error_invalid">Este archivo no es una copia de seguridad de Hermes Agent o está dañado.</string>
+    <string name="backup_notification_backing_up">Haciendo copia de Hermes Agent</string>
+    <string name="backup_notification_restoring">Restaurando Hermes Agent</string>
     <string name="backup_notification_backup_done">Copia completada</string>
     <string name="backup_notification_restore_done">Restauración completada</string>
     <string name="backup_notification_backup_failed">Error en la copia</string>

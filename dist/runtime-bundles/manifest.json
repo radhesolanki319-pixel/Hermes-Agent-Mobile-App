@@ -76,6 +76,19 @@
         "Sessions",
         "Chats and projects"
       ]
+    },
+    "hermes": {
+      "version": "0.19.0",
+      "file": "pocketdev-hermes-arm64-0.19.0.tar.zst",
+      "sha256": "081addd1a8f4560e4738160dda135521f6631a48247211e2ec6aadda52d1752f",
+      "compressedBytes": 51983819,
+      "uncompressedBytes": 223651840,
+      "includes": [
+        "Hermes Agent 0.19.0 (core + acp extras) ARM64",
+        "Standalone CPython 3.14.10 ARM64 (python-build-standalone)",
+        "Prebuilt venv at /root/.pocket-hermes"
+      ],
+      "excludes": ["API keys", "Settings", "Conversations", "Projects", "Device data"]
     }
   }
 }

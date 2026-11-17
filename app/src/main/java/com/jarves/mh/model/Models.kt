@@ -59,7 +59,7 @@ enum class AgentKind(
         "hermes",
         "Hermes Agent",
         "Nous Research's self-improving agent · own memory & skills",
-        "~70 MB",
+        "Pre-installed",
     ),
     CLAUDE_CODE(
         "claude-code",
