@@ -38,7 +38,7 @@ import org.json.JSONObject
  */
 
 /** Where Hermes runs for a chat turn: on this phone (embedded) or on a remote gateway host. */
-internal data class HermesHostConfig(
+data class HermesHostConfig(
     val remote: Boolean,
     val baseUrl: String,
     val apiKey: String,

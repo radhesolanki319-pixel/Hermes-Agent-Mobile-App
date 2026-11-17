@@ -459,7 +459,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             HermesHostConfig(
                 remote = preferences.hermesHostRemote,
                 baseUrl = preferences.hermesHostUrl,
-                apiKey = <redacted> ?: "",
+                apiKey = getSavedHermesHostKey(),
             )
         },
         remoteConversationId = { projectId ->
