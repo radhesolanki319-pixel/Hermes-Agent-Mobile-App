@@ -21,6 +21,10 @@ import android.webkit.WebViewClient
 import android.webkit.WebChromeClient
 import android.widget.Toast
 import com.jarves.mh.BuildConfig
+import com.jarves.mh.genui.GenUiEvent
+import com.jarves.mh.genui.GenUiMessageState
+import com.jarves.mh.genui.GenerativeUiView
+import com.jarves.mh.genui.resolveGenUiParts
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -410,6 +414,7 @@ fun PocketDevApp(viewModel: MainViewModel = viewModel()) {
             onSteerFollowUp = viewModel::steerQueuedFollowUp,
             onRemoveFollowUp = viewModel::removeQueuedFollowUp,
             onApproval = viewModel::answerApproval,
+            onGenUiAction = viewModel::handleGenUiAction,
             onRefreshFiles = viewModel::refreshProjectFiles,
             onLoadProjectDirectory = viewModel::loadProjectDirectory,
             onCreateWorkspaceEntry = viewModel::createWorkspaceEntry,
@@ -4405,6 +4410,7 @@ private fun WorkspaceScreen(
     onSteerFollowUp: (String) -> Unit,
     onRemoveFollowUp: (String) -> Unit,
     onApproval: (Boolean) -> Unit,
+    onGenUiAction: (String, GenUiEvent) -> Unit,
     onRefreshFiles: () -> Unit,
     onLoadProjectDirectory: (String) -> Unit,
     onCreateWorkspaceEntry: (String, String, Boolean) -> Unit,
@@ -4800,6 +4806,8 @@ private fun WorkspaceScreen(
                             Toast.makeText(context, context.getString(R.string.chat_camera_unavailable), Toast.LENGTH_LONG).show()
                         }
                     },
+                    genUiStates = state.genUiStates,
+                    onGenUiAction = onGenUiAction,
                     onRemoveAttachment = onRemoveAttachment,
                     onOpenAttachment = onOpenAttachment,
                     onRunInTerminal = { command ->
@@ -6308,6 +6316,8 @@ private fun ChatTab(
     readOnly: Boolean = false,
     readOnlyBlocked: Boolean = false,
     onContinueHere: () -> Unit = {},
+    genUiStates: Map<String, GenUiMessageState> = emptyMap(),
+    onGenUiAction: (String, GenUiEvent) -> Unit = { _, _ -> },
 ) {
     val view = LocalView.current
     // Keep the screen on while the selected agent is working in this chat. Released automatically
@@ -6336,7 +6346,14 @@ private fun ChatTab(
                     if (message.workItems.isNotEmpty()) {
                         WorkBlockCard(message)
                     } else {
-                        MessageBubble(message, onRunInTerminal, onOpenAttachment)
+                        MessageBubble(
+                            message = message,
+                            onRunInTerminal = onRunInTerminal,
+                            onOpenAttachment = onOpenAttachment,
+                            genUiState = genUiStates[message.id] ?: message.genUiState ?: GenUiMessageState(),
+                            genUiEnabled = !readOnly,
+                            onGenUiAction = onGenUiAction,
+                        )
                     }
                 }
                 if (liveProcess.isNotEmpty() || thinkingActive) {
@@ -7022,11 +7039,27 @@ private fun formatDuration(totalSeconds: Long): String = when {
 }
 
 @Composable
-private fun MessageBubble(message: ChatMessage, onRunInTerminal: (String) -> Unit, onOpenAttachment: (ChatAttachment) -> Unit) {
+private fun MessageBubble(
+    message: ChatMessage,
+    onRunInTerminal: (String) -> Unit,
+    onOpenAttachment: (ChatAttachment) -> Unit,
+    genUiState: GenUiMessageState = GenUiMessageState(),
+    genUiEnabled: Boolean = true,
+    onGenUiAction: (String, GenUiEvent) -> Unit = { _, _ -> },
+) {
     val displayedText = if (!message.fromUser && message.text == "Hi! Tell me what you want to build or change.") {
         stringResource(R.string.chat_welcome)
     } else {
         message.text
+    }
+    // Generative UI: split any payload out of the prose. While streaming this only ever
+    // sees partial text — an unfinished payload is shown as a placeholder, never rendered.
+    val genUiParts = remember(message.id, message.text, message.genUiPayload) {
+        if (message.fromUser || message.workItems.isNotEmpty()) {
+            null
+        } else {
+            resolveGenUiParts(message.text, message.genUiPayload)
+        }
     }
     Row(Modifier.fillMaxWidth(), horizontalArrangement = if (message.fromUser) Arrangement.End else Arrangement.Start) {
         Surface(
@@ -7044,11 +7077,44 @@ private fun MessageBubble(message: ChatMessage, onRunInTerminal: (String) -> Uni
                             color = MaterialTheme.colorScheme.onPrimaryContainer,
                         )
                     } else {
-                        MarkdownText(
-                            markdown = displayedText,
-                            modifier = Modifier.padding(start = 14.dp, end = 14.dp, bottom = 8.dp),
-                            color = MaterialTheme.colorScheme.onSurface,
-                            onRunCode = onRunInTerminal,
+                        val parts = genUiParts
+                        if (parts == null || parts.payload == null) {
+                            MarkdownText(
+                                markdown = displayedText,
+                                modifier = Modifier.padding(start = 14.dp, end = 14.dp, bottom = 8.dp),
+                                color = MaterialTheme.colorScheme.onSurface,
+                                onRunCode = onRunInTerminal,
+                            )
+                        } else if (parts.prose.isNotBlank()) {
+                            MarkdownText(
+                                markdown = parts.prose,
+                                modifier = Modifier.padding(start = 14.dp, end = 14.dp, bottom = 8.dp),
+                                color = MaterialTheme.colorScheme.onSurface,
+                                onRunCode = onRunInTerminal,
+                            )
+                        }
+                    }
+                }
+                val resolvedParts = genUiParts
+                if (!message.fromUser && resolvedParts != null && resolvedParts.payload != null) {
+                    GenerativeUiView(
+                        payload = resolvedParts.payload,
+                        state = genUiState,
+                        enabled = genUiEnabled,
+                        onEvent = { event -> onGenUiAction(message.id, event) },
+                        modifier = Modifier.padding(start = 14.dp, end = 14.dp, bottom = 8.dp),
+                    )
+                } else if (!message.fromUser && resolvedParts?.payloadIncomplete == true) {
+                    Row(
+                        Modifier.padding(start = 14.dp, end = 14.dp, bottom = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            stringResource(R.string.genui_preparing),
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                 }

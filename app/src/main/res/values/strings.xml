@@ -383,4 +383,12 @@
     <string name="diagnostics_inactive_stopped">Inactive processes stopped</string>
     <string name="diagnostics_cache_busy">Wait for active work to finish before clearing output</string>
     <string name="diagnostics_cache_cleared">Disposable runtime output cleared</string>
+    <string name="genui_preparing">Preparing interactive UI…</string>
+    <string name="genui_ok">OK</string>
+    <string name="genui_copy">Copy</string>
+    <string name="genui_approval_title">Approval needed</string>
+    <string name="genui_approve">Approve</string>
+    <string name="genui_approved">Approved</string>
+    <string name="genui_rejected">Rejected</string>
+    <string name="genui_response_sent">Response sent</string>
 </resources>

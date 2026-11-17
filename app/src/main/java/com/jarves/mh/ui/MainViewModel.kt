@@ -27,6 +27,15 @@ import com.jarves.mh.R
 import com.jarves.mh.data.ApiKeyVault
 import com.jarves.mh.data.ApiKeyInfo
 import com.jarves.mh.data.AppPreferences
+import com.jarves.mh.genui.GenUiActionBridge
+import com.jarves.mh.genui.GenUiActionDef
+import com.jarves.mh.genui.GenUiActionTypes
+import com.jarves.mh.genui.GenUiEvent
+import com.jarves.mh.genui.GenUiMessageState
+import com.jarves.mh.genui.GenUiPayload
+import com.jarves.mh.genui.GenUiProtocol
+import com.jarves.mh.genui.parseGenUiMessage
+import com.jarves.mh.genui.resolveGenUiParts
 import com.jarves.mh.model.ActivityItem
 import com.jarves.mh.model.AgentKind
 import com.jarves.mh.model.ChangeItem
@@ -326,6 +335,8 @@ data class AppUiState(
     ),
     val pendingAttachments: List<ChatAttachment> = emptyList(),
     val pendingApproval: ToolRequest? = null,
+    /** Generative-UI state per message, keyed by ChatMessage.id. */
+    val genUiStates: Map<String, GenUiMessageState> = emptyMap(),
     val changes: List<ChangeItem> = emptyList(),
     val activity: List<ActivityItem> = emptyList(),
     val liveProcess: List<ActivityItem> = emptyList(),
@@ -3025,6 +3036,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 projectChats = chats,
                 activeChatId = activeChat.id,
                 messages = msgs,
+                genUiStates = genUiStatesFrom(msgs),
                 liveProcess = emptyList(),
                 liveThinking = false,
                 taskStartedAtMillis = null,
@@ -3977,6 +3989,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 projectChats = chats,
                 activeChatId = chat.id,
                 messages = listOf(ChatMessage(fromUser = false, text = "Hi! Tell me what you want to build or change.")),
+                genUiStates = emptyMap(),
                 liveProcess = emptyList(),
                 liveThinking = false,
                 taskStartedAtMillis = null,
@@ -3994,10 +4007,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val chat = current.projectChats.firstOrNull { it.id == chatId } ?: return
         persistMessages()
         val saved = preferences.loadMessages(project.id, chat.id)
+        val restored = saved.ifEmpty { listOf(ChatMessage(fromUser = false, text = "Hi! Tell me what you want to build or change.")) }
         _state.update {
             it.copy(
                 activeChatId = chat.id,
-                messages = saved.ifEmpty { listOf(ChatMessage(fromUser = false, text = "Hi! Tell me what you want to build or change.")) },
+                messages = restored,
+                genUiStates = genUiStatesFrom(restored),
                 liveProcess = emptyList(),
                 liveThinking = false,
                 taskStartedAtMillis = null,
@@ -4790,7 +4805,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         touchProject(project.id)
         persistMessages()
         val history = state.value.messages // includes all messages up to now
-        val runtimePrompt = if (attachments.isEmpty()) requestText else buildString {
+        // HP4: the generative-ui capability block is appended here, once, so every agent
+        // bridge receives the same contract through its own buildContextPrompt wrap.
+        val runtimePrompt = (if (attachments.isEmpty()) requestText else buildString {
             appendLine(requestText)
             appendLine()
             appendLine("<attached_files>")
@@ -4799,7 +4816,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
             appendLine("These files were explicitly attached by the user. Inspect them only as needed for the request.")
             appendLine("</attached_files>")
-        }
+        }) + "\n\n" + GenUiProtocol.CAPABILITY_PROMPT_BLOCK
         failedApiKeyIds.clear()
         activeRuntimeRequest = RuntimeRetryRequest(
             runtime = activeRuntime(),
@@ -4825,6 +4842,121 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun answerApproval(approved: Boolean) {
         val request = state.value.pendingApproval ?: return
         viewModelScope.launch { activeRuntime().respondToApproval(request, approved) }
+    }
+
+    /**
+     * Generative UI Layer 7 entry point: every interaction with a rendered payload arrives
+     * here. Field changes only update that message's [GenUiMessageState]; actions are
+     * re-checked against the allowlist in [dispatchGenUiAction] before anything re-enters
+     * the agent pipeline.
+     */
+    fun handleGenUiAction(messageId: String, event: GenUiEvent) {
+        when (event) {
+            is GenUiEvent.FieldChanged -> updateGenUiState(messageId) {
+                it.withValue(event.componentId, event.value)
+            }
+            is GenUiEvent.ApprovalDecision -> handleGenUiApproval(messageId, event)
+            is GenUiEvent.ActionInvoked -> dispatchGenUiAction(messageId, event)
+        }
+    }
+
+    private fun dispatchGenUiAction(messageId: String, event: GenUiEvent.ActionInvoked) {
+        val action = event.action
+        if (action.type !in GenUiActionTypes.ALL) return
+        when (action.type) {
+            GenUiActionTypes.SUBMIT_FORM -> {
+                val payload = genUiPayloadForMessage(messageId) ?: return
+                val followUp = GenUiActionBridge.formatFollowUp(
+                    payload,
+                    action,
+                    state.value.genUiStates[messageId] ?: GenUiMessageState(),
+                ) ?: return
+                updateGenUiState(messageId) { it.copy(submitted = true, loading = false) }
+                persistMessages()
+                sendPrompt(followUp)
+            }
+            GenUiActionTypes.SEND_MESSAGE, GenUiActionTypes.INVOKE_TOOL -> {
+                val payload = genUiPayloadForMessage(messageId) ?: return
+                val followUp = GenUiActionBridge.formatFollowUp(
+                    payload,
+                    action,
+                    state.value.genUiStates[messageId] ?: GenUiMessageState(),
+                ) ?: return
+                sendPrompt(followUp)
+            }
+            GenUiActionTypes.REQUEST_APPROVAL -> {
+                // A payload button asking for approval means "the user approves this".
+                handleGenUiApproval(
+                    messageId,
+                    GenUiEvent.ApprovalDecision(event.sourceComponentId ?: action.id, approved = true),
+                )
+            }
+            GenUiActionTypes.COPY_TEXT -> {
+                val text = action.text?.takeIf { it.isNotBlank() } ?: return
+                copyToClipboard("Generative UI", text)
+            }
+            GenUiActionTypes.OPEN_URL -> {
+                val url = action.url ?: return
+                if (GenUiActionBridge.isSafeHttpsUrl(url)) openExternalUrl(url)
+            }
+        }
+    }
+
+    private fun handleGenUiApproval(messageId: String, event: GenUiEvent.ApprovalDecision) {
+        updateGenUiState(messageId) { it.withDecision(event.componentId, event.approved) }
+        persistMessages()
+        if (state.value.pendingApproval != null) {
+            // A real tool approval is waiting: the card's answer drives the runtime
+            // approval channel, exactly like the global ApprovalCard.
+            answerApproval(event.approved)
+            return
+        }
+        val payload = genUiPayloadForMessage(messageId) ?: return
+        sendPrompt(GenUiActionBridge.formatApprovalFollowUp(payload, event.componentId, event.approved))
+    }
+
+    private fun genUiPayloadForMessage(messageId: String): GenUiPayload? {
+        val message = state.value.messages.firstOrNull { it.id == messageId } ?: return null
+        if (message.fromUser || message.workItems.isNotEmpty()) return null
+        return resolveGenUiParts(message.text, message.genUiPayload).payload
+    }
+
+    private fun updateGenUiState(messageId: String, transform: (GenUiMessageState) -> GenUiMessageState) {
+        _state.update { current ->
+            val existing = current.genUiStates[messageId] ?: GenUiMessageState()
+            current.copy(genUiStates = current.genUiStates + (messageId to transform(existing)))
+        }
+    }
+
+    private fun genUiStatesFrom(messages: List<ChatMessage>): Map<String, GenUiMessageState> =
+        messages.mapNotNull { message -> message.genUiState?.let { message.id to it } }.toMap()
+
+    /**
+     * HP1: once a session ends, split a completed generative-ui payload out of the last
+     * assistant text message — prose stays as the message text, the raw payload moves to
+     * [ChatMessage.genUiPayload] and persists with the transcript. A half-arrived payload
+     * (session failed mid-stream) is dropped down to its prose. Invalid payloads are left
+     * untouched so they render as an ordinary code block. Idempotent and cheap for messages
+     * that never mention the protocol.
+     */
+    private fun extractGenUiPayload(state: AppUiState): AppUiState {
+        val index = state.messages.indexOfLast { message ->
+            !message.fromUser && message.workItems.isEmpty() && message.genUiPayload == null &&
+                message.text.contains(GenUiProtocol.PROTOCOL)
+        }
+        if (index < 0) return state
+        val message = state.messages[index]
+        val parts = parseGenUiMessage(message.text)
+        val updated = when {
+            parts.payload != null && parts.rawPayloadJson != null ->
+                message.copy(text = parts.prose, genUiPayload = parts.rawPayloadJson)
+            parts.payloadIncomplete -> message.copy(text = parts.prose)
+            else -> return state
+        }
+        if (updated == message) return state
+        return state.copy(
+            messages = state.messages.toMutableList().also { it[index] = updated },
+        )
     }
 
     fun stopTask() {
@@ -5189,7 +5321,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 )
                 is RuntimeEvent.SessionCompleted -> {
                     val finishedAt = System.currentTimeMillis()
-                    attachTaskDuration(finishWorkSegment(current, finishedAt), finishedAt).copy(
+                    extractGenUiPayload(attachTaskDuration(finishWorkSegment(current, finishedAt), finishedAt)).copy(
                         isRunning = false,
                         activeSessionId = null,
                         activity = listOf(ActivityItem(str(R.string.vm_task_completed), str(R.string.vm_agent_finished, current.agentKind.localizedTitle(getApplication())))) +
@@ -5201,7 +5333,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 is RuntimeEvent.SessionFailed -> {
                     val finishedAt = System.currentTimeMillis()
                     val displayReason = localizedFailureReason(event.reason)
-                    attachTaskDuration(
+                    extractGenUiPayload(attachTaskDuration(
                         finishWorkSegment(
                             appendWorkItem(current, ActivityItem("Task stopped", displayReason)),
                             finishedAt,
@@ -5219,7 +5351,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         activity = listOf(ActivityItem("Task stopped", displayReason)) + current.activity,
                         taskFinishedAtMillis = finishedAt,
                         currentTaskRequest = null,
-                    )
+                    ))
                 }
             }
         }
@@ -5370,7 +5502,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 workedMillis = (System.currentTimeMillis() - startedAt).coerceAtLeast(0L),
             )
         }
-        transcriptWrites.trySend(TranscriptWrite(project.id, chatId, messages))
+        // Fold the live generative-ui states into the snapshot so form values and
+        // decisions persist with the transcript.
+        val mergedMessages = messages.map { message ->
+            val liveGenUiState = current.genUiStates[message.id]
+            if (liveGenUiState != null && liveGenUiState != message.genUiState) {
+                message.copy(genUiState = liveGenUiState)
+            } else {
+                message
+            }
+        }
+        transcriptWrites.trySend(TranscriptWrite(project.id, chatId, mergedMessages))
     }
 
     private fun boundedActivityItem(item: ActivityItem): ActivityItem {

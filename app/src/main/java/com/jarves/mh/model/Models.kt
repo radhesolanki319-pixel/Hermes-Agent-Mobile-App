@@ -1,5 +1,6 @@
 package com.jarves.mh.model
 
+import com.jarves.mh.genui.GenUiMessageState
 import java.time.Instant
 import java.text.Normalizer
 import java.util.Locale
@@ -343,6 +344,10 @@ data class ChatMessage(
     val attachments: List<ChatAttachment> = emptyList(),
     val workItems: List<ActivityItem> = emptyList(),
     val workedMillis: Long = 0L,
+    /** Raw generative-ui payload JSON extracted from this message, without the prose. */
+    val genUiPayload: String? = null,
+    /** Persisted per-message generative-ui state (form values, decisions, submitted flag). */
+    val genUiState: GenUiMessageState? = null,
 )
 
 data class ChatAttachment(

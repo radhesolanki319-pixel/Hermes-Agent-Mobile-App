@@ -14,6 +14,7 @@ import com.jarves.mh.model.ProviderProfile
 import com.jarves.mh.model.defaultDshApiForProvider
 import com.jarves.mh.model.projectSlug
 import com.jarves.mh.model.providersForAgent
+import com.jarves.mh.genui.GenUiStateCodec
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -454,6 +455,8 @@ class AppPreferences(private val context: Context) {
                     }
                 })
                 put("workedMillis", m.workedMillis)
+                m.genUiPayload?.let { put("genUiPayload", it) }
+                m.genUiState?.let { put("genUiState", GenUiStateCodec.toJson(it)) }
                 put("workItems", JSONArray().apply {
                     m.workItems.forEach { item ->
                         put(JSONObject().apply {
@@ -514,6 +517,10 @@ class AppPreferences(private val context: Context) {
                         }
                     }.orEmpty(),
                     workedMillis = obj.optLong("workedMillis", 0L),
+                    genUiPayload = obj.optString("genUiPayload").takeIf { it.isNotBlank() },
+                    genUiState = obj.optJSONObject("genUiState")?.let { genUiState ->
+                        runCatching { GenUiStateCodec.fromJson(genUiState) }.getOrNull()
+                    },
                     workItems = obj.optJSONArray("workItems")?.let { workItems ->
                         (0 until workItems.length()).mapNotNull { index ->
                             runCatching {
