@@ -39,6 +39,7 @@ import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.VideoFile
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
@@ -70,7 +71,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
@@ -86,10 +86,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.jarves.mh.R
 import com.jarves.mh.ui.MarkdownText
-import com.jarves.mh.ui.theme.PocketBlue
-import com.jarves.mh.ui.theme.PocketGradientPrimary
-import com.jarves.mh.ui.theme.PocketGradientRainbow
-import com.jarves.mh.ui.theme.PocketGradientTeal
+import com.jarves.mh.ui.theme.PocketMuseBlue
+import com.jarves.mh.ui.theme.PocketMuseBlueLight
+import com.jarves.mh.ui.theme.PocketMuseSurfaceVariant
 import java.io.ByteArrayOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
@@ -132,8 +131,8 @@ fun GenUiCardView(
 ) {
     Card(
         shape = RoundedCornerShape(24.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White.copy(alpha = 0.055f)),
-        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.13f)),
+        colors = CardDefaults.cardColors(containerColor = PocketMuseSurfaceVariant),
+        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)),
         modifier = Modifier.fillMaxWidth(),
     ) {
         Column(
@@ -152,9 +151,9 @@ fun GenUiCardView(
     }
 }
 
-/** Primary action pill in the violet→pink brand gradient (AMOLED colourful style). */
+/** Primary action pill in solid Muse blue (Muse-app chat style, 2026-11-18). */
 @Composable
-fun GradientPillButton(
+fun MusePillButton(
     label: String,
     enabled: Boolean,
     onClick: () -> Unit,
@@ -163,12 +162,7 @@ fun GradientPillButton(
     Box(
         modifier = modifier
             .clip(RoundedCornerShape(999.dp))
-            .background(
-                if (enabled) PocketGradientPrimary
-                else androidx.compose.ui.graphics.Brush.linearGradient(
-                    listOf(Color(0xFF3A3A46), Color(0xFF3A3A46)),
-                ),
-            )
+            .background(if (enabled) PocketMuseBlue else Color(0xFF3A3A42))
             .clickable(enabled = enabled, onClick = onClick)
             .padding(horizontal = 22.dp, vertical = 13.dp),
         contentAlignment = Alignment.Center,
@@ -225,8 +219,12 @@ fun GenUiButtonView(
     val label = node.propText("label") ?: action?.label ?: stringResource(R.string.genui_ok)
     val onClick: () -> Unit = { if (action != null) onEvent(GenUiEvent.ActionInvoked(action, node.id)) }
     when (node.propText("variant")) {
-        "outline", "secondary" -> OutlinedButton(onClick = onClick, enabled = buttonEnabled) { Text(label) }
-        else -> GradientPillButton(label = label, enabled = buttonEnabled, onClick = onClick)
+        "outline", "secondary" -> OutlinedButton(
+            onClick = onClick,
+            enabled = buttonEnabled,
+            colors = ButtonDefaults.outlinedButtonColors(contentColor = PocketMuseBlueLight),
+        ) { Text(label) }
+        else -> MusePillButton(label = label, enabled = buttonEnabled, onClick = onClick)
     }
 }
 
@@ -252,7 +250,7 @@ fun GenUiInputView(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
         colors = OutlinedTextFieldDefaults.colors(
-            focusedBorderColor = Color(0xFFA78BFA),
+            focusedBorderColor = PocketMuseBlueLight,
             unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
             focusedContainerColor = Color.White.copy(alpha = 0.04f),
             unfocusedContainerColor = Color.White.copy(alpha = 0.03f),
@@ -281,10 +279,10 @@ fun GenUiRadioGroupView(
             val isSelected = value == selected
             Surface(
                 shape = RoundedCornerShape(16.dp),
-                color = if (isSelected) Color(0xFF7C3AED).copy(alpha = 0.16f) else Color.White.copy(alpha = 0.04f),
+                color = if (isSelected) PocketMuseBlue.copy(alpha = 0.18f) else Color.White.copy(alpha = 0.04f),
                 border = BorderStroke(
                     1.dp,
-                    if (isSelected) Color(0xFFA78BFA) else MaterialTheme.colorScheme.outlineVariant,
+                    if (isSelected) PocketMuseBlueLight else MaterialTheme.colorScheme.outlineVariant,
                 ),
                 modifier = Modifier
                     .fillMaxWidth()
@@ -299,7 +297,7 @@ fun GenUiRadioGroupView(
                         onClick = null,
                         enabled = interactive,
                         colors = RadioButtonDefaults.colors(
-                            selectedColor = Color(0xFFA78BFA),
+                            selectedColor = PocketMuseBlueLight,
                             unselectedColor = MaterialTheme.colorScheme.onSurfaceVariant,
                         ),
                     )
@@ -331,7 +329,7 @@ fun GenUiCheckboxView(
             checked = checked,
             onCheckedChange = null,
             enabled = interactive,
-            colors = CheckboxDefaults.colors(checkedColor = MaterialTheme.colorScheme.primary),
+            colors = CheckboxDefaults.colors(checkedColor = PocketMuseBlue),
         )
         Spacer(Modifier.width(4.dp))
         Text(node.propText("label") ?: "", style = MaterialTheme.typography.bodyMedium)
@@ -349,8 +347,8 @@ fun GenUiApprovalCardView(
     val decision = state.approvalDecisions[id]
     Card(
         shape = RoundedCornerShape(24.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White.copy(alpha = 0.055f)),
-        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.13f)),
+        colors = CardDefaults.cardColors(containerColor = PocketMuseSurfaceVariant),
+        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)),
         modifier = Modifier.fillMaxWidth(),
     ) {
         Column(
@@ -362,7 +360,7 @@ fun GenUiApprovalCardView(
                     Modifier
                         .size(36.dp)
                         .clip(RoundedCornerShape(10.dp))
-                        .background(PocketGradientTeal),
+                        .background(PocketMuseBlue),
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(Icons.Default.Warning, null, tint = Color.White, modifier = Modifier.size(19.dp))
@@ -398,7 +396,7 @@ fun GenUiApprovalCardView(
                         if (decision) Icons.Default.Check else Icons.Default.Close,
                         null,
                         Modifier.size(16.dp),
-                        tint = MaterialTheme.colorScheme.primary,
+                        tint = PocketMuseBlueLight,
                     )
                     Spacer(Modifier.width(6.dp))
                     Text(
@@ -409,7 +407,7 @@ fun GenUiApprovalCardView(
                 }
             } else {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    GradientPillButton(
+                    MusePillButton(
                         label = stringResource(R.string.genui_approve),
                         enabled = enabled,
                         onClick = { onEvent(GenUiEvent.ApprovalDecision(id, true)) },
@@ -431,7 +429,7 @@ fun GenUiProgressView(node: GenUiNode) {
     val value = node.propNumber("value") ?: node.propNumber("percent")?.div(100.0)
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         if (value != null) {
-            // Rainbow gradient bar on a translucent track (AMOLED colourful style).
+            // Solid Muse-blue bar on a translucent track (Muse-app chat style).
             Box(
                 Modifier
                     .fillMaxWidth()
@@ -444,11 +442,11 @@ fun GenUiProgressView(node: GenUiNode) {
                         .fillMaxWidth(value.toFloat().coerceIn(0f, 1f))
                         .height(8.dp)
                         .clip(RoundedCornerShape(99.dp))
-                        .background(PocketGradientRainbow),
+                        .background(PocketMuseBlue),
                 )
             }
         } else {
-            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            LinearProgressIndicator(modifier = Modifier.fillMaxWidth(), color = PocketMuseBlue)
         }
         node.propText("label")?.takeIf { it.isNotBlank() }?.let { label ->
             Text(label, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -498,7 +496,7 @@ fun GenUiCodeBlockView(node: GenUiNode) {
                     Icon(
                         imageVector = if (copied) Icons.Default.Check else Icons.Default.ContentCopy,
                         contentDescription = stringResource(R.string.genui_copy),
-                        tint = if (copied) MaterialTheme.colorScheme.primary else Color(0xFF9AA0A6),
+                        tint = if (copied) PocketMuseBlueLight else Color(0xFF9AA0A6),
                         modifier = Modifier.size(16.dp),
                     )
                 }
@@ -527,7 +525,7 @@ fun GenUiDividerView() {
 @Composable
 fun GenUiSpinnerView(node: GenUiNode) {
     Row(verticalAlignment = Alignment.CenterVertically) {
-        CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+        CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = PocketMuseBlue)
         node.propText("label")?.takeIf { it.isNotBlank() }?.let { label ->
             Spacer(Modifier.width(10.dp))
             Text(label, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -540,12 +538,12 @@ fun GenUiSpinnerView(node: GenUiNode) {
 // views below can trust them and only need a fallback for hand-built nodes.
 // ---------------------------------------------------------------------------
 
-/** Shared tone palette for `badge` and `alert` (colourful AMOLED accents). */
+/** Shared tone palette for `badge` and `alert` (semantic tones; info = Muse blue). */
 private fun genUiToneColor(tone: String?): Color = when (tone) {
     "success" -> Color(0xFF34D399)
     "warning" -> Color(0xFFF59E0B)
     "danger" -> Color(0xFFF87171)
-    "info" -> Color(0xFF60A5FA)
+    "info" -> PocketMuseBlueLight
     else -> Color(0xFFA6A6B8)
 }
 
@@ -658,11 +656,11 @@ fun GenUiSliderView(
             },
             enabled = interactive,
             colors = SliderDefaults.colors(
-                thumbColor = Color(0xFFA78BFA),
-                activeTrackColor = Color(0xFF7C3AED),
+                thumbColor = Color.White,
+                activeTrackColor = PocketMuseBlue,
                 inactiveTrackColor = Color.White.copy(alpha = 0.12f),
-                disabledThumbColor = Color(0xFFA78BFA).copy(alpha = 0.5f),
-                disabledActiveTrackColor = Color(0xFF7C3AED).copy(alpha = 0.5f),
+                disabledThumbColor = Color.White.copy(alpha = 0.5f),
+                disabledActiveTrackColor = PocketMuseBlue.copy(alpha = 0.5f),
                 disabledInactiveTrackColor = Color.White.copy(alpha = 0.08f),
             ),
         )
@@ -693,13 +691,13 @@ fun GenUiTabsView(
                 Surface(
                     shape = RoundedCornerShape(999.dp),
                     color = if (isActive) {
-                        Color(0xFF7C3AED).copy(alpha = 0.16f)
+                        PocketMuseBlue.copy(alpha = 0.18f)
                     } else {
                         Color.White.copy(alpha = 0.04f)
                     },
                     border = BorderStroke(
                         1.dp,
-                        if (isActive) Color(0xFFA78BFA) else MaterialTheme.colorScheme.outlineVariant,
+                        if (isActive) PocketMuseBlueLight else MaterialTheme.colorScheme.outlineVariant,
                     ),
                     modifier = Modifier.clickable(enabled = enabled) {
                         onEvent(GenUiEvent.FieldChanged(id, index.toString()))
@@ -772,7 +770,7 @@ fun GenUiImageView(node: GenUiNode) {
                     .background(Color.White.copy(alpha = 0.04f)),
                 contentAlignment = Alignment.Center,
             ) {
-                CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
+                CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp, color = PocketMuseBlue)
             }
         }
         node.propText("caption")?.takeIf { it.isNotBlank() }?.let { caption ->
@@ -928,34 +926,34 @@ fun GenUiTableView(node: GenUiNode) {
 fun GenUiToolCallCardView(node: GenUiNode) {
     val tool = node.propText("tool") ?: return
     val status = node.propText("status") ?: "running"
-    val chipBrush: Brush
+    val chipColor: Color
     val chipIcon: ImageVector
     val statusColor: Color
     val statusText: String
     when (status) {
         "done" -> {
-            chipBrush = PocketGradientTeal
+            chipColor = Color(0xFF1F7A55)
             chipIcon = Icons.Default.Check
             statusColor = genUiToneColor("success")
             statusText = stringResource(R.string.genui_status_done)
         }
         "error" -> {
-            chipBrush = Brush.linearGradient(listOf(Color(0xFFEF4444), Color(0xFFDB2777)))
+            chipColor = Color(0xFFB3261E)
             chipIcon = Icons.Default.Close
             statusColor = genUiToneColor("danger")
             statusText = stringResource(R.string.genui_status_error)
         }
         else -> {
-            chipBrush = PocketGradientPrimary
+            chipColor = PocketMuseBlue
             chipIcon = Icons.Default.Build
-            statusColor = Color(0xFFA78BFA)
+            statusColor = PocketMuseBlueLight
             statusText = stringResource(R.string.genui_status_running)
         }
     }
     Card(
         shape = RoundedCornerShape(24.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White.copy(alpha = 0.055f)),
-        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.13f)),
+        colors = CardDefaults.cardColors(containerColor = PocketMuseSurfaceVariant),
+        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)),
         modifier = Modifier.fillMaxWidth(),
     ) {
         Column(
@@ -967,7 +965,7 @@ fun GenUiToolCallCardView(node: GenUiNode) {
                     Modifier
                         .size(36.dp)
                         .clip(RoundedCornerShape(10.dp))
-                        .background(chipBrush),
+                        .background(chipColor),
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(chipIcon, null, tint = Color.White, modifier = Modifier.size(19.dp))
@@ -1015,7 +1013,7 @@ fun GenUiFilePreviewView(node: GenUiNode) {
                 Icon(
                     genUiFileIcon(name),
                     null,
-                    tint = PocketBlue,
+                    tint = PocketMuseBlueLight,
                     modifier = Modifier.size(21.dp),
                 )
             }
@@ -1088,15 +1086,15 @@ fun GenUiTimelineView(node: GenUiNode) {
                             Modifier
                                 .size(26.dp)
                                 .clip(CircleShape)
-                                .background(Color(0xFFF472B6).copy(alpha = 0.12f))
-                                .border(2.dp, Color(0xFFF472B6), CircleShape),
+                                .background(PocketMuseBlue.copy(alpha = 0.14f))
+                                .border(2.dp, PocketMuseBlue, CircleShape),
                             contentAlignment = Alignment.Center,
                         ) {
                             Box(
                                 Modifier
                                     .size(10.dp)
                                     .clip(CircleShape)
-                                    .background(Color(0xFFF472B6)),
+                                    .background(PocketMuseBlue),
                             )
                         }
                         else -> Box(

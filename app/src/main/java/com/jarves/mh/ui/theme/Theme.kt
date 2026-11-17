@@ -23,6 +23,15 @@ val PocketSurface = Color(0xFF0B0B10)
 val PocketSurfaceVariant = Color(0xFF15151D)
 val PocketOutline = Color(0xFF23232D)
 
+// Muse-app chat identity (user-chosen, 2026-11-18): the workspace chat screen mirrors
+// the Muse app's dark chat — solid Muse blue accent, dark-grey assistant surfaces on
+// pure black. These tokens are used by the chat screen (and GenUI inside it) only; the
+// rest of the app keeps the violet identity above.
+val PocketMuseBlue = Color(0xFF006FEA)
+val PocketMuseBlueLight = Color(0xFF5EAAFF)
+val PocketMuseSurface = Color(0xFF1E1E21)
+val PocketMuseSurfaceVariant = Color(0xFF26262B)
+
 val PocketGradientPrimary: Brush = Brush.linearGradient(
     listOf(Color(0xFF7C3AED), Color(0xFFDB2777)),
 )

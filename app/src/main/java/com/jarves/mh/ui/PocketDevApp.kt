@@ -264,9 +264,11 @@ import com.jarves.mh.network.DiscoveredModel
 import com.jarves.mh.network.ModelDiscoveryResult
 import com.jarves.mh.network.GitHubRepository
 import com.jarves.mh.ui.theme.PocketBlue
-import com.jarves.mh.ui.theme.PocketGradientPrimary
-import com.jarves.mh.ui.theme.PocketGradientUserBubble
 import com.jarves.mh.ui.theme.PocketGreen
+import com.jarves.mh.ui.theme.PocketMuseBlue
+import com.jarves.mh.ui.theme.PocketMuseBlueLight
+import com.jarves.mh.ui.theme.PocketMuseSurface
+import com.jarves.mh.ui.theme.PocketMuseSurfaceVariant
 import com.jarves.mh.ui.theme.PocketOrange
 import java.io.ByteArrayInputStream
 import kotlinx.coroutines.delay
@@ -2625,6 +2627,16 @@ private fun RootScreenHost(
                     onRefreshDiagnostics = viewModel::refreshDeveloperDiagnostics,
                     onStopInactiveProcesses = viewModel::stopInactiveDeveloperProcesses,
                     onClearRuntimeCache = viewModel::clearDeveloperRuntimeCache,
+                    onCheckForAppUpdate = {
+                        // The install dialog is hosted on the Projects screen: when an
+                        // update is already known, go there so it opens; otherwise run a
+                        // manual (unthrottled) check.
+                        if (state.appUpdate != null) {
+                            screen = RootScreen.PROJECTS
+                        } else {
+                            viewModel.checkForAppUpdateFromSettings()
+                        }
+                    },
                 )
             }
         }
@@ -4561,6 +4573,9 @@ private fun WorkspaceScreen(
     }
 
     var selectedTab by rememberSaveable { mutableStateOf(WorkspaceTab.CHAT) }
+    // Chat screen has no bottom tab bar (user direction, 2026-11-18): its workspace
+    // sections live in this top-bar overflow menu instead.
+    var sectionMenuOpen by remember { mutableStateOf(false) }
     var showChats by rememberSaveable { mutableStateOf(false) }
     var showAndroidBuild by rememberSaveable { mutableStateOf(false) }
     val activeChat = state.projectChats.firstOrNull { it.id == state.activeChatId }
@@ -4700,18 +4715,44 @@ private fun WorkspaceScreen(
                             onClick = { showAndroidBuild = true },
                             enabled = !state.isRunning && !state.projectTerminalRunning,
                         ) {
-                            if (state.androidBuildRunning) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                            if (state.androidBuildRunning) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp, color = PocketMuseBlue)
                             else Icon(Icons.Default.PlayArrow, stringResource(R.string.ws_build_run_android))
                         }
                     }
                     IconButton(onClick = { showChats = true }) { Icon(Icons.Default.History, stringResource(R.string.ws_project_chats)) }
-                    if (state.isRunning) CircularProgressIndicator(Modifier.padding(12.dp).size(20.dp), strokeWidth = 2.dp)
+                    if (selectedTab == WorkspaceTab.CHAT) {
+                        Box {
+                            IconButton(onClick = { sectionMenuOpen = true }) {
+                                Icon(Icons.Default.MoreVert, stringResource(R.string.more_options))
+                            }
+                            DropdownMenu(expanded = sectionMenuOpen, onDismissRequest = { sectionMenuOpen = false }) {
+                                // The sections the bottom tab bar used to offer on this
+                                // screen (Changes was never reachable there either).
+                                listOf(WorkspaceTab.FILES, WorkspaceTab.TERMINAL, WorkspaceTab.PREVIEW).forEach { tab ->
+                                    DropdownMenuItem(
+                                        text = { Text(stringResource(tab.labelRes)) },
+                                        leadingIcon = { Icon(tab.icon, null) },
+                                        onClick = {
+                                            sectionMenuOpen = false
+                                            selectedTab = tab
+                                            if (tab == WorkspaceTab.FILES) onRefreshFiles()
+                                            if (tab == WorkspaceTab.TERMINAL) onTerminalOpened()
+                                        },
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    if (state.isRunning) CircularProgressIndicator(Modifier.padding(12.dp).size(20.dp), strokeWidth = 2.dp, color = PocketMuseBlue)
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
             )
         },
         bottomBar = {
-            if (!keyboardVisible) NavigationBar(containerColor = MaterialTheme.colorScheme.background) {
+            // Hidden on the Chat tab: the chat screen's sections moved to the top-bar
+            // 3-dot menu and the composer sits at the very bottom. Other sections keep
+            // the bar, which is also their way back to Chat.
+            if (!keyboardVisible && selectedTab != WorkspaceTab.CHAT) NavigationBar(containerColor = MaterialTheme.colorScheme.background) {
                 WorkspaceTab.entries.filter { it != WorkspaceTab.CHANGES }.forEach { tab ->
                     NavigationBarItem(
                         selected = selectedTab == tab,
@@ -4722,10 +4763,14 @@ private fun WorkspaceScreen(
                         },
                         icon = { Icon(tab.icon, stringResource(tab.labelRes)) },
                         label = { Text(stringResource(tab.labelRes), fontSize = 10.sp) },
+                        // Muse-app style bar: active item plain white, inactive grey,
+                        // no pill indicator (visuals only — tabs and behaviour unchanged).
                         colors = NavigationBarItemDefaults.colors(
-                            selectedIconColor = MaterialTheme.colorScheme.primary,
-                            selectedTextColor = MaterialTheme.colorScheme.primary,
-                            indicatorColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.16f),
+                            selectedIconColor = Color.White,
+                            selectedTextColor = Color.White,
+                            unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                            unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                            indicatorColor = Color.Transparent,
                         ),
                     )
                 }
@@ -6348,14 +6393,14 @@ private fun ChatTab(
                             Icons.Default.KeyboardArrowDown,
                             contentDescription = null,
                             modifier = Modifier.size(17.dp),
-                            tint = MaterialTheme.colorScheme.primary,
+                            tint = PocketMuseBlue,
                         )
                         Spacer(Modifier.width(4.dp))
                         Text(
                             stringResource(R.string.ws_latest),
                             fontSize = 12.sp,
                             fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.primary,
+                            color = PocketMuseBlue,
                         )
                     }
                 }
@@ -6437,11 +6482,11 @@ private fun ChatTab(
                 val canSend = prompt.isNotBlank() || pendingAttachments.isNotEmpty()
 
                 Surface(
-                    shape = RoundedCornerShape(26.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                    shape = RoundedCornerShape(28.dp),
+                    color = PocketMuseSurface,
                     border = BorderStroke(
                         width = 1.dp,
-                        color = if (canSend) MaterialTheme.colorScheme.primary.copy(alpha = 0.55f) else MaterialTheme.colorScheme.outlineVariant,
+                        color = if (canSend) PocketMuseBlue.copy(alpha = 0.55f) else MaterialTheme.colorScheme.outlineVariant,
                     ),
                     modifier = Modifier.fillMaxWidth(),
                 ) {
@@ -6453,16 +6498,20 @@ private fun ChatTab(
                     ) {
                         var attachMenuOpen by remember { mutableStateOf(false) }
                         Box {
-                            IconButton(
-                                onClick = { attachMenuOpen = true },
-                                enabled = pendingAttachments.size < 5,
-                                modifier = Modifier.size(40.dp),
+                            // Muse-style circular + button; still opens the same
+                            // photo/files attach menu as before.
+                            Box(
+                                modifier = Modifier
+                                    .size(38.dp)
+                                    .background(PocketMuseSurfaceVariant, CircleShape)
+                                    .clickable(enabled = pendingAttachments.size < 5) { attachMenuOpen = true },
+                                contentAlignment = Alignment.Center,
                             ) {
                                 Icon(
-                                    imageVector = Icons.Default.AttachFile,
+                                    imageVector = Icons.Default.Add,
                                     contentDescription = stringResource(R.string.chat_attach_files),
                                     modifier = Modifier.size(20.dp),
-                                    tint = if (pendingAttachments.isNotEmpty()) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    tint = if (pendingAttachments.size < 5) Color.White else Color.White.copy(alpha = 0.4f),
                                 )
                             }
                             DropdownMenu(expanded = attachMenuOpen, onDismissRequest = { attachMenuOpen = false }) {
@@ -6491,7 +6540,7 @@ private fun ChatTab(
                                 fontSize = 15.sp,
                                 lineHeight = 20.sp,
                             ),
-                            cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                            cursorBrush = SolidColor(PocketMuseBlue),
                             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Default),
                             decorationBox = { innerTextField ->
                                 Box(contentAlignment = Alignment.CenterStart) {
@@ -6514,7 +6563,7 @@ private fun ChatTab(
                                 modifier = Modifier
                                     .size(38.dp)
                                     .background(
-                                        color = MaterialTheme.colorScheme.error,
+                                        color = PocketMuseBlue,
                                         shape = CircleShape,
                                     )
                                     .clickable(onClick = onStop),
@@ -6523,7 +6572,7 @@ private fun ChatTab(
                                 Icon(
                                     imageVector = Icons.Default.Stop,
                                     contentDescription = stringResource(R.string.ws_stop_ai_task),
-                                    tint = MaterialTheme.colorScheme.onError,
+                                    tint = Color.White,
                                     modifier = Modifier.size(18.dp),
                                 )
                             }
@@ -6534,16 +6583,7 @@ private fun ChatTab(
                                 modifier = Modifier
                                     .size(38.dp)
                                     .background(
-                                        brush = if (canSend) {
-                                            PocketGradientPrimary
-                                        } else {
-                                            androidx.compose.ui.graphics.Brush.linearGradient(
-                                                listOf(
-                                                    MaterialTheme.colorScheme.surfaceVariant,
-                                                    MaterialTheme.colorScheme.surfaceVariant,
-                                                ),
-                                            )
-                                        },
+                                        color = if (canSend) PocketMuseBlue else PocketMuseSurfaceVariant,
                                         shape = CircleShape,
                                     )
                                     .clickable(
@@ -6560,7 +6600,7 @@ private fun ChatTab(
                                 Icon(
                                     imageVector = Icons.Default.ArrowUpward,
                                     contentDescription = stringResource(R.string.chat_send),
-                                    tint = if (canSend) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                                    tint = if (canSend) Color.White else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
                                     modifier = Modifier.size(19.dp),
                                 )
                             }
@@ -7026,19 +7066,12 @@ private fun MessageBubble(
         }
     }
     Row(Modifier.fillMaxWidth(), horizontalArrangement = if (message.fromUser) Arrangement.End else Arrangement.Start) {
+        // Muse-app chat look (2026-11-18): assistant = dark-grey rounded card,
+        // user = solid Muse blue bubble; no gradients, no avatar.
         Surface(
-            color = Color.Transparent,
-            shape = RoundedCornerShape(if (message.fromUser) 24.dp else 18.dp),
-            border = if (message.fromUser) BorderStroke(1.dp, Color.White.copy(alpha = 0.25f)) else null,
-            modifier = Modifier
-                .fillMaxWidth(if (message.fromUser) .82f else .92f)
-                .then(
-                    if (message.fromUser) {
-                        Modifier.background(PocketGradientUserBubble, RoundedCornerShape(24.dp))
-                    } else {
-                        Modifier
-                    },
-                ),
+            color = if (message.fromUser) PocketMuseBlue else PocketMuseSurface,
+            shape = RoundedCornerShape(24.dp),
+            modifier = Modifier.fillMaxWidth(if (message.fromUser) .82f else .92f),
         ) {
             Column(Modifier.padding(top = 12.dp)) {
                 SelectionContainer {
@@ -7082,7 +7115,7 @@ private fun MessageBubble(
                         Modifier.padding(start = 14.dp, end = 14.dp, bottom = 8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                        CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp, color = PocketMuseBlue)
                         Spacer(Modifier.width(8.dp))
                         Text(
                             stringResource(R.string.genui_preparing),
@@ -7132,7 +7165,7 @@ private fun AttachmentChip(
         border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
     ) {
         Row(Modifier.padding(start = 9.dp, end = if (onRemove == null) 10.dp else 3.dp, top = 7.dp, bottom = 7.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(icon, null, Modifier.size(17.dp), tint = PocketOrange)
+            Icon(icon, null, Modifier.size(17.dp), tint = PocketMuseBlueLight)
             Spacer(Modifier.width(7.dp))
             Column(Modifier.widthIn(max = 180.dp)) {
                 Text(attachment.displayName, fontSize = 12.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -7149,17 +7182,21 @@ private fun AttachmentChip(
 
 @Composable
 private fun ApprovalCard(request: ToolRequest, onApproval: (Boolean) -> Unit) {
-    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+    Card(colors = CardDefaults.cardColors(containerColor = PocketMuseSurface)) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.Warning, null, tint = PocketOrange)
+                Icon(Icons.Default.Warning, null, tint = PocketMuseBlueLight)
                 Spacer(Modifier.width(8.dp)); Text(stringResource(R.string.ws_review_action), fontWeight = FontWeight.Bold)
             }
             Text(request.explanation)
             request.affectedPaths.forEach { Text("• $it", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(onClick = { onApproval(false) }, Modifier.weight(1f)) { Text(stringResource(R.string.ws_reject)) }
-                Button(onClick = { onApproval(true) }, Modifier.weight(1f)) { Text(stringResource(R.string.ws_allow_once)) }
+                Button(
+                    onClick = { onApproval(true) },
+                    Modifier.weight(1f),
+                    colors = ButtonDefaults.buttonColors(containerColor = PocketMuseBlue, contentColor = Color.White),
+                ) { Text(stringResource(R.string.ws_allow_once)) }
             }
         }
     }

@@ -44,6 +44,7 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SmartToy
+import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Visibility
@@ -144,6 +145,7 @@ fun SettingsScreen(
     onRefreshDiagnostics: () -> Unit = {},
     onStopInactiveProcesses: () -> Unit = {},
     onClearRuntimeCache: () -> Unit = {},
+    onCheckForAppUpdate: () -> Unit = {},
     showBackupDot: Boolean = false,
     onBackupOpened: () -> Unit = {},
     openBackup: Boolean = false,
@@ -496,6 +498,43 @@ fun SettingsScreen(
                         onSave = onSetDebugUpdateManifestUrl,
                         onClear = onClearDebugUpdateManifestUrl,
                     )
+                }
+            }
+
+            item {
+                // Manual self-update check (the automatic check runs on app start,
+                // throttled to once per 6 hours). A found update is announced here
+                // and opens the install dialog from the Projects screen.
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onCheckForAppUpdate() }
+                        .padding(vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        Icons.Default.SystemUpdate,
+                        contentDescription = null,
+                        modifier = Modifier.size(20.dp),
+                        tint = MaterialTheme.colorScheme.primary,
+                    )
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(stringResource(R.string.settings_check_updates), fontWeight = FontWeight.Medium)
+                        Text(
+                            stringResource(R.string.settings_current_version, BuildConfig.VERSION_NAME, BuildConfig.VERSION_CODE),
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        state.appUpdate?.let { update ->
+                            Text(
+                                stringResource(R.string.settings_update_available, update.versionName),
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+                        }
+                    }
                 }
             }
 

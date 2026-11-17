@@ -81,6 +81,21 @@ object HermesProviderCatalog {
         defaultModel = "",
     )
 
+    /** Provider an untouched Hermes setup starts on: the user's own FreeLLM endpoint (Custom). */
+    const val DEFAULT_PROVIDER_ID = CUSTOM_ID
+
+    /** Base URL an untouched Hermes setup starts on: the user's FreeLLMAPI service. */
+    const val DEFAULT_CUSTOM_BASE_URL = "https://freellmapi-backup.onrender.com/v1"
+
+    /**
+     * Model an untouched Hermes setup starts on: FreeLLM's `fusion` virtual
+     * model — the endpoint fans the prompt out to a panel of models and a
+     * judge model synthesizes one answer, so no single model is pinned.
+     * These three defaults are only the setup screen's starting values;
+     * the user can change all of them there.
+     */
+    const val DEFAULT_MODEL = "fusion"
+
     val PROVIDERS: List<HermesProviderDef> = listOf(
         HermesProviderDef("anthropic", "Anthropic", "ANTHROPIC_API_KEY", "https://api.anthropic.com", "claude-fable-5"),
         HermesProviderDef("openrouter", "OpenRouter", "OPENROUTER_API_KEY", "https://openrouter.ai/api/v1", "anthropic/claude-sonnet-4.6"),
@@ -164,6 +179,42 @@ data class HermesSetupSettings(
                 keyEnv = def?.keyEnv.orEmpty(),
                 baseUrl = def?.baseUrl.orEmpty(),
             )
+        }
+}
+
+/**
+ * One-time migration to the fusion defaults for installs that predate them.
+ *
+ * Before the fusion defaults landed, an untouched Hermes setup resolved to
+ * the Anthropic provider with no model and no custom base URL — and an
+ * install from that era may have those exact values STORED (older builds
+ * persisted the setup), where the new getter defaults can no longer reach
+ * them. When the raw stored triple is still that old untouched-equivalent
+ * state, [migratedSetup] returns the fusion configuration to overwrite it
+ * with. Anything else — nothing stored at all (the getters already resolve
+ * to fusion), or any deliberate combination the user picked — returns null
+ * and is left untouched. Pure and side-effect free; `AppPreferences` owns
+ * the stored values and the one-time flag.
+ */
+object HermesSetupMigration {
+
+    /** Provider id an untouched setup resolved to before the fusion defaults. */
+    const val OLD_DEFAULT_PROVIDER_ID = "anthropic"
+
+    /** The fusion setup to store, or null when no migration applies. */
+    fun migratedSetup(
+        providerId: String?,
+        model: String?,
+        customBaseUrl: String?,
+    ): HermesSetupSettings? =
+        if (providerId == OLD_DEFAULT_PROVIDER_ID && model.isNullOrBlank() && customBaseUrl.isNullOrBlank()) {
+            HermesSetupSettings(
+                providerId = HermesProviderCatalog.DEFAULT_PROVIDER_ID,
+                model = HermesProviderCatalog.DEFAULT_MODEL,
+                customBaseUrl = HermesProviderCatalog.DEFAULT_CUSTOM_BASE_URL,
+            )
+        } else {
+            null
         }
 }
 

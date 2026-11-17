@@ -74,6 +74,7 @@ import com.jarves.mh.runtime.HermesHostProbe
 import com.jarves.mh.runtime.HermesRemoteMessages
 import com.jarves.mh.runtime.HermesRuntimeBridge
 import com.jarves.mh.runtime.HermesRuntimeSettings
+import com.jarves.mh.runtime.HermesProviderCatalog
 import com.jarves.mh.runtime.HermesSetupSettings
 import com.jarves.mh.runtime.probeHermesHost
 import com.jarves.mh.runtime.NativeSpawnProcess
@@ -112,6 +113,7 @@ import com.jarves.mh.runtime.isDebugApkStale
 import com.jarves.mh.runtime.parseAndroidBuildIssues
 import com.jarves.mh.update.AppUpdateInfo
 import com.jarves.mh.update.AppUpdater
+import com.jarves.mh.update.GitHubReleaseUpdater
 import java.io.File
 import java.io.RandomAccessFile
 import java.nio.ByteBuffer
@@ -400,9 +402,9 @@ data class AppUiState(
     val antigravityEffort: String = "high",
     val hermesHostRemote: Boolean = false,
     val hermesHostUrl: String = "",
-    val hermesProviderId: String = "anthropic",
-    val hermesModel: String = "",
-    val hermesCustomBaseUrl: String = "",
+    val hermesProviderId: String = HermesProviderCatalog.DEFAULT_PROVIDER_ID,
+    val hermesModel: String = HermesProviderCatalog.DEFAULT_MODEL,
+    val hermesCustomBaseUrl: String = HermesProviderCatalog.DEFAULT_CUSTOM_BASE_URL,
     val hermesOptions: HermesConfigOptions = HermesConfigOptions.FULL_POWER,
     val antigravityModels: List<String> = emptyList(),
     val antigravityModelsLoading: Boolean = false,
@@ -2442,15 +2444,49 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /**
+     * One update lookup, shared by the automatic and manual checks.
+     * Production source: GitHub Releases of the user's own repo. A debug
+     * manifest override (debug builds only) keeps the old manifest channel
+     * for end-to-end update-flow testing. Null on no-update and on any
+     * network failure alike.
+     */
+    private suspend fun fetchAppUpdate(): AppUpdateInfo? = withContext(Dispatchers.IO) {
+        runCatching {
+            if (BuildConfig.DEBUG && preferences.debugUpdateManifestUrl.isNotBlank()) {
+                appUpdater().check()
+            } else {
+                GitHubReleaseUpdater().check(BuildConfig.VERSION_CODE.toLong())
+            }
+        }.getOrNull()
+    }
+
     fun checkForAppUpdate(force: Boolean = false) {
-        if (!force && System.currentTimeMillis() - preferences.lastAppUpdateCheckMillis < 24L * 60L * 60L * 1000L) return
-        viewModelScope.launch(Dispatchers.IO) {
-            val update = runCatching { appUpdater().check() }.getOrNull()
+        // Automatic checks run at most once per 6 hours and stay silent:
+        // no update (or any network failure) changes nothing on screen.
+        if (!force && System.currentTimeMillis() - preferences.lastAppUpdateCheckMillis < APP_UPDATE_CHECK_INTERVAL_MS) return
+        viewModelScope.launch {
+            val update = fetchAppUpdate()
             preferences.lastAppUpdateCheckMillis = System.currentTimeMillis()
             if (update != null) {
                 _state.update {
                     it.copy(appUpdate = update, appUpdateStatus = AppUpdateStatus.AVAILABLE, appUpdateError = null)
                 }
+            }
+        }
+    }
+
+    /** Manual check from Settings: ignores the throttle and confirms when already current. */
+    fun checkForAppUpdateFromSettings() {
+        viewModelScope.launch {
+            val update = fetchAppUpdate()
+            preferences.lastAppUpdateCheckMillis = System.currentTimeMillis()
+            if (update != null) {
+                _state.update {
+                    it.copy(appUpdate = update, appUpdateStatus = AppUpdateStatus.AVAILABLE, appUpdateError = null)
+                }
+            } else if (_state.value.appUpdate == null) {
+                _state.update { it.copy(toastMessage = str(R.string.vm_up_to_date)) }
             }
         }
     }
@@ -5720,6 +5756,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         private const val RECENT_EXIT_CACHE_MS = 60_000L
         private const val MINIMUM_INITIALIZATION_SCREEN_MS = 3_000L
         private const val HERMES_AUTO_UPDATE_CHECK_INTERVAL_MS = 24L * 60L * 60L * 1_000L
+        private const val APP_UPDATE_CHECK_INTERVAL_MS = 6L * 60L * 60L * 1_000L
         private const val MAX_EDITABLE_FILE_BYTES = 512_000L
         private const val MAX_PROJECT_TERMINAL_HISTORY = 100
         private const val MAX_PROJECT_TERMINAL_OUTPUT = 200_000

@@ -2,6 +2,7 @@ package com.jarves.mh.runtime
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -86,6 +87,41 @@ class HermesNativeSettingsTest {
         assertEquals("my-pick", HermesSetupSettings("anthropic", " my-pick ", "").resolvedModel())
         // Providers without a curated list leave the model to the user.
         assertEquals("", HermesSetupSettings("lmstudio", "", "").resolvedModel())
+    }
+
+    @Test
+    fun untouchedSetupDefaultsToTheFreeLlmFusionConfiguration() {
+        // The setup screen's starting values — AppPreferences falls back to
+        // these constants when nothing is stored yet: the user's own
+        // FreeLLM endpoint, running its `fusion` virtual model (a panel of
+        // models plus a judge), so no single model is pinned.
+        assertEquals(HermesProviderCatalog.CUSTOM_ID, HermesProviderCatalog.DEFAULT_PROVIDER_ID)
+        assertEquals("custom", HermesProviderCatalog.DEFAULT_PROVIDER_ID)
+        assertEquals("https://freellmapi-backup.onrender.com/v1", HermesProviderCatalog.DEFAULT_CUSTOM_BASE_URL)
+        assertEquals("fusion", HermesProviderCatalog.DEFAULT_MODEL)
+
+        val setup = HermesSetupSettings(
+            providerId = HermesProviderCatalog.DEFAULT_PROVIDER_ID,
+            model = HermesProviderCatalog.DEFAULT_MODEL,
+            customBaseUrl = HermesProviderCatalog.DEFAULT_CUSTOM_BASE_URL,
+        )
+        assertTrue(setup.isCustom())
+        assertEquals("fusion", setup.resolvedModel())
+        val route = setup.route()
+        assertTrue(route.custom)
+        assertEquals(HermesProviderCatalog.CUSTOM_PROVIDER_KEY, route.provider)
+        assertEquals(HermesProviderCatalog.CUSTOM_KEY_ENV, route.keyEnv)
+        assertEquals("https://freellmapi-backup.onrender.com/v1", route.baseUrl)
+
+        // The first launch writes exactly that route and model.
+        val fresh = HermesConfigFiles.freshConfig(route, setup.resolvedModel())
+        assertTrue(fresh.contains("model:\n  provider: 'custom-provider'\n  default: 'fusion'\n"))
+        assertTrue(
+            fresh.contains(
+                "providers:\n  custom-provider:\n    name: 'Custom endpoint'\n" +
+                    "    api: 'https://freellmapi-backup.onrender.com/v1'\n    key_env: CUSTOM_PROVIDER_API_KEY\n",
+            ),
+        )
     }
 
     @Test
@@ -219,6 +255,52 @@ class HermesNativeSettingsTest {
         assertEquals(
             listOf("x_search", "video", "video_gen", "kanban", "spotify"),
             defaults.cliToolsets,
+        )
+    }
+
+    @Test
+    fun fusionMigrationLeavesFreshInstallsAlone() {
+        // Nothing ever stored: no migration — the preference getters already
+        // default an untouched setup to the fusion configuration.
+        assertNull(HermesSetupMigration.migratedSetup(null, null, null))
+        assertNull(HermesSetupMigration.migratedSetup(null, "", ""))
+    }
+
+    @Test
+    fun fusionMigrationRewritesTheOldUntouchedSetup() {
+        // The pre-fusion untouched state, as older builds stored it:
+        // Anthropic provider, no model, no custom base URL.
+        val migrated = HermesSetupMigration.migratedSetup("anthropic", "", "")
+        assertEquals(
+            HermesSetupSettings(
+                providerId = HermesProviderCatalog.DEFAULT_PROVIDER_ID,
+                model = HermesProviderCatalog.DEFAULT_MODEL,
+                customBaseUrl = HermesProviderCatalog.DEFAULT_CUSTOM_BASE_URL,
+            ),
+            migrated,
+        )
+        // Absent model/base-URL values (provider stored alone) migrate the same.
+        assertEquals(migrated, HermesSetupMigration.migratedSetup("anthropic", null, null))
+        // And the migrated setup really resolves to the fusion route.
+        assertEquals("fusion", migrated!!.resolvedModel())
+        assertTrue(migrated.isCustom())
+    }
+
+    @Test
+    fun fusionMigrationLeavesDeliberateChoicesAlone() {
+        // Anthropic picked WITH a model is a deliberate setup, not the old default.
+        assertNull(HermesSetupMigration.migratedSetup("anthropic", "claude-sonnet-4.6", ""))
+        // A stored custom base URL means the old state was not untouched either.
+        assertNull(HermesSetupMigration.migratedSetup("anthropic", "", "https://llm.example.com/v1"))
+        // Any other provider is a deliberate choice.
+        assertNull(HermesSetupMigration.migratedSetup("openrouter", "", ""))
+        // Already on the fusion configuration: nothing to do.
+        assertNull(
+            HermesSetupMigration.migratedSetup(
+                HermesProviderCatalog.DEFAULT_PROVIDER_ID,
+                HermesProviderCatalog.DEFAULT_MODEL,
+                HermesProviderCatalog.DEFAULT_CUSTOM_BASE_URL,
+            ),
         )
     }
 }

@@ -15,6 +15,8 @@ import com.jarves.mh.model.projectSlug
 import com.jarves.mh.model.providersForAgent
 import com.jarves.mh.genui.GenUiStateCodec
 import com.jarves.mh.runtime.HermesConfigOptions
+import com.jarves.mh.runtime.HermesProviderCatalog
+import com.jarves.mh.runtime.HermesSetupMigration
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -22,6 +24,37 @@ import java.time.Instant
 
 class AppPreferences(private val context: Context) {
     private val preferences = context.getSharedPreferences("pocket_preferences", Context.MODE_PRIVATE)
+
+    init {
+        migrateHermesSetupToFusionDefaultIfNeeded()
+    }
+
+    /**
+     * One-time migration (2026-11-18): an install that still has the OLD
+     * untouched Hermes setup stored — Anthropic provider, no model, no
+     * custom base URL, from before the fusion defaults landed — is moved
+     * onto the fusion defaults (Custom + FreeLLM + "fusion"). Any other
+     * stored combination is a deliberate user choice and is left untouched;
+     * a never-stored setup needs nothing (the getters already default to
+     * fusion). The flag records that the check has run, so a user who later
+     * deliberately recreates the old combination keeps it.
+     */
+    private fun migrateHermesSetupToFusionDefaultIfNeeded() {
+        if (preferences.getBoolean(HERMES_FUSION_MIGRATION_FLAG, false)) return
+        val migrated = HermesSetupMigration.migratedSetup(
+            providerId = preferences.getString("hermes_provider_id", null),
+            model = preferences.getString("hermes_model", null),
+            customBaseUrl = preferences.getString("hermes_custom_base_url", null),
+        )
+        preferences.edit().apply {
+            if (migrated != null) {
+                putString("hermes_provider_id", migrated.providerId)
+                putString("hermes_model", migrated.model)
+                putString("hermes_custom_base_url", migrated.customBaseUrl)
+            }
+            putBoolean(HERMES_FUSION_MIGRATION_FLAG, true)
+        }.apply()
+    }
 
     var onboardingComplete: Boolean
         get() = preferences.getBoolean("onboarding_complete", false)
@@ -166,19 +199,32 @@ class AppPreferences(private val context: Context) {
     // onto HermesConfigOptions and are written into the guest's config.yaml
     // on every launch. Defaults are the full-power posture.
 
-    /** Hermes provider id from Hermes's own registry (e.g. "anthropic", "custom"). */
+    /**
+     * Hermes provider id from Hermes's own registry (e.g. "anthropic",
+     * "custom"). An untouched setup starts on the FreeLLM fusion
+     * configuration (Custom) — see [HermesProviderCatalog.DEFAULT_PROVIDER_ID].
+     */
     var hermesProviderId: String
-        get() = preferences.getString("hermes_provider_id", "anthropic") ?: "anthropic"
+        get() = preferences.getString("hermes_provider_id", HermesProviderCatalog.DEFAULT_PROVIDER_ID)
+            ?: HermesProviderCatalog.DEFAULT_PROVIDER_ID
         set(value) { preferences.edit().putString("hermes_provider_id", value).apply() }
 
-    /** Model id for Hermes ("" = the provider's curated default). */
+    /**
+     * Model id for Hermes ("" = the provider's curated default). An
+     * untouched setup starts on FreeLLM's "fusion" virtual model.
+     */
     var hermesModel: String
-        get() = preferences.getString("hermes_model", "") ?: ""
+        get() = preferences.getString("hermes_model", HermesProviderCatalog.DEFAULT_MODEL)
+            ?: HermesProviderCatalog.DEFAULT_MODEL
         set(value) { preferences.edit().putString("hermes_model", value).apply() }
 
-    /** Base URL for the Custom endpoint provider ("" for first-class providers). */
+    /**
+     * Base URL for the Custom endpoint provider ("" for first-class
+     * providers). An untouched setup starts on the user's FreeLLMAPI endpoint.
+     */
     var hermesCustomBaseUrl: String
-        get() = preferences.getString("hermes_custom_base_url", "") ?: ""
+        get() = preferences.getString("hermes_custom_base_url", HermesProviderCatalog.DEFAULT_CUSTOM_BASE_URL)
+            ?: HermesProviderCatalog.DEFAULT_CUSTOM_BASE_URL
         set(value) { preferences.edit().putString("hermes_custom_base_url", value).apply() }
 
     var hermesOptMemoryEnabled: Boolean
@@ -652,12 +698,16 @@ class AppPreferences(private val context: Context) {
     }
 
     companion object {
+        /** SharedPreferences key of the one-time Hermes fusion-default migration flag. */
+        const val HERMES_FUSION_MIGRATION_FLAG = "hermes_fusion_default_migrated"
+
         /** Install and update state that describes this phone, not the user's work. */
         val DEVICE_ONLY_KEYS = setOf(
             "runtime_setup_complete",
             "background_setup_complete",
             "last_app_update_check_millis",
             "last_hermes_update_check_millis",
+            "hermes_fusion_default_migrated",
             "debug_update_manifest_url",
             "test_provider_defaults_version",
             "whats_new_seen_code",
