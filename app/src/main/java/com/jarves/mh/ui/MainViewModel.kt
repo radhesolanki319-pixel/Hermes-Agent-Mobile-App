@@ -2143,7 +2143,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     suspend fun readHermesFile(fileName: String): String? = withContext(Dispatchers.IO) {
         if (fileName !in HERMES_EDITABLE_FILES) return@withContext null
         runCatching {
-            val rootfs = RuntimeInstaller(application).installedRuntime().rootfs
+            val rootfs = RuntimeInstaller(getApplication()).installedRuntime().rootfs
             File(rootfs, "${HermesRuntimeBridge.HERMES_HOME_GUEST_PATH.removePrefix("/")}/$fileName")
                 .takeIf(File::isFile)?.readText()
         }.getOrNull()
@@ -2153,7 +2153,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     suspend fun writeHermesFile(fileName: String, text: String): Boolean = withContext(Dispatchers.IO) {
         if (fileName !in HERMES_EDITABLE_FILES) return@withContext false
         runCatching {
-            val rootfs = RuntimeInstaller(application).installedRuntime().rootfs
+            val rootfs = RuntimeInstaller(getApplication()).installedRuntime().rootfs
             val home = File(rootfs, HermesRuntimeBridge.HERMES_HOME_GUEST_PATH.removePrefix("/")).apply { mkdirs() }
             File(home, fileName).writeText(text)
             true

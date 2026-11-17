@@ -32,14 +32,14 @@ package com.jarves.mh.runtime
  */
 
 /** ApiKeyVault pool id holding the API key for the Hermes-native setup. */
-internal const val HERMES_SETUP_VAULT_ID = "HERMES_SETUP"
+const val HERMES_SETUP_VAULT_ID = "HERMES_SETUP"
 
 /**
  * One Hermes provider as `hermes model` knows it: the canonical slug written
  * to `model.provider`, the environment variable its API key is stored under,
  * its default endpoint and the curated model the picker pre-selects.
  */
-internal data class HermesProviderDef(
+data class HermesProviderDef(
     val id: String,
     val displayName: String,
     val keyEnv: String,
@@ -52,7 +52,7 @@ internal data class HermesProviderDef(
  * id Hermes is told to use (`--provider`), which env var carries the key,
  * and the endpoint for the model section / custom provider entry.
  */
-internal data class HermesRoute(
+data class HermesRoute(
     val provider: String,
     val keyEnv: String,
     val baseUrl: String,
@@ -60,7 +60,7 @@ internal data class HermesRoute(
 )
 
 /** Hermes's provider registry (0.19.0), API-key providers plus Custom. */
-internal object HermesProviderCatalog {
+object HermesProviderCatalog {
     const val CUSTOM_ID = "custom"
 
     /** Key of the app-managed entry under `providers:` for a custom endpoint. */
@@ -135,7 +135,7 @@ internal object HermesProviderCatalog {
  * choices `hermes setup` / `hermes model` ask for. The API key itself lives
  * in the vault (see [HermesRuntimeSettings.secret]).
  */
-internal data class HermesSetupSettings(
+data class HermesSetupSettings(
     val providerId: String,
     val model: String,
     val customBaseUrl: String,
@@ -177,7 +177,7 @@ internal data class HermesSetupSettings(
  * [FULL_POWER] reproduces the app's established full-powers unlock posture
  * as the initial values; nothing here silently weakens it.
  */
-internal data class HermesConfigOptions(
+data class HermesConfigOptions(
     /** `memory.memory_enabled` — persistent memory across sessions. */
     val memoryEnabled: Boolean,
     /** `memory.user_profile_enabled` — the USER.md profile memory. */
@@ -249,7 +249,7 @@ internal data class HermesConfigOptions(
 }
 
 /** Everything one Hermes launch needs from the native settings store. */
-internal data class HermesRuntimeSettings(
+data class HermesRuntimeSettings(
     val setup: HermesSetupSettings,
     val secret: String,
     val options: HermesConfigOptions,
@@ -261,7 +261,7 @@ internal data class HermesRuntimeSettings(
  * secrets; keys, comments, blank lines and empty values pass through
  * untouched. Purely a display transform — saving always writes the real text.
  */
-internal object HermesEnvText {
+object HermesEnvText {
     private const val MASK = "••••••"
     private val assignment = Regex("""^(\s*(?:export\s+)?[A-Za-z_][A-Za-z0-9_]*\s*=)\s*(\S.*)?$""")
 
