@@ -55,17 +55,17 @@ enum class AgentKind(
     val subtitle: String,
     val downloadNote: String,
 ) {
+    HERMES(
+        "hermes",
+        "Hermes Agent",
+        "Nous Research's self-improving agent · own memory & skills",
+        "~70 MB",
+    ),
     CLAUDE_CODE(
         "claude-code",
         "Claude Code",
         "Anthropic's coding agent · broad provider support",
         "71.8 MB",
-    ),
-    DEEPSEEK_HARNESS(
-        "deepseek-harness",
-        "DeepSeek Harness",
-        "Official DeepSeek coding agent · API-key providers",
-        "26.5 MB",
     ),
     ANTIGRAVITY(
         "antigravity",
@@ -76,61 +76,31 @@ enum class AgentKind(
     ;
 
     companion object {
+        /**
+         * Resolves a persisted agent id. Unknown ids — including agents removed
+         * in later versions (e.g. the retired DeepSeek Harness, "deepseek-harness")
+         * — fall back to the default agent instead of failing.
+         */
         fun fromStored(value: String?): AgentKind = entries.firstOrNull {
             it.stableId == value || it.name == value
-        } ?: CLAUDE_CODE
+        } ?: HERMES
     }
-}
-
-/** Provider kinds usable with [AgentKind.DEEPSEEK_HARNESS]. Claude OAuth login has no dsh equivalent. */
-val DEEPSEEK_HARNESS_PROVIDERS: Set<ProviderKind> = setOf(
-    ProviderKind.DEEPSEEK,
-    ProviderKind.ANTHROPIC,
-    ProviderKind.LLM_ROUTER,
-    ProviderKind.KIMI,
-    ProviderKind.NVIDIA_NIM,
-    ProviderKind.CUSTOM,
-)
-
-val DSH_PROTOCOL_PROVIDERS: Set<ProviderKind> = setOf(
-    ProviderKind.KIMI,
-    ProviderKind.OPENCODE_ZEN,
-    ProviderKind.NVIDIA_NIM,
-    ProviderKind.CUSTOM,
-)
-
-fun defaultDshApiForProvider(kind: ProviderKind): String = when (kind) {
-    ProviderKind.OPENCODE_ZEN -> "openai-responses"
-    ProviderKind.NVIDIA_NIM -> "openai-completions"
-    else -> "anthropic-messages"
 }
 
 /**
- * Best-effort protocol choice for a user-entered custom gateway URL.
- * The picker remains editable because a URL alone cannot prove a gateway's wire format.
+ * Provider kinds usable with [AgentKind.HERMES]. Claude subscription login has no
+ * Hermes equivalent, and OpenCode Zen is not offered to any agent (see
+ * [providersForAgent]). DeepSeek, Kimi and NVIDIA NIM map to Hermes's first-class
+ * providers; CUSTOM becomes a named OpenAI/Anthropic-compatible provider entry.
  */
-fun inferredDshApiForUrl(baseUrl: String): String {
-    val normalized = baseUrl.trim().trimEnd('/').lowercase(Locale.ROOT)
-    return when {
-        normalized.endsWith("/responses") -> "openai-responses"
-        "/anthropic" in normalized || "api.anthropic.com" in normalized -> "anthropic-messages"
-        normalized.endsWith("/v1") -> "openai-completions"
-        else -> "anthropic-messages"
-    }
-}
-
-/** Resolves the protocol DeepSeek Harness will actually use for this saved profile. */
-fun providerProtocolForAgent(profile: ProviderProfile, agent: AgentKind): ProviderProtocol {
-    if (agent != AgentKind.DEEPSEEK_HARNESS || profile.kind !in DSH_PROTOCOL_PROVIDERS) {
-        return profile.kind.protocol
-    }
-    val api = if (profile.kind.fixedProtocol) defaultDshApiForProvider(profile.kind) else profile.dshApi
-    return when (api) {
-        "openai-completions" -> ProviderProtocol.OPENAI_CHAT
-        "openai-responses" -> ProviderProtocol.OPENAI_RESPONSES
-        else -> ProviderProtocol.ANTHROPIC_GATEWAY
-    }
-}
+val HERMES_PROVIDERS: Set<ProviderKind> = setOf(
+    ProviderKind.ANTHROPIC,
+    ProviderKind.LLM_ROUTER,
+    ProviderKind.DEEPSEEK,
+    ProviderKind.KIMI,
+    ProviderKind.NVIDIA_NIM,
+    ProviderKind.CUSTOM,
+)
 
 /**
  * Provider choices shown for the selected coding agent. OpenCode Zen is no longer offered: its
@@ -138,7 +108,7 @@ fun providerProtocolForAgent(profile: ProviderProfile, agent: AgentKind): Provid
  * still load; [AppPreferences.loadProvider] moves them to the agent's default provider.
  */
 fun providersForAgent(agent: AgentKind): List<ProviderKind> = when (agent) {
-    AgentKind.DEEPSEEK_HARNESS -> ProviderKind.entries.filter { it in DEEPSEEK_HARNESS_PROVIDERS }
+    AgentKind.HERMES -> ProviderKind.entries.filter { it in HERMES_PROVIDERS }
     AgentKind.CLAUDE_CODE -> ProviderKind.entries.filterNot { it == ProviderKind.OPENCODE_ZEN }
     AgentKind.ANTIGRAVITY -> emptyList()
 }
@@ -148,8 +118,6 @@ data class ProviderProfile(
     val baseUrl: String = kind.defaultBaseUrl,
     val model: String = kind.defaultModel,
     val hasSecret: Boolean = false,
-    /** dsh custom-route wire protocol for CUSTOM: anthropic-messages | openai-completions | openai-responses. */
-    val dshApi: String = defaultDshApiForProvider(kind),
     /** Comma-separated OpenRouter provider slugs, tried in order. Blank keeps automatic routing. */
     val openRouterProviderOrder: String = "",
     /** Whether OpenRouter may use providers outside [openRouterProviderOrder]. */

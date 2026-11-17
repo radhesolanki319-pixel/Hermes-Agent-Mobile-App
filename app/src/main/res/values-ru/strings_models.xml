@@ -27,7 +27,6 @@
     <string name="md_reason_stopped_by_user">Остановлено пользователем</string>
     <string name="md_reason_no_api_key">Для %1$s не сохранён API-ключ.</string>
     <string name="md_reason_no_claude_token">Токен подписки Claude не сохранён. Добавьте его в разделе Агент → Провайдер ИИ.</string>
-    <string name="md_reason_dsh_not_installed">DeepSeek Harness не установлен. Откройте Настройки → Агент для программирования, чтобы установить его.</string>
     <string name="md_reason_antigravity_not_installed">Antigravity CLI не установлен. Откройте Настройки → Агент для программирования, чтобы установить его.</string>
     <string name="md_chat_title_attachments">Просмотреть прикреплённые файлы</string>
     <string name="md_reason_user_not_found">Пользователь не найден. Проверьте API-ключ и аккаунт провайдера.</string>
@@ -43,12 +42,6 @@
     <string name="md_reason_antigravity_model_unavailable">Выбранная модель Antigravity недоступна. Обновите список моделей в Настройках.</string>
     <string name="md_reason_antigravity_failed">Antigravity не удалось выполнить задачу.</string>
     <string name="md_reason_antigravity_cli_missing_short">Antigravity CLI не установлен.</string>
-    <string name="md_reason_dsh_stopped_before_prompt">DeepSeek Harness остановился до обработки запроса</string>
-    <string name="md_reason_dsh_no_key">API-ключ не был передан в DeepSeek Harness. Сохраните ключ провайдера заново в Настройках.</string>
-    <string name="md_reason_dsh_could_not_start">Не удалось запустить DeepSeek Harness.</string>
-    <string name="md_reason_dsh_unspecified">DeepSeek Harness сообщил о неизвестной ошибке</string>
-    <string name="md_reason_dsh_turn_failed">Ход DeepSeek Harness завершился с ошибкой</string>
-    <string name="md_reason_dsh_blocked">DeepSeek Harness не смог завершить задачу из-за блокировки</string>
     <string name="md_tool_failed">Ошибка инструмента</string>
     <string name="md_tool_completed_successfully">Успешно выполнено</string>
 </resources>

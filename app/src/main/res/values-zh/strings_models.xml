@@ -27,7 +27,6 @@
     <string name="md_reason_stopped_by_user">已被用户停止</string>
     <string name="md_reason_no_api_key">尚未保存 %1$s 的 API 密钥。</string>
     <string name="md_reason_no_claude_token">尚未保存 Claude 订阅令牌。请在“智能助手 → AI 服务商”中添加。</string>
-    <string name="md_reason_dsh_not_installed">DeepSeek Harness 未安装。请打开“设置 → 编程代理”进行安装。</string>
     <string name="md_reason_antigravity_not_installed">Antigravity CLI 未安装。请打开“设置 → 编程代理”进行安装。</string>
     <string name="md_chat_title_attachments">查看附加的文件</string>
     <string name="md_reason_user_not_found">未找到用户。请检查 API 密钥和服务商账户。</string>
@@ -43,12 +42,6 @@
     <string name="md_reason_antigravity_model_unavailable">所选的 Antigravity 模型不可用。请在设置中刷新模型。</string>
     <string name="md_reason_antigravity_failed">Antigravity 无法完成任务。</string>
     <string name="md_reason_antigravity_cli_missing_short">Antigravity CLI 未安装。</string>
-    <string name="md_reason_dsh_stopped_before_prompt">DeepSeek Harness 在处理提示前已停止</string>
-    <string name="md_reason_dsh_no_key">没有 API 密钥传递到 DeepSeek Harness。请在设置中重新保存服务商密钥。</string>
-    <string name="md_reason_dsh_could_not_start">DeepSeek Harness 无法启动。</string>
-    <string name="md_reason_dsh_unspecified">DeepSeek Harness 报告了未指明的错误</string>
-    <string name="md_reason_dsh_turn_failed">DeepSeek Harness 本轮执行失败</string>
-    <string name="md_reason_dsh_blocked">DeepSeek Harness 被阻止完成任务</string>
     <string name="md_tool_failed">工具执行失败</string>
     <string name="md_tool_completed_successfully">已成功完成</string>
 </resources>

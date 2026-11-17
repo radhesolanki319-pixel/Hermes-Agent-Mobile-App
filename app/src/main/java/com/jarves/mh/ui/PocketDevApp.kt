@@ -226,8 +226,6 @@ import com.jarves.mh.model.ChangeItem
 import com.jarves.mh.model.ChatMessage
 import com.jarves.mh.model.ChatAttachment
 import com.jarves.mh.model.DevStack
-import com.jarves.mh.model.DEEPSEEK_HARNESS_PROVIDERS
-import com.jarves.mh.model.DSH_PROTOCOL_PROVIDERS
 import com.jarves.mh.model.DiffLine
 import com.jarves.mh.model.DiffLineType
 import com.jarves.mh.model.Project
@@ -237,7 +235,6 @@ import com.jarves.mh.model.AndroidTemplate
 import com.jarves.mh.model.ProjectChat
 import com.jarves.mh.model.ProviderKind
 import com.jarves.mh.model.ProviderProfile
-import com.jarves.mh.model.inferredDshApiForUrl
 import com.jarves.mh.model.providersForAgent
 import com.jarves.mh.model.ToolRequest
 import com.jarves.mh.model.WorkspaceEntry
@@ -1139,7 +1136,7 @@ private fun getDevStackVisuals(stack: DevStack): DevStackVisuals = when (stack) 
 @Composable
 private fun RuntimeSetupPromptScreen(
     selectedStacks: Set<DevStack>,
-    selectedAgent: AgentKind = AgentKind.CLAUDE_CODE,
+    selectedAgent: AgentKind = AgentKind.HERMES,
     themeMode: AppThemeMode = AppThemeMode.DARK,
     currentLanguageCode: String = "system",
     onSetLanguage: (String) -> Unit = {},
@@ -1547,8 +1544,8 @@ private fun RuntimeSetupPromptScreen(
 
 private const val CORE_RUNTIME_DOWNLOAD_MB = 69
 private const val CLAUDE_RUNTIME_DOWNLOAD_MB = 72
-private const val DSH_RUNTIME_DOWNLOAD_MB = 27
 private const val AGY_RUNTIME_DOWNLOAD_MB = 40
+private const val HERMES_RUNTIME_DOWNLOAD_MB = 70
 private const val PYTHON_RUNTIME_DOWNLOAD_MB = 55
 private const val ANDROID_RUNTIME_DOWNLOAD_MB = 570
 
@@ -1589,8 +1586,8 @@ private fun toolchainDownloadSummary(selected: Set<DevStack>, agent: AgentKind):
     if (BuildConfig.OFFLINE_RUNTIME_BUNDLES) return stringResource(R.string.ws_bundles_included_offline)
     val total = CORE_RUNTIME_DOWNLOAD_MB +
         when (agent) {
+            AgentKind.HERMES -> HERMES_RUNTIME_DOWNLOAD_MB
             AgentKind.CLAUDE_CODE -> CLAUDE_RUNTIME_DOWNLOAD_MB
-            AgentKind.DEEPSEEK_HARNESS -> DSH_RUNTIME_DOWNLOAD_MB
             AgentKind.ANTIGRAVITY -> AGY_RUNTIME_DOWNLOAD_MB
         } +
         (if (DevStack.PYTHON in selected) PYTHON_RUNTIME_DOWNLOAD_MB else 0) +
@@ -1678,13 +1675,13 @@ private fun AgentChoiceRow(
     onClick: () -> Unit,
 ) {
     val accent = when (agent) {
+        AgentKind.HERMES -> Color(0xFF0F766E)
         AgentKind.CLAUDE_CODE -> Color(0xFFD97757)
-        AgentKind.DEEPSEEK_HARNESS -> Color(0xFF4D6BFE)
         AgentKind.ANTIGRAVITY -> Color(0xFF4285F4)
     }
     val mark = when (agent) {
+        AgentKind.HERMES -> "HA"
         AgentKind.CLAUDE_CODE -> "CC"
-        AgentKind.DEEPSEEK_HARNESS -> "DS"
         AgentKind.ANTIGRAVITY -> "AG"
     }
     Row(
@@ -1713,7 +1710,7 @@ private fun AgentChoiceRow(
                     fontWeight = FontWeight.SemiBold,
                     fontSize = 13.sp,
                 )
-                if (agent == AgentKind.DEEPSEEK_HARNESS) {
+                if (agent == AgentKind.HERMES) {
                     Spacer(Modifier.width(7.dp))
                     Surface(
                         color = PocketOrange.copy(alpha = 0.14f),
@@ -2729,7 +2726,7 @@ private fun QuickTerminalSheet(
 private fun ProviderSetupScreen(
     initial: ProviderProfile,
     onboarding: Boolean,
-    agentKind: AgentKind = AgentKind.CLAUDE_CODE,
+    agentKind: AgentKind = AgentKind.HERMES,
     initialStep: Int = if (onboarding) 0 else 1,
     onBack: (() -> Unit)? = null,
     currentLanguageCode: String = "system",
@@ -2748,7 +2745,6 @@ private fun ProviderSetupScreen(
     var selected by rememberSaveable { mutableStateOf(initial.kind) }
     var baseUrl by rememberSaveable { mutableStateOf(initial.baseUrl.ifBlank { initial.kind.defaultBaseUrl }) }
     var model by rememberSaveable { mutableStateOf(initial.model.ifBlank { initial.kind.defaultModel }) }
-    var dshApi by rememberSaveable { mutableStateOf(initial.dshApi.ifBlank { "anthropic-messages" }) }
     var apiKey by rememberSaveable { mutableStateOf("") }
     var showAgentPicker by rememberSaveable { mutableStateOf(false) }
 
@@ -2828,76 +2824,32 @@ private fun ProviderSetupScreen(
                 )
                 else -> ProviderCredentialsStep(
                     provider = selected,
-                    agentKind = agentKind,
                     baseUrl = baseUrl,
                     model = model,
-                    dshApi = dshApi,
                     apiKey = apiKey,
                     onBaseUrl = {
                         baseUrl = it
-                        if (agentKind == AgentKind.DEEPSEEK_HARNESS && selected == ProviderKind.CUSTOM) {
-                            dshApi = inferredDshApiForUrl(it)
-                        }
                     },
                     onModel = { model = it },
-                    onDshApi = { dshApi = it },
                     onApiKey = { apiKey = it },
                     hasStoredSecret = initial.kind == selected && initial.hasSecret,
                     onDiscover = {
                         val url = if (selected.fixedBaseUrl) selected.defaultBaseUrl else baseUrl.trim()
-                        onDiscover(ProviderProfile(selected, url, model.trim(), dshApi = dshApi), apiKey)
+                        onDiscover(ProviderProfile(selected, url, model.trim()), apiKey)
                     },
                     onValidate = { models ->
                         val url = if (selected.fixedBaseUrl) selected.defaultBaseUrl else baseUrl.trim()
-                        onValidate(ProviderProfile(selected, url, model.trim(), dshApi = dshApi), apiKey, models)
+                        onValidate(ProviderProfile(selected, url, model.trim()), apiKey, models)
                     },
                     onSave = {
                         val url = if (selected.fixedBaseUrl) selected.defaultBaseUrl else baseUrl.trim()
-                        onSave(ProviderProfile(selected, url, model.trim(), dshApi = dshApi), apiKey)
+                        onSave(ProviderProfile(selected, url, model.trim()), apiKey)
                     },
                     onChangeAgent = { showAgentPicker = true },
                     onSkip = onSkip,
                 )
             }
         }
-    }
-}
-
-@Composable
-private fun DshApiProtocolPicker(selected: String, onSelected: (String) -> Unit) {
-    val options = listOf("anthropic-messages", "openai-completions", "openai-responses")
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text(
-            stringResource(R.string.provider_gateway_protocol),
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            fontSize = 12.sp,
-        )
-        options.forEach { option ->
-            Row(
-                modifier = Modifier.fillMaxWidth().clickable { onSelected(option) }.padding(vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(19.dp)
-                        .border(
-                            width = if (selected == option) 2.dp else 1.dp,
-                            color = if (selected == option) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant,
-                            shape = CircleShape,
-                        ),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    if (selected == option) Box(Modifier.size(8.dp).background(MaterialTheme.colorScheme.primary, CircleShape))
-                }
-                Spacer(Modifier.width(10.dp))
-                Text(option, fontSize = 13.sp)
-            }
-        }
-        Text(
-            stringResource(R.string.provider_gateway_protocol_help),
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            fontSize = 11.sp,
-        )
     }
 }
 
@@ -3200,14 +3152,11 @@ private fun ProviderChoiceRow(
 @Composable
 private fun ProviderCredentialsStep(
     provider: ProviderKind,
-    agentKind: AgentKind = AgentKind.CLAUDE_CODE,
     baseUrl: String,
     model: String,
-    dshApi: String = "anthropic-messages",
     apiKey: String,
     onBaseUrl: (String) -> Unit,
     onModel: (String) -> Unit,
-    onDshApi: (String) -> Unit = {},
     onApiKey: (String) -> Unit,
     hasStoredSecret: Boolean,
     onDiscover: suspend () -> ModelDiscoveryResult,
@@ -3379,7 +3328,6 @@ private fun ProviderCredentialsStep(
             Spacer(Modifier.height(5.dp))
             Text(
                 when {
-                    agentKind == AgentKind.DEEPSEEK_HARNESS -> stringResource(R.string.provider_endpoint_deepseek)
                     provider.protocol.name.startsWith("OPENAI") -> stringResource(R.string.provider_endpoint_translate)
                     else -> stringResource(R.string.provider_endpoint_claude)
                 },
@@ -3405,9 +3353,6 @@ private fun ProviderCredentialsStep(
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
                     )
-                    if (agentKind == AgentKind.DEEPSEEK_HARNESS && provider in DSH_PROTOCOL_PROVIDERS && !provider.fixedProtocol) {
-                        DshApiProtocolPicker(selected = dshApi, onSelected = { onDshApi(it); status = null })
-                    }
                     OutlinedTextField(
                         apiKey,
                         { onApiKey(it); status = null; statusDetails = null },

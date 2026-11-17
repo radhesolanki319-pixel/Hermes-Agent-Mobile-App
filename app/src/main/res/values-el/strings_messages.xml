@@ -128,7 +128,6 @@
     <string name="vm_unsafe_attachment_folder">Μη ασφαλής φάκελος συνημμένων</string>
     <string name="vm_read_named_failed">Δεν ήταν δυνατή η ανάγνωση του %1$s</string>
     <string name="vm_antigravity_signin_before_task">Συνδεθείτε στο Antigravity από τις Ρυθμίσεις πριν ξεκινήσετε μια εργασία.</string>
-    <string name="vm_dsh_claude_unsupported">Η σύνδεση με συνδρομή Claude δεν υποστηρίζεται από το DeepSeek Harness — επιλέξτε πάροχο με κλειδί στις Ρυθμίσεις.</string>
     <string name="vm_understanding_request">Κατανόηση του αιτήματός σας</string>
     <string name="vm_preparing_safe_plan">Προετοιμασία ασφαλούς σχεδίου</string>
     <string name="vm_changes_undone">Οι αλλαγές αναιρέθηκαν</string>

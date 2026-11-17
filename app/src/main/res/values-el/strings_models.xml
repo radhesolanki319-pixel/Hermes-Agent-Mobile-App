@@ -27,7 +27,6 @@
     <string name="md_reason_stopped_by_user">Διακόπηκε από τον χρήστη</string>
     <string name="md_reason_no_api_key">Δεν έχει αποθηκευτεί κλειδί API για %1$s.</string>
     <string name="md_reason_no_claude_token">Δεν έχει αποθηκευτεί token συνδρομής Claude. Προσθέστε ένα από Agent → Πάροχος AI.</string>
-    <string name="md_reason_dsh_not_installed">Το DeepSeek Harness δεν είναι εγκατεστημένο. Ανοίξτε Ρυθμίσεις → Agent προγραμματισμού για να το εγκαταστήσετε.</string>
     <string name="md_reason_antigravity_not_installed">Το Antigravity CLI δεν είναι εγκατεστημένο. Ανοίξτε Ρυθμίσεις → Agent προγραμματισμού για να το εγκαταστήσετε.</string>
     <string name="md_chat_title_attachments">Ελέγξτε τα συνημμένα αρχεία</string>
     <string name="md_reason_user_not_found">Ο χρήστης δεν βρέθηκε. Ελέγξτε το κλειδί API και τον λογαριασμό του παρόχου.</string>
@@ -43,12 +42,6 @@
     <string name="md_reason_antigravity_model_unavailable">Το επιλεγμένο μοντέλο Antigravity δεν είναι διαθέσιμο. Ανανεώστε τα μοντέλα στις Ρυθμίσεις.</string>
     <string name="md_reason_antigravity_failed">Το Antigravity δεν μπόρεσε να ολοκληρώσει την εργασία.</string>
     <string name="md_reason_antigravity_cli_missing_short">Το Antigravity CLI δεν είναι εγκατεστημένο.</string>
-    <string name="md_reason_dsh_stopped_before_prompt">Το DeepSeek Harness σταμάτησε πριν επεξεργαστεί το αίτημα</string>
-    <string name="md_reason_dsh_no_key">Κανένα κλειδί API δεν έφτασε στο DeepSeek Harness. Αποθηκεύστε ξανά το κλειδί του παρόχου στις Ρυθμίσεις.</string>
-    <string name="md_reason_dsh_could_not_start">Δεν ήταν δυνατή η εκκίνηση του DeepSeek Harness.</string>
-    <string name="md_reason_dsh_unspecified">Το DeepSeek Harness ανέφερε απροσδιόριστο σφάλμα</string>
-    <string name="md_reason_dsh_turn_failed">Ο γύρος του DeepSeek Harness απέτυχε</string>
-    <string name="md_reason_dsh_blocked">Το DeepSeek Harness εμποδίστηκε να ολοκληρώσει την εργασία</string>
     <string name="md_tool_failed">Το εργαλείο απέτυχε</string>
     <string name="md_tool_completed_successfully">Ολοκληρώθηκε με επιτυχία</string>
 </resources>

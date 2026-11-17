@@ -30,10 +30,14 @@ object GenUiActionBridge {
     fun defaultValue(node: GenUiNode): String = when (node.type) {
         GenUiComponentTypes.INPUT, GenUiComponentTypes.TEXTAREA ->
             node.propText("value") ?: ""
-        GenUiComponentTypes.RADIO_GROUP ->
+        GenUiComponentTypes.RADIO_GROUP, GenUiComponentTypes.SELECT ->
             node.propText("selected") ?: node.propOptions("options").firstOrNull()?.first ?: ""
         GenUiComponentTypes.CHECKBOX ->
             (node.propBool("checked") ?: false).toString()
+        GenUiComponentTypes.SLIDER ->
+            formatGenUiNumber(node.propNumber("value") ?: node.propNumber("min") ?: 0.0)
+        GenUiComponentTypes.TABS ->
+            (node.propNumber("selected")?.toInt() ?: 0).toString()
         else -> ""
     }
 
@@ -114,6 +118,9 @@ object GenUiActionBridge {
         is GenUiValue.Number -> value.value.toString()
         is GenUiValue.Bool -> value.value.toString()
         is GenUiValue.TextList -> value.values.joinToString(", ")
+        is GenUiValue.TextMatrix -> value.values.joinToString("; ") { row ->
+            row.joinToString(", ")
+        }
         is GenUiValue.ObjectList -> value.values.joinToString(", ") { entry ->
             entry.entries.joinToString(", ") { (key, item) -> "$key=${renderValue(item)}" }
         }

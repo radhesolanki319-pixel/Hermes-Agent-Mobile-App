@@ -97,11 +97,8 @@ import androidx.annotation.StringRes
 import com.jarves.mh.R
 import com.jarves.mh.data.ApiKeyInfo
 import com.jarves.mh.model.AgentKind
-import com.jarves.mh.model.DSH_PROTOCOL_PROVIDERS
 import com.jarves.mh.model.ProviderKind
 import com.jarves.mh.model.ProviderProfile
-import com.jarves.mh.model.defaultDshApiForProvider
-import com.jarves.mh.model.inferredDshApiForUrl
 import com.jarves.mh.model.providersForAgent
 import com.jarves.mh.network.ConnectionValidation
 import com.jarves.mh.network.DiscoveredModel
@@ -204,7 +201,6 @@ fun AgentScreen(
     val verifiedStatusLabel = stringResource(R.string.agent_status_verified)
     var baseUrl by rememberSaveable(state.provider.baseUrl) { mutableStateOf(state.provider.baseUrl) }
     var model by rememberSaveable(state.provider.model) { mutableStateOf(state.provider.model) }
-    var dshApi by rememberSaveable(state.provider.dshApi) { mutableStateOf(state.provider.dshApi) }
     var openRouterProviderOrder by rememberSaveable(state.provider.openRouterProviderOrder) {
         mutableStateOf(state.provider.openRouterProviderOrder)
     }
@@ -298,7 +294,6 @@ fun AgentScreen(
                 kind,
                 url,
                 model.trim(),
-                dshApi = dshApi,
                 openRouterProviderOrder = openRouterProviderOrder,
                 openRouterAllowFallbacks = openRouterAllowFallbacks,
             )
@@ -849,9 +844,9 @@ fun AgentScreen(
                                 val isInstalled = installedVersion != null
                                 val updateAvailable = state.agentUpdates.containsKey(agent)
                                 val shortTitle = when (agent) {
-                                    AgentKind.ANTIGRAVITY -> "Antigravity"
-                                    AgentKind.DEEPSEEK_HARNESS -> "DeepSeek"
+                                    AgentKind.HERMES -> "Hermes"
                                     AgentKind.CLAUDE_CODE -> "Claude Code"
+                                    AgentKind.ANTIGRAVITY -> "Antigravity"
                                 }
                                 Surface(
                                     shape = RoundedCornerShape(12.dp),
@@ -944,8 +939,8 @@ fun AgentScreen(
                     } else if (!viewedAgentInstalled) {
                         val viewedAgentTitle = stringResource(
                             when (viewedAgent) {
+                                AgentKind.HERMES -> R.string.agent_title_hermes
                                 AgentKind.CLAUDE_CODE -> R.string.agent_title_claude
-                                AgentKind.DEEPSEEK_HARNESS -> R.string.agent_title_deepseek
                                 AgentKind.ANTIGRAVITY -> R.string.agent_title_antigravity
                             },
                         )
@@ -1008,7 +1003,6 @@ fun AgentScreen(
                         selectedKind = selectedKind,
                         baseUrl = baseUrl,
                         model = model,
-                        dshApi = dshApi,
                         openRouterProviderOrder = openRouterProviderOrder,
                         openRouterAllowFallbacks = openRouterAllowFallbacks,
                         apiKey = apiKey,
@@ -1027,7 +1021,6 @@ fun AgentScreen(
                             selectedKind = kind
                             baseUrl = kind.defaultBaseUrl
                             model = kind.defaultModel
-                            dshApi = defaultDshApiForProvider(kind)
                             openRouterProviderOrder = ""
                             openRouterAllowFallbacks = true
                             models = emptyList()
@@ -1040,16 +1033,12 @@ fun AgentScreen(
                         },
                         onBaseUrl = {
                             baseUrl = it
-                            if (state.agentKind == AgentKind.DEEPSEEK_HARNESS && selectedKind == ProviderKind.CUSTOM) {
-                                dshApi = inferredDshApiForUrl(it)
-                            }
                             models = emptyList()
                             status = null
                             statusProviderMessage = null
                             keyConnectionStatuses = emptyMap()
                         },
                         onModel = { model = it; status = null; statusProviderMessage = null; keyConnectionStatuses = emptyMap() },
-                        onDshApi = { dshApi = it; status = null; statusProviderMessage = null; keyConnectionStatuses = emptyMap() },
                         onOpenRouterProviderOrder = {
                             openRouterProviderOrder = it
                             status = null
@@ -1108,7 +1097,6 @@ fun AgentScreen(
                                     kind,
                                     url,
                                     model.trim(),
-                                    dshApi = dshApi,
                                     openRouterProviderOrder = openRouterProviderOrder,
                                     openRouterAllowFallbacks = openRouterAllowFallbacks,
                                 )
@@ -1519,7 +1507,6 @@ private fun AgentProviderCard(
     selectedKind: ProviderKind,
     baseUrl: String,
     model: String,
-    dshApi: String,
     openRouterProviderOrder: String,
     openRouterAllowFallbacks: Boolean,
     apiKey: String,
@@ -1537,7 +1524,6 @@ private fun AgentProviderCard(
     onProvider: (ProviderKind) -> Unit,
     onBaseUrl: (String) -> Unit,
     onModel: (String) -> Unit,
-    onDshApi: (String) -> Unit,
     onOpenRouterProviderOrder: (String) -> Unit,
     onOpenRouterAllowFallbacks: (Boolean) -> Unit,
     onNewKeyName: (String) -> Unit,
@@ -1625,13 +1611,7 @@ private fun AgentProviderCard(
                 PremiumSummaryRow(
                     icon = Icons.Default.Info,
                     title = stringResource(if (selectedKind == ProviderKind.CUSTOM) R.string.agent_custom_api_settings else R.string.agent_endpoint_protocol),
-                    subtitle = buildString {
-                        append(baseUrl.ifBlank { stringResource(R.string.st_base_url_required) })
-                        if (state.agentKind == AgentKind.DEEPSEEK_HARNESS && selectedKind in DSH_PROTOCOL_PROVIDERS) {
-                            append(" · ")
-                            append(if (selectedKind.fixedProtocol) defaultDshApiForProvider(selectedKind) else dshApi)
-                        }
-                    },
+                    subtitle = baseUrl.ifBlank { stringResource(R.string.st_base_url_required) },
                     expanded = endpointExpanded,
                     onClick = { endpointExpanded = !endpointExpanded },
                 )
@@ -1689,25 +1669,6 @@ private fun AgentProviderCard(
                                     onCheckedChange = onOpenRouterAllowFallbacks,
                                     enabled = openRouterProviderOrder.isNotBlank(),
                                 )
-                            }
-                        }
-                        if (state.agentKind == AgentKind.DEEPSEEK_HARNESS && selectedKind in DSH_PROTOCOL_PROVIDERS && !selectedKind.fixedProtocol) {
-                            Column(modifier = Modifier.fillMaxWidth()) {
-                                Text(stringResource(R.string.provider_gateway_protocol), fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                Spacer(Modifier.height(5.dp))
-                                Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.28f)) {
-                                    Column {
-                                        listOf("anthropic-messages", "openai-completions", "openai-responses").forEach { option ->
-                                            Row(
-                                                Modifier.fillMaxWidth().clickable { onDshApi(option) }.padding(horizontal = 12.dp, vertical = 9.dp),
-                                                verticalAlignment = Alignment.CenterVertically,
-                                            ) {
-                                                Text(option, Modifier.weight(1f), fontSize = 12.sp, fontFamily = FontFamily.Monospace)
-                                                AgentSelectionDot(dshApi == option)
-                                            }
-                                        }
-                                    }
-                                }
                             }
                         }
                     }

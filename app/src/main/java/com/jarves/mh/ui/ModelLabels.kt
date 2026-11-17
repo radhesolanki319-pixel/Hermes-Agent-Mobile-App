@@ -42,15 +42,15 @@ fun ProviderKind.subtitleRes(): Int = when (this) {
 
 @StringRes
 fun AgentKind.titleRes(): Int = when (this) {
+    AgentKind.HERMES -> R.string.agent_title_hermes
     AgentKind.CLAUDE_CODE -> R.string.agent_title_claude
-    AgentKind.DEEPSEEK_HARNESS -> R.string.agent_title_deepseek
     AgentKind.ANTIGRAVITY -> R.string.agent_title_antigravity
 }
 
 @StringRes
 fun AgentKind.subtitleRes(): Int = when (this) {
+    AgentKind.HERMES -> R.string.agent_subtitle_hermes
     AgentKind.CLAUDE_CODE -> R.string.agent_subtitle_claude
-    AgentKind.DEEPSEEK_HARNESS -> R.string.agent_subtitle_deepseek
     AgentKind.ANTIGRAVITY -> R.string.agent_subtitle_antigravity
 }
 

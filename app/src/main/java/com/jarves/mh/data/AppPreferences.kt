@@ -11,7 +11,6 @@ import com.jarves.mh.model.AndroidTemplate
 import com.jarves.mh.model.ProjectChat
 import com.jarves.mh.model.ProviderKind
 import com.jarves.mh.model.ProviderProfile
-import com.jarves.mh.model.defaultDshApiForProvider
 import com.jarves.mh.model.projectSlug
 import com.jarves.mh.model.providersForAgent
 import com.jarves.mh.genui.GenUiStateCodec
@@ -39,9 +38,9 @@ class AppPreferences(private val context: Context) {
         get() = preferences.getBoolean("initial_language_selected", onboardingComplete || runtimeSetupComplete)
         set(value) { preferences.edit().putBoolean("initial_language_selected", value).apply() }
 
-    /** Coding agent engine the user picked during setup. Absent = pre-agent-choice install → Claude. */
+    /** Coding agent engine the user picked during setup. Absent = pre-agent-choice install → Hermes. */
     var agentKind: String
-        get() = preferences.getString("agent_kind", AgentKind.CLAUDE_CODE.stableId) ?: AgentKind.CLAUDE_CODE.stableId
+        get() = preferences.getString("agent_kind", AgentKind.HERMES.stableId) ?: AgentKind.HERMES.stableId
         set(value) { preferences.edit().putString("agent_kind", value).apply() }
 
     /** Agent chosen for the initial runtime installation; used as the leading UI tab. */
@@ -105,11 +104,6 @@ class AppPreferences(private val context: Context) {
         val version = if (agent == AgentKind.ANTIGRAVITY) "v2_" else ""
         return "agent_conversation_${version}${agent.stableId}_${projectId}_$chatId"
     }
-
-    /** Pinned dsh version recorded when DeepSeek Harness was installed. */
-    var dshVersion: String
-        get() = preferences.getString("dsh_version", "") ?: ""
-        set(value) { preferences.edit().putString("dsh_version", value).apply() }
 
     var themeMode: String
         get() = preferences.getString("theme_mode", "dark") ?: "dark"
@@ -213,7 +207,6 @@ class AppPreferences(private val context: Context) {
             .putString("provider_kind", profile.kind.name)
             .putString("provider_base_url", profile.baseUrl)
             .putString("provider_model", profile.model)
-            .putString("provider_dsh_api", profile.dshApi)
             .putString("provider_openrouter_order", profile.openRouterProviderOrder)
             .putBoolean("provider_openrouter_allow_fallbacks", profile.openRouterAllowFallbacks)
         if (agent != null) {
@@ -222,7 +215,6 @@ class AppPreferences(private val context: Context) {
                 .putString("${prefix}kind", profile.kind.name)
                 .putString("${prefix}base_url", profile.baseUrl)
                 .putString("${prefix}model", profile.model)
-                .putString("${prefix}dsh_api", profile.dshApi)
                 .putString("${prefix}openrouter_order", profile.openRouterProviderOrder)
                 .putBoolean("${prefix}openrouter_allow_fallbacks", profile.openRouterAllowFallbacks)
         }
@@ -236,25 +228,9 @@ class AppPreferences(private val context: Context) {
         val storedKind = runCatching {
             ProviderKind.valueOf(preferences.getString("${sourcePrefix}kind", null).orEmpty())
         }.getOrNull()
-        val storedBaseUrl = storedKind?.let {
-            preferences.getString("${sourcePrefix}base_url", it.defaultBaseUrl) ?: it.defaultBaseUrl
-        }.orEmpty()
-        val storedModel = storedKind?.let {
-            preferences.getString("${sourcePrefix}model", it.defaultModel) ?: it.defaultModel
-        }.orEmpty()
-        // Older builds copied the global Claude/Anthropic default into a new
-        // DeepSeek Harness profile. Treat that untouched, keyless placeholder
-        // as unconfigured so DeepSeek opens on its own official provider.
-        val legacyClaudeDefaultInDeepSeek = agent == AgentKind.DEEPSEEK_HARNESS &&
-            storedKind == ProviderKind.ANTHROPIC &&
-            !vault.contains(ProviderKind.ANTHROPIC.name) &&
-            storedBaseUrl == ProviderKind.ANTHROPIC.defaultBaseUrl &&
-            storedModel == ProviderKind.ANTHROPIC.defaultModel
         val kind = when {
             agent == null -> storedKind ?: ProviderKind.ANTHROPIC
-            agent == AgentKind.DEEPSEEK_HARNESS && (!hasAgentProfile || legacyClaudeDefaultInDeepSeek) -> ProviderKind.DEEPSEEK
             storedKind != null && storedKind in providersForAgent(agent) -> storedKind
-            agent == AgentKind.DEEPSEEK_HARNESS -> ProviderKind.DEEPSEEK
             else -> ProviderKind.ANTHROPIC
         }
         val useStoredValues = storedKind == kind
@@ -284,12 +260,6 @@ class AppPreferences(private val context: Context) {
             },
             model = model,
             hasSecret = vault.contains(kind.name),
-            dshApi = if (useStoredValues) {
-                preferences.getString("${sourcePrefix}dsh_api", defaultDshApiForProvider(kind))
-                    ?: defaultDshApiForProvider(kind)
-            } else {
-                defaultDshApiForProvider(kind)
-            },
             openRouterProviderOrder = if (useStoredValues) {
                 preferences.getString("${sourcePrefix}openrouter_order", "").orEmpty()
             } else {
@@ -553,7 +523,6 @@ class AppPreferences(private val context: Context) {
             "last_app_update_check_millis",
             "debug_update_manifest_url",
             "test_provider_defaults_version",
-            "dsh_version",
             "whats_new_seen_code",
             "backup_feature_seen",
         )

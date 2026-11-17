@@ -81,6 +81,16 @@ fun GenUiNodeView(
         GenUiComponentTypes.CODE_BLOCK -> GenUiCodeBlockView(node)
         GenUiComponentTypes.DIVIDER -> GenUiDividerView()
         GenUiComponentTypes.SPINNER -> GenUiSpinnerView(node)
+        GenUiComponentTypes.SELECT -> GenUiSelectView(node, state, enabled, onEvent)
+        GenUiComponentTypes.SLIDER -> GenUiSliderView(node, state, enabled, onEvent)
+        GenUiComponentTypes.TABS -> GenUiTabsView(node, payload, state, enabled, onEvent)
+        GenUiComponentTypes.IMAGE -> GenUiImageView(node)
+        GenUiComponentTypes.BADGE -> GenUiBadgeView(node)
+        GenUiComponentTypes.ALERT -> GenUiAlertView(node)
+        GenUiComponentTypes.TABLE -> GenUiTableView(node)
+        GenUiComponentTypes.TOOL_CALL_CARD -> GenUiToolCallCardView(node)
+        GenUiComponentTypes.FILE_PREVIEW -> GenUiFilePreviewView(node)
+        GenUiComponentTypes.TIMELINE -> GenUiTimelineView(node)
         else -> Unit
     }
 }

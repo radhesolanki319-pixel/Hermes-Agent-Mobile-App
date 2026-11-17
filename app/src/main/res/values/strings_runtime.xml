@@ -11,13 +11,14 @@
     <string name="rt_install_ready">%1$s is ready</string>
     <string name="rt_install_version_ready">%1$s %2$s is ready</string>
     <string name="rt_install_github_needs_online">GitHub sign-in needs the PocketDev online APK.</string>
+    <string name="rt_install_hermes_needs_online">Hermes Agent setup needs the PocketDev online APK.</string>
+    <string name="rt_install_hermes_failed">Hermes Agent installation failed</string>
     <string name="rt_install_downloading_github_cli">Downloading official GitHub CLI</string>
     <string name="rt_install_downloading_version">Downloading %1$s %2$s</string>
     <string name="rt_install_installing_version">Installing %1$s %2$s</string>
     <string name="rt_install_downloading_named">Downloading %1$s</string>
     <string name="rt_install_installing_named">Installing %1$s</string>
     <string name="rt_install_newer_release">A newer %1$s release appeared. Check again before updating.</string>
-    <string name="rt_install_dsh_update_failed">DeepSeek Harness update failed; the installed version was preserved</string>
     <string name="rt_install_stack_ready">%1$s tools are ready</string>
     <string name="rt_install_web_not_removable">Web tools are part of the core runtime and cannot be removed</string>
     <string name="rt_install_removing_stack">Removing %1$s tools</string>

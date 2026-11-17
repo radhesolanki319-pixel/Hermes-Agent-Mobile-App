@@ -93,8 +93,6 @@ import androidx.compose.ui.unit.sp
 import com.jarves.mh.BuildConfig
 import com.jarves.mh.data.ApiKeyInfo
 import com.jarves.mh.model.AgentKind
-import com.jarves.mh.model.DEEPSEEK_HARNESS_PROVIDERS
-import com.jarves.mh.model.DSH_PROTOCOL_PROVIDERS
 import com.jarves.mh.model.DevStack
 import com.jarves.mh.model.ProviderKind
 import com.jarves.mh.model.ProviderProfile
@@ -839,7 +837,6 @@ private fun ConnectionSettings(
     selectedKind: ProviderKind,
     baseUrl: String,
     model: String,
-    dshApi: String,
     apiKey: String,
     models: List<DiscoveredModel>,
     isDiscovering: Boolean,
@@ -854,7 +851,6 @@ private fun ConnectionSettings(
     onProvider: (ProviderKind) -> Unit,
     onBaseUrl: (String) -> Unit,
     onModel: (String) -> Unit,
-    onDshApi: (String) -> Unit,
     onNewKeyName: (String) -> Unit,
     onNewApiKey: (String) -> Unit,
     onToggleNewKey: () -> Unit,
@@ -942,22 +938,6 @@ private fun ConnectionSettings(
         )
     } else {
         OutlinedTextField(baseUrl, onBaseUrl, label = { Text(stringResource(R.string.provider_base_url)) }, singleLine = true, modifier = Modifier.fillMaxWidth())
-    }
-    if (state.agentKind == AgentKind.DEEPSEEK_HARNESS && selectedKind in DSH_PROTOCOL_PROVIDERS) {
-        Text(stringResource(R.string.provider_gateway_protocol), fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Surface(shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)) {
-            Column {
-                listOf("anthropic-messages", "openai-completions", "openai-responses").forEach { option ->
-                    Row(
-                        Modifier.fillMaxWidth().clickable { onDshApi(option) }.padding(horizontal = 13.dp, vertical = 11.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(option, Modifier.weight(1f), fontSize = 13.sp)
-                        SelectionDot(dshApi == option)
-                    }
-                }
-            }
-        }
     }
     Text(stringResource(R.string.st_model), fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurfaceVariant)
     OutlinedTextField(model, onModel, label = { Text(stringResource(R.string.provider_model_id)) }, singleLine = true, modifier = Modifier.fillMaxWidth())

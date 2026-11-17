@@ -54,19 +54,18 @@ import com.jarves.mh.model.ToolRequest
 import com.jarves.mh.model.WorkspaceEntry
 import com.jarves.mh.model.projectSlug
 import com.jarves.mh.model.generateQuickChatIdentity
-import com.jarves.mh.model.providerProtocolForAgent
 import com.jarves.mh.network.ConnectionValidation
 import com.jarves.mh.network.ModelDiscoveryResult
 import com.jarves.mh.network.ProviderApiClient
 import com.jarves.mh.network.GitHubRepository
 import com.jarves.mh.runtime.ClaudeRuntimeBridge
-import com.jarves.mh.runtime.DshRuntimeBridge
 import com.jarves.mh.runtime.AgentRegistry
 import com.jarves.mh.runtime.AgentUpdateInfo
 import com.jarves.mh.runtime.AntigravityAuthController
 import com.jarves.mh.runtime.AntigravityAuthState
 import com.jarves.mh.runtime.AntigravityAuthStatus
 import com.jarves.mh.runtime.AntigravityRuntimeBridge
+import com.jarves.mh.runtime.HermesRuntimeBridge
 import com.jarves.mh.runtime.NativeSpawnProcess
 import com.jarves.mh.runtime.RuntimeInstallProgress
 import com.jarves.mh.runtime.RuntimeInstaller
@@ -368,8 +367,8 @@ data class AppUiState(
     val devStackProgress: Float = 0f,
     val devStackBytes: Pair<Long, Long>? = null,
     val devStackBytesPerSecond: Long? = null,
-    val agentKind: AgentKind = AgentKind.CLAUDE_CODE,
-    val primaryAgentKind: AgentKind = AgentKind.CLAUDE_CODE,
+    val agentKind: AgentKind = AgentKind.HERMES,
+    val primaryAgentKind: AgentKind = AgentKind.HERMES,
     val installedAgentVersions: Map<AgentKind, String> = emptyMap(),
     val agentInstalling: AgentKind? = null,
     val agentMessage: String? = null,
@@ -427,7 +426,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val vault = ApiKeyVault(application)
     private val preferences = AppPreferences(application)
     private val claudeRuntime = ClaudeRuntimeBridge(application) { profile -> vault.get(profile.kind.name) }
-    private val dshRuntime = DshRuntimeBridge(application) { profile -> vault.get(profile.kind.name) }
     private val installer = RuntimeInstaller(application)
     private val antigravityRuntime = AntigravityRuntimeBridge(
         application,
@@ -440,7 +438,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _state.value.activeChatId?.let { preferences.saveAgentConversation(AgentKind.ANTIGRAVITY, projectId, it, id) }
         },
     )
-    private val agentRegistry = AgentRegistry.builtIns(claudeRuntime, dshRuntime, antigravityRuntime)
+    private val hermesRuntime = HermesRuntimeBridge(
+        application,
+        secretFor = { profile -> vault.get(profile.kind.name) },
+        conversationId = { projectId ->
+            _state.value.activeChatId?.let { preferences.loadAgentConversation(AgentKind.HERMES, projectId, it) }
+        },
+        saveConversationId = { projectId, id ->
+            _state.value.activeChatId?.let { preferences.saveAgentConversation(AgentKind.HERMES, projectId, it, id) }
+        },
+    )
+    private val agentRegistry = AgentRegistry.builtIns(hermesRuntime, claudeRuntime, antigravityRuntime)
     private fun activeRuntime(): com.jarves.mh.runtime.RuntimeBridge = agentRegistry.require(_state.value.agentKind).runtime
     private val providerApi = ProviderApiClient(application)
     private fun appUpdater(): AppUpdater = AppUpdater(
@@ -597,8 +605,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
         }
-        viewModelScope.launch { dshRuntime.events.collect(::onRuntimeEvent) }
         viewModelScope.launch { antigravityRuntime.events.collect(::onRuntimeEvent) }
+        viewModelScope.launch { hermesRuntime.events.collect(::onRuntimeEvent) }
         viewModelScope.launch {
             antigravityAuthController.state.collect { auth ->
                 _state.update { it.copy(antigravityAuth = auth) }
@@ -915,8 +923,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val current = _state.value
             if (!current.isRunning) {
                 runCatching { claudeRuntime.stopActiveSession() }
-                runCatching { dshRuntime.stopActiveSession() }
                 runCatching { antigravityRuntime.stopActiveSession() }
+                runCatching { hermesRuntime.stopActiveSession() }
             }
             if (!current.projectTerminalRunning) {
                 projectTerminalProcess?.takeIf(Process::isAlive)?.destroyForcibly()
@@ -2072,8 +2080,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     /** Keeps both agent bridges mapped to the same workspace root; the active one is used. */
     private fun configureBridgeRoots(projectId: String, rootPath: String) {
         claudeRuntime.configureProjectRoot(projectId, rootPath)
-        dshRuntime.configureProjectRoot(projectId, rootPath)
         antigravityRuntime.configureProjectRoot(projectId, rootPath)
+        hermesRuntime.configureProjectRoot(projectId, rootPath)
     }
 
     init {
@@ -2502,7 +2510,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
             result.onSuccess {
-                if (kind == AgentKind.DEEPSEEK_HARNESS) preferences.dshVersion = installer.dshVersion
                 selectAgent(kind)
             }
             _state.update { current ->
@@ -2857,7 +2864,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     suspend fun discoverModels(profile: ProviderProfile, secret: String): ModelDiscoveryResult {
         val key = secret.ifBlank { vault.get(profile.kind.name).orEmpty() }
-        return providerApi.discoverModels(profile.baseUrl, key, providerProtocolForAgent(profile, _state.value.agentKind))
+        return providerApi.discoverModels(profile.baseUrl, key, profile.kind.protocol)
     }
 
     suspend fun validateProvider(
@@ -2870,7 +2877,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             profile.baseUrl,
             profile.model,
             key,
-            providerProtocolForAgent(profile, _state.value.agentKind),
+            profile.kind.protocol,
             models,
             profile.openRouterProviderOrder,
             profile.openRouterAllowFallbacks,
@@ -2906,7 +2913,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 profile.baseUrl,
                 profile.model,
                 key,
-                providerProtocolForAgent(profile, _state.value.agentKind),
+                profile.kind.protocol,
                 emptyList(),
                 profile.openRouterProviderOrder,
                 profile.openRouterAllowFallbacks,
@@ -4723,10 +4730,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _state.update { it.copy(toastMessage = str(R.string.vm_antigravity_signin_before_task)) }
             return
         }
-        if (_state.value.agentKind == AgentKind.DEEPSEEK_HARNESS && _state.value.provider.kind == ProviderKind.CLAUDE) {
-            _state.update { it.copy(toastMessage = str(R.string.vm_dsh_claude_unsupported)) }
-            return
-        }
         val attachments = state.value.pendingAttachments
         if (prompt.isBlank() && attachments.isEmpty()) return
         if (state.value.isRunning || state.value.androidBuildRunning) {
@@ -5423,7 +5426,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val kind = ProviderKind.entries.firstOrNull { it.title == name }
             return str(R.string.md_reason_no_api_key, kind?.localizedTitle(getApplication()) ?: name)
         }
-        Regex("^(Claude Code|DeepSeek Harness) stopped with exit code (-?\\d+)$").matchEntire(trimmed)?.let { match ->
+        Regex("^(Claude Code) stopped with exit code (-?\\d+)$").matchEntire(trimmed)?.let { match ->
             return str(R.string.md_reason_agent_exit_code, match.groupValues[1], match.groupValues[2].toInt())
         }
         Regex("^Antigravity exited with code (-?\\d+)$").matchEntire(trimmed)?.let { match ->
@@ -5442,15 +5445,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             "Antigravity reached the 60-minute task limit. Your files were kept." -> str(R.string.md_reason_antigravity_time_limit)
             "The selected Antigravity model is unavailable. Refresh models in Settings." -> str(R.string.md_reason_antigravity_model_unavailable)
             "Antigravity could not complete the task." -> str(R.string.md_reason_antigravity_failed)
-            "Claude subscription login is not supported by DeepSeek Harness. Pick a key-based provider in Settings." -> str(R.string.vm_dsh_claude_unsupported)
-            "DeepSeek Harness stopped before processing the prompt" -> str(R.string.md_reason_dsh_stopped_before_prompt)
-            "No API key reached DeepSeek Harness. Re-save the provider key in Settings." -> str(R.string.md_reason_dsh_no_key)
-            "DeepSeek Harness could not start." -> str(R.string.md_reason_dsh_could_not_start)
-            "DeepSeek Harness reported an unspecified error" -> str(R.string.md_reason_dsh_unspecified)
-            "DeepSeek Harness turn failed" -> str(R.string.md_reason_dsh_turn_failed)
-            "DeepSeek Harness was blocked from completing the task" -> str(R.string.md_reason_dsh_blocked)
             "No Claude subscription token is saved. Add one from Agent → AI provider." -> str(R.string.md_reason_no_claude_token)
-            "DeepSeek Harness is not installed. Open Settings → Coding agent to install it." -> str(R.string.md_reason_dsh_not_installed)
             "Antigravity CLI is not installed. Open Settings → Coding agent to install it." -> str(R.string.md_reason_antigravity_not_installed)
             "Antigravity did not answer. Try again." -> str(R.string.vm_antigravity_no_answer)
             else -> reason

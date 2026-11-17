@@ -27,7 +27,6 @@
     <string name="md_reason_stopped_by_user">Stopped by user</string>
     <string name="md_reason_no_api_key">No API key is saved for %1$s.</string>
     <string name="md_reason_no_claude_token">No Claude subscription token is saved. Add one from Agent → AI provider.</string>
-    <string name="md_reason_dsh_not_installed">DeepSeek Harness is not installed. Open Settings → Coding agent to install it.</string>
     <string name="md_reason_antigravity_not_installed">Antigravity CLI is not installed. Open Settings → Coding agent to install it.</string>
     <string name="md_chat_title_attachments">Review the attached files</string>
     <string name="md_reason_user_not_found">User not found. Check the API key and provider account.</string>
@@ -43,12 +42,6 @@
     <string name="md_reason_antigravity_model_unavailable">The selected Antigravity model is unavailable. Refresh models in Settings.</string>
     <string name="md_reason_antigravity_failed">Antigravity could not complete the task.</string>
     <string name="md_reason_antigravity_cli_missing_short">Antigravity CLI is not installed.</string>
-    <string name="md_reason_dsh_stopped_before_prompt">DeepSeek Harness stopped before processing the prompt</string>
-    <string name="md_reason_dsh_no_key">No API key reached DeepSeek Harness. Re-save the provider key in Settings.</string>
-    <string name="md_reason_dsh_could_not_start">DeepSeek Harness could not start.</string>
-    <string name="md_reason_dsh_unspecified">DeepSeek Harness reported an unspecified error</string>
-    <string name="md_reason_dsh_turn_failed">DeepSeek Harness turn failed</string>
-    <string name="md_reason_dsh_blocked">DeepSeek Harness was blocked from completing the task</string>
     <string name="md_tool_failed">Tool failed</string>
     <string name="md_tool_completed_successfully">Completed successfully</string>
 </resources>

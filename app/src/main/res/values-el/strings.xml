@@ -225,8 +225,6 @@
     <string name="provider_subtitle_anthropic_compatible">Endpoint συμβατό με Anthropic</string>
     <string name="provider_subtitle_opencode">Μοντέλα μέσω του gateway OpenCode Zen</string>
     <string name="provider_subtitle_nvidia">Μοντέλα συμβατά με OpenAI, φιλοξενούμενα από τη NVIDIA</string>
-    <string name="provider_gateway_protocol">Πρωτόκολλο gateway</string>
-    <string name="provider_gateway_protocol_help">Επιλέξτε το πρωτόκολλο που χρησιμοποιεί το gateway σας· το DeepSeek Harness το δρομολογεί απευθείας.</string>
     <string name="provider_models_found">Βρέθηκαν %1$d διαθέσιμα μοντέλα.</string>
     <string name="provider_available_models">Διαθέσιμα μοντέλα</string>
     <string name="provider_models_count">%1$d από %2$d μοντέλα</string>
@@ -235,7 +233,6 @@
     <string name="provider_no_matching_models">Δεν βρέθηκαν μοντέλα</string>
     <string name="provider_free"> ΔΩΡΕΑΝ</string>
     <string name="provider_encrypted_locally">Κρυπτογραφημένο τοπικά</string>
-    <string name="provider_endpoint_deepseek">Το DeepSeek Harness θα συνδεθεί μέσω αυτού του endpoint API.</string>
     <string name="provider_endpoint_translate">Το Mobile Harness θα μετατρέπει τα αιτήματα του Claude Code για αυτόν τον πάροχο.</string>
     <string name="provider_endpoint_claude">Το Claude Code θα συνδεθεί μέσω αυτού του endpoint API.</string>
     <string name="provider_fixed_by">Ορίζεται από %1$s</string>
@@ -260,10 +257,8 @@
     <string name="agent_choose_desc">Αλλάξτε αν η τρέχουσα υπηρεσία δεν είναι διαθέσιμη. Η υπάρχουσα σύνδεση και τα διαπιστευτήριά σας παραμένουν αποθηκευμένα.</string>
     <string name="agent_recommended">Προτείνεται</string>
     <string name="agent_title_claude">Claude Code</string>
-    <string name="agent_title_deepseek">DeepSeek Harness</string>
     <string name="agent_title_antigravity">Antigravity CLI</string>
     <string name="agent_subtitle_claude">Ο coding agent της Anthropic · ευρεία υποστήριξη παρόχων</string>
-    <string name="agent_subtitle_deepseek">Επίσημος coding agent της DeepSeek · πάροχοι με κλειδί API</string>
     <string name="agent_subtitle_antigravity">Ο επίσημος coding agent της Google · λογαριασμός Google</string>
     <string name="projects_hero_title">Αναπτύξτε από το τηλέφωνό σας</string>
     <string name="projects_hero_desc">Συνομιλήστε, ελέγξτε αλλαγές και δείτε προεπισκόπηση του έργου σας.</string>

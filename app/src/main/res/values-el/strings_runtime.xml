@@ -17,7 +17,6 @@
     <string name="rt_install_downloading_named">Λήψη %1$s</string>
     <string name="rt_install_installing_named">Εγκατάσταση %1$s</string>
     <string name="rt_install_newer_release">Κυκλοφόρησε νεότερη έκδοση του %1$s. Ελέγξτε ξανά πριν από την ενημέρωση.</string>
-    <string name="rt_install_dsh_update_failed">Η ενημέρωση του DeepSeek Harness απέτυχε· η εγκατεστημένη έκδοση διατηρήθηκε</string>
     <string name="rt_install_stack_ready">Τα εργαλεία %1$s είναι έτοιμα</string>
     <string name="rt_install_web_not_removable">Τα εργαλεία web είναι μέρος του βασικού περιβάλλοντος και δεν μπορούν να αφαιρεθούν</string>
     <string name="rt_install_removing_stack">Αφαίρεση εργαλείων %1$s</string>

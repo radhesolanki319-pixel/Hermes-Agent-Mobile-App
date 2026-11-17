@@ -27,7 +27,6 @@
     <string name="md_reason_stopped_by_user">أوقفه المستخدم</string>
     <string name="md_reason_no_api_key">لا يوجد مفتاح API محفوظ لـ %1$s.</string>
     <string name="md_reason_no_claude_token">لا يوجد رمز اشتراك Claude محفوظ. أضف رمزًا من الوكيل ← مزود الذكاء الاصطناعي.</string>
-    <string name="md_reason_dsh_not_installed">DeepSeek Harness غير مثبّت. افتح الإعدادات ← وكيل البرمجة لتثبيته.</string>
     <string name="md_reason_antigravity_not_installed">Antigravity CLI غير مثبّت. افتح الإعدادات ← وكيل البرمجة لتثبيته.</string>
     <string name="md_chat_title_attachments">مراجعة الملفات المرفقة</string>
     <string name="md_reason_user_not_found">لم يتم العثور على المستخدم. تحقق من مفتاح API وحساب المزود.</string>
@@ -43,12 +42,6 @@
     <string name="md_reason_antigravity_model_unavailable">نموذج Antigravity المحدد غير متاح. حدّث النماذج من الإعدادات.</string>
     <string name="md_reason_antigravity_failed">تعذّر على Antigravity إكمال المهمة.</string>
     <string name="md_reason_antigravity_cli_missing_short">Antigravity CLI غير مثبّت.</string>
-    <string name="md_reason_dsh_stopped_before_prompt">توقف DeepSeek Harness قبل معالجة الطلب</string>
-    <string name="md_reason_dsh_no_key">لم يصل أي مفتاح API إلى DeepSeek Harness. أعد حفظ مفتاح المزود من الإعدادات.</string>
-    <string name="md_reason_dsh_could_not_start">تعذّر تشغيل DeepSeek Harness.</string>
-    <string name="md_reason_dsh_unspecified">أبلغ DeepSeek Harness عن خطأ غير محدد</string>
-    <string name="md_reason_dsh_turn_failed">فشلت جولة DeepSeek Harness</string>
-    <string name="md_reason_dsh_blocked">مُنع DeepSeek Harness من إكمال المهمة</string>
     <string name="md_tool_failed">فشلت الأداة</string>
     <string name="md_tool_completed_successfully">اكتمل بنجاح</string>
 </resources>

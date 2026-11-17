@@ -42,28 +42,29 @@ class AgentRegistry(drivers: List<AgentDriver>) {
 
     companion object {
         fun builtIns(
+            hermes: RuntimeBridge,
             claude: RuntimeBridge,
-            deepSeek: RuntimeBridge,
             antigravity: RuntimeBridge,
         ) = AgentRegistry(
             listOf(
+                BuiltInAgentDriver(
+                    AgentKind.HERMES,
+                    hermes,
+                    setOf(
+                        AgentCapability.API_KEY,
+                        AgentCapability.PROVIDER_PICKER,
+                        AgentCapability.MODEL_PICKER,
+                        AgentCapability.RESUME,
+                        // No INTERACTIVE_APPROVALS: Phase 1 drives Hermes in
+                        // one-shot mode, whose approvals are config-only.
+                    ),
+                ),
                 BuiltInAgentDriver(
                     AgentKind.CLAUDE_CODE,
                     claude,
                     setOf(
                         AgentCapability.API_KEY,
                         AgentCapability.ACCOUNT_LOGIN,
-                        AgentCapability.PROVIDER_PICKER,
-                        AgentCapability.MODEL_PICKER,
-                        AgentCapability.RESUME,
-                        AgentCapability.INTERACTIVE_APPROVALS,
-                    ),
-                ),
-                BuiltInAgentDriver(
-                    AgentKind.DEEPSEEK_HARNESS,
-                    deepSeek,
-                    setOf(
-                        AgentCapability.API_KEY,
                         AgentCapability.PROVIDER_PICKER,
                         AgentCapability.MODEL_PICKER,
                         AgentCapability.RESUME,

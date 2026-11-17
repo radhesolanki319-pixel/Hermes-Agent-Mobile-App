@@ -27,7 +27,6 @@
     <string name="md_reason_stopped_by_user">Detenido por el usuario</string>
     <string name="md_reason_no_api_key">No hay ninguna clave de API guardada para %1$s.</string>
     <string name="md_reason_no_claude_token">No hay ningún token de suscripción de Claude guardado. Añade uno en Agente → Proveedor de IA.</string>
-    <string name="md_reason_dsh_not_installed">DeepSeek Harness no está instalado. Abre Ajustes → Agente de programación para instalarlo.</string>
     <string name="md_reason_antigravity_not_installed">Antigravity CLI no está instalado. Abre Ajustes → Agente de programación para instalarlo.</string>
     <string name="md_chat_title_attachments">Revisar los archivos adjuntos</string>
     <string name="md_reason_user_not_found">Usuario no encontrado. Comprueba la clave de API y la cuenta del proveedor.</string>
@@ -43,12 +42,6 @@
     <string name="md_reason_antigravity_model_unavailable">El modelo de Antigravity seleccionado no está disponible. Actualiza los modelos en Ajustes.</string>
     <string name="md_reason_antigravity_failed">Antigravity no pudo completar la tarea.</string>
     <string name="md_reason_antigravity_cli_missing_short">Antigravity CLI no está instalado.</string>
-    <string name="md_reason_dsh_stopped_before_prompt">DeepSeek Harness se detuvo antes de procesar la solicitud</string>
-    <string name="md_reason_dsh_no_key">Ninguna clave de API llegó a DeepSeek Harness. Vuelve a guardar la clave del proveedor en Ajustes.</string>
-    <string name="md_reason_dsh_could_not_start">No se pudo iniciar DeepSeek Harness.</string>
-    <string name="md_reason_dsh_unspecified">DeepSeek Harness informó de un error no especificado</string>
-    <string name="md_reason_dsh_turn_failed">Falló el turno de DeepSeek Harness</string>
-    <string name="md_reason_dsh_blocked">Se impidió que DeepSeek Harness completara la tarea</string>
     <string name="md_tool_failed">La herramienta falló</string>
     <string name="md_tool_completed_successfully">Completado correctamente</string>
 </resources>

@@ -47,9 +47,6 @@ data class AgentUpdateInfo(
     val latestVersion: String,
 )
 
-internal fun isSupportedDshVersion(version: String): Boolean =
-    version == RuntimeInstaller.DSH_VERSION
-
 enum class RuntimeInstallEvent { STAGE, COMMAND, OUTPUT, DOWNLOAD, COMMAND_COMPLETED, COMPLETED }
 
 private data class RuntimeBundle(
@@ -72,10 +69,10 @@ class RuntimeInstaller(private val context: Context) {
     private val coreToolsMarker = File(rootfs, ".pocket-core-tools-version")
     private val systemUpgradeMarker = File(rootfs, ".pocket-system-upgrade-version")
     private val devStacksFile = File(rootfs, ".pocket-dev-stacks.json")
-    private val dshMarker = File(rootfs, ".pocket-dsh-version")
     private val agyMarker = File(rootfs, ".pocket-agy-version")
+    private val hermesMarker = File(rootfs, ".pocket-hermes-version")
+    private val uvMarker = File(rootfs, ".pocket-uv-version")
     private val githubCliMarker = File(rootfs, ".pocket-github-cli-version")
-    private val dshAndroidCompatibilityMarker = File(rootfs, ".pocket-dsh-android-compat-version")
     private val macosMetadataRepairMarker = File(rootfs, ".pocket-macos-metadata-repair")
 
     /** Resolves a user-visible installer label in the language picked inside the app. */
@@ -149,7 +146,7 @@ class RuntimeInstaller(private val context: Context) {
 
     suspend fun ensureInstalled(
         selectedStacks: Set<DevStack> = emptySet(),
-        agent: com.jarves.mh.model.AgentKind = com.jarves.mh.model.AgentKind.CLAUDE_CODE,
+        agent: com.jarves.mh.model.AgentKind = com.jarves.mh.model.AgentKind.HERMES,
         onProgress: suspend (RuntimeInstallProgress) -> Unit,
     ): InstalledRuntime {
         require(
@@ -234,8 +231,8 @@ class RuntimeInstaller(private val context: Context) {
 
         when (agent) {
             com.jarves.mh.model.AgentKind.CLAUDE_CODE -> ensureClaudeInstalled(proot, 0.985f, onProgress)
-            com.jarves.mh.model.AgentKind.DEEPSEEK_HARNESS -> ensureDshInstalled(proot, 0.985f, onProgress)
             com.jarves.mh.model.AgentKind.ANTIGRAVITY -> ensureAgyInstalled(proot, 0.985f, onProgress)
+            com.jarves.mh.model.AgentKind.HERMES -> ensureHermesInstalled(proot, 0.985f, onProgress)
         }
         onProgress(RuntimeInstallProgress(str(R.string.rt_install_setup_complete), 1f))
         return InstalledRuntime(proot, rootfs)
@@ -253,8 +250,8 @@ class RuntimeInstaller(private val context: Context) {
         val runtime = installedRuntime()
         when (agent) {
             com.jarves.mh.model.AgentKind.CLAUDE_CODE -> ensureClaudeInstalled(runtime.proot, 0.05f, onProgress)
-            com.jarves.mh.model.AgentKind.DEEPSEEK_HARNESS -> ensureDshInstalled(runtime.proot, 0.05f, onProgress)
             com.jarves.mh.model.AgentKind.ANTIGRAVITY -> ensureAgyInstalled(runtime.proot, 0.05f, onProgress)
+            com.jarves.mh.model.AgentKind.HERMES -> ensureHermesInstalled(runtime.proot, 0.05f, onProgress)
         }
         onProgress(RuntimeInstallProgress(str(R.string.rt_install_ready, agent.localizedTitle(context)), 1f))
     }
@@ -266,18 +263,14 @@ class RuntimeInstaller(private val context: Context) {
                 isInstalled() && File(rootfs, CLAUDE_GUEST_PATH.removePrefix("/")).canExecute() &&
                     !claudeMarker.readTextOrNull().isNullOrBlank()
             }
-            com.jarves.mh.model.AgentKind.DEEPSEEK_HARNESS -> isInstalled() &&
-                // /usr/local/bin/dsh is an absolute guest symlink. File.exists() follows it
-                // against Android's host root and therefore reports false outside PRoot.
-                File(rootfs, "usr/local/lib/dsh/node_modules/.bin/dsh").isFile &&
-                isSupportedDshVersion(dshMarker.readTextOrNull().orEmpty())
             com.jarves.mh.model.AgentKind.ANTIGRAVITY -> isInstalled() &&
                 File(rootfs, AGY_GUEST_PATH.removePrefix("/")).canExecute() &&
                 !agyMarker.readTextOrNull().isNullOrBlank()
+            com.jarves.mh.model.AgentKind.HERMES -> isInstalled() &&
+                File(rootfs, HERMES_GUEST_PATH.removePrefix("/")).canExecute() &&
+                !hermesMarker.readTextOrNull().isNullOrBlank()
         }
     }
-
-    val dshVersion: String get() = dshMarker.readTextOrNull().orEmpty()
 
     val claudeVersion: String get() {
         migrateLegacyClaudeMarker()
@@ -285,6 +278,8 @@ class RuntimeInstaller(private val context: Context) {
     }
 
     val agyVersion: String get() = agyMarker.readTextOrNull().orEmpty()
+
+    val hermesVersion: String get() = hermesMarker.readTextOrNull().orEmpty()
 
     val githubCliVersion: String get() = githubCliMarker.readTextOrNull().orEmpty()
 
@@ -353,15 +348,15 @@ class RuntimeInstaller(private val context: Context) {
             ?.takeIf { isAgentInstalled(com.jarves.mh.model.AgentKind.CLAUDE_CODE) && it.matches(CLAUDE_VERSION_PATTERN) }
             ?.let { put(com.jarves.mh.model.AgentKind.CLAUDE_CODE, it) }
 
-        dshMarker.readTextOrNull()
-            ?.trim()
-            ?.takeIf { isAgentInstalled(com.jarves.mh.model.AgentKind.DEEPSEEK_HARNESS) }
-            ?.let { put(com.jarves.mh.model.AgentKind.DEEPSEEK_HARNESS, it) }
-
         agyMarker.readTextOrNull()
             ?.trim()
             ?.takeIf { it.isNotEmpty() && File(rootfs, AGY_GUEST_PATH.removePrefix("/")).canExecute() }
             ?.let { put(com.jarves.mh.model.AgentKind.ANTIGRAVITY, it) }
+
+        hermesMarker.readTextOrNull()
+            ?.trim()
+            ?.takeIf { isAgentInstalled(com.jarves.mh.model.AgentKind.HERMES) }
+            ?.let { put(com.jarves.mh.model.AgentKind.HERMES, it) }
     }
 
     /** Checks each installed agent against its own authoritative release source. */
@@ -375,19 +370,27 @@ class RuntimeInstaller(private val context: Context) {
                     put(com.jarves.mh.model.AgentKind.CLAUDE_CODE, AgentUpdateInfo(current, latest))
                 }
             }
-            installed[com.jarves.mh.model.AgentKind.DEEPSEEK_HARNESS]?.let { current ->
-                // DSH needs Android-specific filesystem patches. Only advertise the
-                // release validated and bundled with this PocketDev build; npm's
-                // latest tag may point at a source layout we cannot safely patch.
-                DSH_VERSION.takeIf { isVersionNewer(it, current) }?.let { compatible ->
-                    put(com.jarves.mh.model.AgentKind.DEEPSEEK_HARNESS, AgentUpdateInfo(current, compatible))
-                }
-            }
             installed[com.jarves.mh.model.AgentKind.ANTIGRAVITY]?.let { current ->
                 runCatching { fetchAgyManifest().getString("version") }.getOrNull()
                     ?.takeIf { isVersionNewer(it, current) }?.let { latest ->
                         put(com.jarves.mh.model.AgentKind.ANTIGRAVITY, AgentUpdateInfo(current, latest))
                     }
+            }
+            installed[com.jarves.mh.model.AgentKind.HERMES]?.let { current ->
+                // Upgrades are unlocked (user decision, 2026-11-17): advertise
+                // the newest release published on PyPI, not just the pinned
+                // first-install version. A source-checkout install records
+                // "<checkout version>+src" as its version; the numeric part
+                // is the checkout's placeholder version, so a PyPI release is
+                // normally offered, and accepting it replaces the checkout
+                // install with the released package.
+                runCatching {
+                    JSONObject(fetchText("https://pypi.org/pypi/hermes-agent/json"))
+                        .getJSONObject("info")
+                        .getString("version")
+                }.getOrNull()?.takeIf { isVersionNewer(it, current) }?.let { latest ->
+                    put(com.jarves.mh.model.AgentKind.HERMES, AgentUpdateInfo(current, latest))
+                }
             }
         }
     }
@@ -400,8 +403,8 @@ class RuntimeInstaller(private val context: Context) {
         val runtime = installedRuntime()
         when (agent) {
             com.jarves.mh.model.AgentKind.CLAUDE_CODE -> updateClaude(runtime, expectedVersion, onProgress)
-            com.jarves.mh.model.AgentKind.DEEPSEEK_HARNESS -> updateDsh(runtime, expectedVersion, onProgress)
             com.jarves.mh.model.AgentKind.ANTIGRAVITY -> updateAgy(runtime, expectedVersion, onProgress)
+            com.jarves.mh.model.AgentKind.HERMES -> updateHermes(runtime, expectedVersion, onProgress)
         }
         onProgress(RuntimeInstallProgress(str(R.string.rt_install_version_ready, agent.localizedTitle(context), expectedVersion), 1f, event = RuntimeInstallEvent.COMPLETED))
     }
@@ -469,62 +472,23 @@ class RuntimeInstaller(private val context: Context) {
         agyMarker.writeText(latest)
     }
 
-    private suspend fun updateDsh(
+    /**
+     * Hermes updates install the exact PyPI release the user approved in the
+     * update prompt (upgrades unlocked 2026-11-17; only the first install is
+     * pinned). The reinstall rebuilds the venv from scratch; the uv-managed
+     * CPython and the agent's HERMES_HOME data (memory, skills, sessions)
+     * stay. The version marker is rewritten only after the new install
+     * verifies, so a failed update never claims a version that is not there.
+     */
+    private suspend fun updateHermes(
         runtime: InstalledRuntime,
         expectedVersion: String,
         onProgress: suspend (RuntimeInstallProgress) -> Unit,
     ) {
-        check(isSupportedDshVersion(expectedVersion)) {
-            "DeepSeek Harness $expectedVersion is not compatible with this PocketDev build"
+        require(isHermesReleaseVersion(expectedVersion)) {
+            "Refusing to install an unrecognised Hermes release: $expectedVersion"
         }
-        val quotedVersion = expectedVersion.replace(Regex("[^0-9A-Za-z.+-]"), "")
-        check(quotedVersion == expectedVersion) { "Invalid DeepSeek Harness version" }
-        runGuestCommand(
-            proot = runtime.proot,
-            command = "set -e; next=/usr/local/lib/dsh.updating; " +
-                "rm -rf \"${'$'}next\"; mkdir -p \"${'$'}next\"; " +
-                "cd \"${'$'}next\"; npm init -y >/dev/null; " +
-                "npm install --omit=dev --no-audit --no-fund @deepseek-ai/dsh@$quotedVersion",
-            displayCommand = "npm install @deepseek-ai/dsh@$quotedVersion",
-            fraction = 0.55f,
-            timeoutMs = 20 * 60 * 1_000L,
-            onProgress = onProgress,
-            failureMessage = str(R.string.rt_install_dsh_update_failed),
-        )
-        val staged = File(rootfs, "usr/local/lib/dsh.updating")
-        applyDshAndroidCompatibility(staged, expectedVersion)
-        runGuestCommand(
-            proot = runtime.proot,
-            command = "set -e; old=/usr/local/lib/dsh.previous; rm -rf \"${'$'}old\"; " +
-                "mv /usr/local/lib/dsh \"${'$'}old\"; " +
-                "if mv /usr/local/lib/dsh.updating /usr/local/lib/dsh; then :; " +
-                "else mv \"${'$'}old\" /usr/local/lib/dsh; exit 1; fi",
-            displayCommand = "Activate DeepSeek Harness $quotedVersion",
-            fraction = 0.9f,
-            timeoutMs = 60_000L,
-            onProgress = onProgress,
-            failureMessage = str(R.string.rt_install_dsh_update_failed),
-        )
-        val verified = runCatching {
-            verifyGuest(runtime.proot, "/usr/local/bin/dsh --profile headless --help", str(R.string.rt_install_update_verify_failed, "DeepSeek Harness"))
-        }
-        if (verified.isFailure) {
-            runCatching {
-                runGuestCommand(
-                    proot = runtime.proot,
-                    command = "set -e; rm -rf /usr/local/lib/dsh; mv /usr/local/lib/dsh.previous /usr/local/lib/dsh",
-                    displayCommand = "Restore previous DeepSeek Harness",
-                    fraction = 0.95f,
-                    timeoutMs = 60_000L,
-                    onProgress = onProgress,
-                    failureMessage = str(R.string.rt_install_dsh_update_failed),
-                )
-            }
-            verified.getOrThrow()
-        }
-        File(rootfs, "usr/local/lib/dsh.previous").deleteRecursively()
-        dshMarker.writeText(expectedVersion)
-        dshAndroidCompatibilityMarker.writeText(DSH_ANDROID_COMPATIBILITY_VERSION)
+        installHermesFromPyPi(runtime.proot, expectedVersion, 0.05f, onProgress)
     }
 
     private fun fetchAgyManifest(): JSONObject = JSONObject(
@@ -604,95 +568,205 @@ class RuntimeInstaller(private val context: Context) {
         }
     }
 
-    private suspend fun ensureDshInstalled(
+    private fun isUvInstalled(): Boolean = isInstalled() &&
+        File(rootfs, UV_GUEST_PATH.removePrefix("/")).canExecute() &&
+        uvMarker.readTextOrNull() == UV_VERSION
+
+    /**
+     * Stages the pinned uv binary the same way the GitHub CLI is staged: a
+     * checksum-verified host-side download, one binary extracted from the
+     * release tarball, then an in-guest `--version` check. The pin (version,
+     * URL and SHA-256) is the one Hermes's own installer locks in `pm/lock.json`.
+     */
+    private suspend fun ensureUvInstalled(
+        proot: File,
+        from: Float,
+        to: Float,
+        onProgress: suspend (RuntimeInstallProgress) -> Unit,
+    ) {
+        if (isUvInstalled()) return
+        writeResolver()
+        downloads.mkdirs()
+        val downloaded = File(downloads, "uv-$UV_VERSION-linux-arm64.tar.gz")
+        onProgress(RuntimeInstallProgress(str(R.string.rt_install_downloading_version, "uv", UV_VERSION), from))
+        val uvDownloadLabel = str(R.string.rt_install_downloading_version, "uv", UV_VERSION)
+        downloadVerified(UV_RELEASE_URL, downloaded, UV_RELEASE_SHA256) { bytes, total ->
+            val ratio = if (total > 0L) bytes.toFloat() / total else 0f
+            onProgress(
+                RuntimeInstallProgress(
+                    message = uvDownloadLabel,
+                    fraction = from + ratio * (to - from),
+                    downloadedBytes = bytes,
+                    totalBytes = total.takeIf { it > 0L },
+                    event = RuntimeInstallEvent.DOWNLOAD,
+                ),
+            )
+        }
+        onProgress(RuntimeInstallProgress(str(R.string.rt_install_installing_version, "uv", UV_VERSION), to, indeterminate = true))
+        val destination = File(rootfs, UV_GUEST_PATH.removePrefix("/"))
+        destination.parentFile?.mkdirs()
+        var found = false
+        TarArchiveInputStream(GzipCompressorInputStream(BufferedInputStream(downloaded.inputStream()))).use { archive ->
+            var entry = archive.nextEntry
+            while (entry != null) {
+                if (entry.isFile && entry.name.removePrefix("./").endsWith("/uv")) {
+                    val staged = File(destination.parentFile, ".uv-$UV_VERSION.installing")
+                    FileOutputStream(staged).use { archive.copyTo(it) }
+                    Os.chmod(staged.absolutePath, 0b111101101)
+                    Os.rename(staged.absolutePath, destination.absolutePath)
+                    found = true
+                    break
+                }
+                entry = archive.nextEntry
+            }
+        }
+        check(found) { "Official uv archive did not contain the expected binary" }
+        downloaded.delete()
+        verifyGuest(proot = proot, command = "$UV_GUEST_PATH --version", failureMessage = str(R.string.rt_install_verify_failed, "uv"))
+        uvMarker.writeText(UV_VERSION)
+        check(isUvInstalled()) { "uv installation is incomplete" }
+    }
+
+    /**
+     * Phase 1 (development/fallback) Hermes install. Two routes, both ending
+     * in the same venv under /root/.pocket-hermes (HERMES_GUEST_PATH):
+     *
+     * - If a Hermes source checkout exists in the guest at
+     *   [HERMES_SOURCE_GUEST_PATH] (recognised by its `pyproject.toml` and
+     *   `hermes_cli` package), it is installed from source — see
+     *   [installHermesFromSource]. This is the modification-unlocked route:
+     *   the venv resolves its packages from the checkout itself, so edits
+     *   there take effect without a reinstall.
+     * - Otherwise the pinned PyPI release is installed — see
+     *   [installHermesFromPyPi]. A prebuilt runtime bundle replaces this
+     *   download route in a later phase.
+     *
+     * An already-installed Hermes is left untouched whatever version its
+     * marker records — in particular an install that was upgraded past the
+     * pin is never "repaired" back down to it.
+     */
+    private suspend fun ensureHermesInstalled(
         proot: File,
         fraction: Float,
         onProgress: suspend (RuntimeInstallProgress) -> Unit,
     ) {
-        if (isAgentInstalled(com.jarves.mh.model.AgentKind.DEEPSEEK_HARNESS)) {
-            ensureDshAndroidCompatibility()
-            return
+        if (isAgentInstalled(com.jarves.mh.model.AgentKind.HERMES)) return
+        check(!BuildConfig.OFFLINE_RUNTIME_BUNDLES) {
+            str(R.string.rt_install_hermes_needs_online)
         }
-        // Remove partial or unsupported npm updates before restoring the bundled,
-        // Android-validated release. The user can recover simply by launching DSH
-        // again; project files and conversations live outside this overlay.
-        File(rootfs, "usr/local/lib/dsh").deleteRecursively()
-        File(rootfs, "usr/local/lib/dsh.updating").deleteRecursively()
-        File(rootfs, "usr/local/lib/dsh.previous").deleteRecursively()
-        dshMarker.delete()
-        dshAndroidCompatibilityMarker.delete()
-        installRuntimeOverlay(
-            bundle = DSH_BUNDLE,
-            message = str(R.string.rt_install_installing_version, "DeepSeek Harness", DSH_VERSION),
-            from = fraction,
-            to = 0.995f,
-            onProgress = onProgress,
-        )
-        ensureDshAndroidCompatibility()
-        verifyGuest(proot, "/usr/local/bin/dsh --profile headless --help", str(R.string.rt_install_verify_failed, "DeepSeek Harness"))
-        require(isAgentInstalled(com.jarves.mh.model.AgentKind.DEEPSEEK_HARNESS)) {
-            "The DeepSeek Harness runtime bundle is incomplete"
+        val sourceCheckout = hermesSourceCheckout()
+        if (sourceCheckout != null) {
+            installHermesFromSource(proot, sourceCheckout, fraction, onProgress)
+        } else {
+            installHermesFromPyPi(proot, HERMES_VERSION, fraction, onProgress)
+        }
+    }
+
+    /** The guest source checkout to install Hermes from, or null when absent. */
+    private fun hermesSourceCheckout(): File? {
+        val dir = File(rootfs, HERMES_SOURCE_GUEST_PATH.removePrefix("/"))
+        return dir.takeIf {
+            File(it, "pyproject.toml").isFile && File(it, "hermes_cli").isDirectory
         }
     }
 
     /**
-     * DSH uses POSIX hard links for no-clobber publication of new session and
-     * workspace files. Android blocks that syscall inside PRoot. PRoot's
-     * `--link2symlink` workaround is unsuitable here because DSH immediately
-     * deletes its staging file, leaving the published symlink dangling.
-     *
-     * The bundled, pinned DSH build can use COPYFILE_EXCL for the same
-     * no-clobber guarantee. Existing-file edits continue to use atomic rename.
+     * PyPI route, mirroring what the Phase 0 spike verified end to end:
+     * pinned uv → uv-managed standalone CPython 3.14 (python-build-standalone;
+     * the guest's own Python 3.8/3.10 is too old for Hermes) → a dedicated
+     * venv under /root/.pocket-hermes → `uv pip install
+     * "hermes-agent[acp]==<version>"`. Used for the pinned first install and
+     * for updates to a user-approved newer release; the version marker is
+     * written only after the installed binary verifies.
      */
-    fun ensureDshAndroidCompatibility() {
-        if (!isAgentInstalled(com.jarves.mh.model.AgentKind.DEEPSEEK_HARNESS)) return
-        applyDshAndroidCompatibility(File(rootfs, "usr/local/lib/dsh"), dshMarker.readTextOrNull().orEmpty())
-        dshAndroidCompatibilityMarker.writeText(DSH_ANDROID_COMPATIBILITY_VERSION)
-    }
-
-    private fun applyDshAndroidCompatibility(dshRoot: File, version: String) {
-        check(isSupportedDshVersion(version)) {
-            "DeepSeek Harness $version is not compatible with this PocketDev build"
-        }
-        val persistence = File(
-            dshRoot,
-            "node_modules/@deepseek-ai/dsh-session-persistence-jsonl/lib/index.js",
-        )
-        val localFs = File(
-            dshRoot,
-            "node_modules/@deepseek-ai/dsh-fs-local/lib/index.js",
-        )
-        patchDshHardLinkPublication(
-            file = persistence,
-            importBefore = "import { link, mkdir, mkdtemp, open, readFile, readdir, realpath, rm, stat, truncate } from \"node:fs/promises\";",
-            importAfter = "import { copyFile, link, mkdir, mkdtemp, open, readFile, readdir, realpath, rm, stat, truncate } from \"node:fs/promises\";",
-            callBefore = "await link(tmp, finalPath);",
-            callAfter = "await copyFile(tmp, finalPath, 1);",
-        )
-        patchDshHardLinkPublication(
-            file = localFs,
-            importBefore = "import { chmod, link, lstat, mkdir, open, readFile, readdir, realpath, rename, rm, stat } from \"node:fs/promises\";",
-            importAfter = "import { chmod, copyFile, link, lstat, mkdir, open, readFile, readdir, realpath, rename, rm, stat } from \"node:fs/promises\";",
-            callBefore = "await linkFile(tempPath, absolutePath);",
-            callAfter = "await copyFile(tempPath, absolutePath, 1);",
-        )
-    }
-
-    private fun patchDshHardLinkPublication(
-        file: File,
-        importBefore: String,
-        importAfter: String,
-        callBefore: String,
-        callAfter: String,
+    private suspend fun installHermesFromPyPi(
+        proot: File,
+        version: String,
+        fraction: Float,
+        onProgress: suspend (RuntimeInstallProgress) -> Unit,
     ) {
-        check(file.isFile) { "DeepSeek Harness compatibility file is missing: ${file.name}" }
-        var source = file.readText()
-        if (callAfter in source && importAfter in source) return
-        check(callBefore in source && importBefore in source) {
-            "Installed DeepSeek Harness source is not compatible with this PocketDev build"
+        val span = 1f - fraction
+        ensureUvInstalled(proot, fraction, fraction + span * 0.25f, onProgress)
+        writeResolver()
+        val installCommand = """
+            set -e
+            export UV_PYTHON_INSTALL_DIR=$HERMES_PREFIX_GUEST_PATH/python
+            $UV_GUEST_PATH python install 3.14
+            rm -rf $HERMES_PREFIX_GUEST_PATH/venv
+            $UV_GUEST_PATH venv --python 3.14 $HERMES_PREFIX_GUEST_PATH/venv
+            $UV_GUEST_PATH pip install --python $HERMES_PREFIX_GUEST_PATH/venv/bin/python "hermes-agent[acp]==$version"
+            $HERMES_GUEST_PATH --version
+        """.trimIndent()
+        runGuestCommand(
+            proot = proot,
+            command = installCommand,
+            displayCommand = "uv pip install hermes-agent[acp]==$version (Python 3.14)",
+            fraction = fraction + span * 0.5f,
+            timeoutMs = 20 * 60 * 1_000L,
+            onProgress = onProgress,
+            failureMessage = str(R.string.rt_install_hermes_failed),
+        )
+        verifyGuest(proot, "$HERMES_GUEST_PATH --version", str(R.string.rt_install_verify_failed, "Hermes Agent"))
+        hermesMarker.writeText(version)
+        require(isAgentInstalled(com.jarves.mh.model.AgentKind.HERMES)) {
+            "Hermes Agent installation is incomplete"
         }
-        source = source.replace(importBefore, importAfter).replace(callBefore, callAfter)
-        file.writeText(source)
+    }
+
+    /**
+     * Source route: installs the checkout at [HERMES_SOURCE_GUEST_PATH]
+     * through the project's own lockfile — `uv sync --extra acp --python 3.14
+     * --locked` inside the checkout, the only from-source route the Phase 0
+     * spike verified (a plain pip resolution from a checkout fails on the
+     * project's pillow pin conflict, because its uv overrides only apply when
+     * the project is the resolution root). UV_PROJECT_ENVIRONMENT redirects
+     * the synced environment into the usual /root/.pocket-hermes/venv, so the
+     * entry point lands at HERMES_GUEST_PATH exactly like the PyPI route; the
+     * sync installs the project editable, i.e. the venv keeps resolving the
+     * packages from the checkout itself.
+     *
+     * The version marker records the checkout's own [project] version with a
+     * "+src" suffix (a raw checkout self-reports the placeholder 0.0.0), so
+     * update checks keep offering the latest PyPI release; accepting such an
+     * update replaces the source install with the released package and
+     * leaves the checkout directory itself untouched.
+     */
+    private suspend fun installHermesFromSource(
+        proot: File,
+        sourceCheckout: File,
+        fraction: Float,
+        onProgress: suspend (RuntimeInstallProgress) -> Unit,
+    ) {
+        val span = 1f - fraction
+        ensureUvInstalled(proot, fraction, fraction + span * 0.25f, onProgress)
+        writeResolver()
+        val syncCommand = """
+            set -e
+            export UV_PYTHON_INSTALL_DIR=$HERMES_PREFIX_GUEST_PATH/python
+            export UV_PROJECT_ENVIRONMENT=$HERMES_PREFIX_GUEST_PATH/venv
+            $UV_GUEST_PATH python install 3.14
+            rm -rf $HERMES_PREFIX_GUEST_PATH/venv
+            cd $HERMES_SOURCE_GUEST_PATH
+            $UV_GUEST_PATH sync --extra acp --python 3.14 --locked
+            $HERMES_GUEST_PATH --version
+        """.trimIndent()
+        runGuestCommand(
+            proot = proot,
+            command = syncCommand,
+            displayCommand = "uv sync --extra acp --locked (Hermes source: $HERMES_SOURCE_GUEST_PATH)",
+            fraction = fraction + span * 0.5f,
+            timeoutMs = 20 * 60 * 1_000L,
+            onProgress = onProgress,
+            failureMessage = str(R.string.rt_install_hermes_failed),
+        )
+        verifyGuest(proot, "$HERMES_GUEST_PATH --version", str(R.string.rt_install_verify_failed, "Hermes Agent"))
+        val checkoutVersion = File(sourceCheckout, "pyproject.toml").readTextOrNull()
+            ?.let(::parseHermesProjectVersion)
+            ?: "0.0.0"
+        hermesMarker.writeText("$checkoutVersion+src")
+        require(isAgentInstalled(com.jarves.mh.model.AgentKind.HERMES)) {
+            "Hermes Agent installation is incomplete"
+        }
     }
 
     /**
@@ -1928,6 +2002,21 @@ printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decis
     companion object {
         const val AGY_GUEST_PATH = "/root/.local/bin/agy"
         const val GITHUB_CLI_GUEST_PATH = "/root/.local/bin/gh"
+        const val HERMES_GUEST_PATH = "/root/.pocket-hermes/venv/bin/hermes"
+        private const val HERMES_PREFIX_GUEST_PATH = "/root/.pocket-hermes"
+        private const val UV_GUEST_PATH = "/root/.local/bin/uv"
+        /** Pinned uv release; version, URL and SHA-256 are Hermes's own installer pins (`pm/lock.json`). */
+        private const val UV_VERSION = "0.13.5"
+        private const val UV_RELEASE_URL = "https://github.com/astral-sh/uv/releases/download/0.13.5/uv-aarch64-unknown-linux-gnu.tar.gz"
+        private const val UV_RELEASE_SHA256 = "4bb69cf95ed13f23713bb7bc09f241896ea0c75b7c557e615a20604b82f9c403"
+        /**
+         * Pinned Hermes release for the first install from PyPI (spike-verified).
+         * Later upgrades are unlocked: they install the newest PyPI release the
+         * user approves, and the version marker then records that release.
+         */
+        const val HERMES_VERSION = "0.19.0"
+        /** Guest path of an optional Hermes source checkout; when present it is installed instead of the PyPI release. */
+        private const val HERMES_SOURCE_GUEST_PATH = "/root/hermes-agent-src"
         private const val AGY_VERSION = "1.1.27"
         private const val AGY_RELEASE_URL = "https://storage.googleapis.com/antigravity-public/antigravity-cli/1.1.27-5211191891591168/linux-arm/cli_linux_arm64.tar.gz"
         private const val AGY_RELEASE_SHA512 = "ed45f6930785aa4b42f14e07ace1c9d91a94fb76e760f54acbd7d3d3951e1f957fd456a0dae2a3124dd9a3b689bf7afb7c9303a3e4ba95037fc10063424d9bf9"
@@ -1968,9 +2057,6 @@ printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decis
         private const val ANDROID_AAPT2_GUEST_PATH = "/root/android-sdk/build-tools/35.0.0/aapt2"
         private const val ANDROID_AAPT2_HOST_PATH = "root/android-sdk/build-tools/35.0.0/aapt2"
         private val CLAUDE_VERSION_PATTERN = Regex("[0-9]+\\.[0-9]+\\.[0-9]+")
-        /** Pinned DeepSeek Harness release installed via npm inside the guest (verified 2026-09-06). */
-        const val DSH_VERSION = "0.1.2-rc.1"
-        private const val DSH_ANDROID_COMPATIBILITY_VERSION = "copyfile-excl-v1"
         private val CORE_BUNDLE = RuntimeBundle(
             label = "Core",
             fileName = "pocketdev-core-arm64-2026.09.5.tar.zst",
@@ -1996,12 +2082,6 @@ printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decis
             fileName = "pocketdev-android-arm64-2026.09.1.tar.zst",
             sha256 = "01bea058ebcb17416d1eb08c0211b3782da3228eb3c8348eb3719f2d61dd3ec6",
             compressedBytes = 569_652_007L,
-        )
-        private val DSH_BUNDLE = RuntimeBundle(
-            label = "DeepSeek Harness",
-            fileName = "pocketdev-dsh-arm64-2026.09.1.tar.zst",
-            sha256 = "88e6a23ba74e1cd74a2c923b7e0d6bd78ba4b7e5f8a9b649f12bf4ffe158cce5",
-            compressedBytes = 27_752_194L,
         )
         private val AGY_BUNDLE = RuntimeBundle(
             label = "Antigravity CLI",

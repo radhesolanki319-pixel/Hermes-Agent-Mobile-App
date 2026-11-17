@@ -48,7 +48,6 @@ val offlineBundleFiles = listOf(
     "pocketdev-claude-arm64-2026.11.1.tar.zst",
     "pocketdev-python-arm64-2026.09.2.tar.zst",
     "pocketdev-android-arm64-2026.09.1.tar.zst",
-    "pocketdev-dsh-arm64-2026.09.1.tar.zst",
 ).map { runtimeBundleDir.file(it) }
 val prepareOfflineRuntimeAssets = tasks.register<Sync>("prepareOfflineRuntimeAssets") {
     onlyIf { offlineBundleFiles.any { it.asFile.isFile } }

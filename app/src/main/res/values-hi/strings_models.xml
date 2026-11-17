@@ -27,7 +27,6 @@
     <string name="md_reason_stopped_by_user">उपयोगकर्ता द्वारा रोका गया</string>
     <string name="md_reason_no_api_key">%1$s के लिए कोई API कुंजी सहेजी नहीं गई है।</string>
     <string name="md_reason_no_claude_token">कोई Claude सदस्यता टोकन सहेजा नहीं गया है। एजेंट → AI प्रदाता से एक जोड़ें।</string>
-    <string name="md_reason_dsh_not_installed">DeepSeek Harness इंस्टॉल नहीं है। इसे इंस्टॉल करने के लिए सेटिंग्स → कोडिंग एजेंट खोलें।</string>
     <string name="md_reason_antigravity_not_installed">Antigravity CLI इंस्टॉल नहीं है। इसे इंस्टॉल करने के लिए सेटिंग्स → कोडिंग एजेंट खोलें।</string>
     <string name="md_chat_title_attachments">संलग्न फ़ाइलों की समीक्षा करें</string>
     <string name="md_reason_user_not_found">उपयोगकर्ता नहीं मिला। API कुंजी और प्रदाता खाता जांचें।</string>
@@ -43,12 +42,6 @@
     <string name="md_reason_antigravity_model_unavailable">चयनित Antigravity मॉडल उपलब्ध नहीं है। सेटिंग्स में मॉडल रीफ़्रेश करें।</string>
     <string name="md_reason_antigravity_failed">Antigravity टास्क पूरा नहीं कर सका।</string>
     <string name="md_reason_antigravity_cli_missing_short">Antigravity CLI इंस्टॉल नहीं है।</string>
-    <string name="md_reason_dsh_stopped_before_prompt">DeepSeek Harness प्रॉम्प्ट प्रोसेस करने से पहले रुक गया</string>
-    <string name="md_reason_dsh_no_key">DeepSeek Harness तक कोई API कुंजी नहीं पहुंची। सेटिंग्स में प्रदाता कुंजी फिर से सहेजें।</string>
-    <string name="md_reason_dsh_could_not_start">DeepSeek Harness शुरू नहीं हो सका।</string>
-    <string name="md_reason_dsh_unspecified">DeepSeek Harness ने एक अनिर्दिष्ट त्रुटि बताई</string>
-    <string name="md_reason_dsh_turn_failed">DeepSeek Harness का टर्न विफल रहा</string>
-    <string name="md_reason_dsh_blocked">DeepSeek Harness को टास्क पूरा करने से रोका गया</string>
     <string name="md_tool_failed">टूल विफल रहा</string>
     <string name="md_tool_completed_successfully">सफलतापूर्वक पूरा हुआ</string>
 </resources>
