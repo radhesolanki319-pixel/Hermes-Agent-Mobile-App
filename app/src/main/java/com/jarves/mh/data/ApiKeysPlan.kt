@@ -4,7 +4,14 @@ import com.jarves.mh.model.AgentKind
 import com.jarves.mh.model.ProviderKind
 import com.jarves.mh.model.ProviderProfile
 import com.jarves.mh.model.providersForAgent
-import com.jarves.mh.runtime.HERMES_GATEWAY_VAULT_ID
+
+/**
+ * Vault pool id the gateway key was stored under in the remote era.
+ * The pool itself is user data and stays in the vault untouched; since
+ * v31 (embedded only) nothing routes through it — the id survives here
+ * because this plan is its last referrer.
+ */
+internal const val HERMES_GATEWAY_VAULT_ID = "HERMES_GATEWAY"
 
 /**
  * Which key fields the simple Settings → "API Keys" screen shows.

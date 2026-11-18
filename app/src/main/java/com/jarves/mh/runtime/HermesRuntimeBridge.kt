@@ -769,9 +769,6 @@ class HermesRuntimeBridge(
     private val hermesSettings: () -> HermesRuntimeSettings,
     private val conversationId: (String) -> String?,
     private val saveConversationId: (String, String) -> Unit,
-    private val hostConfig: () -> HermesHostConfig = { HermesHostConfig(remote = false, baseUrl = "", apiKey = "") },
-    private val remoteConversationId: (String) -> String? = { null },
-    private val saveRemoteConversationId: (String, String) -> Unit = { _, _ -> },
 ) : RuntimeBridge {
     private val installer = RuntimeInstaller(context)
     private val checkpoints = WorkspaceCheckpoints(context.filesDir, context)
@@ -779,7 +776,6 @@ class HermesRuntimeBridge(
     override val events: Flow<RuntimeEvent> = eventBus
     private val finishedSessions = ConcurrentHashMap.newKeySet<String>()
     @Volatile private var activeProcess: Process? = null
-    @Volatile private var activeGatewayClient: HermesGatewayClient? = null
     @Volatile private var activeSessionId: String? = null
     @Volatile private var userStopRequested: Boolean = false
     @Volatile private var activeProjectSlug: String? = null
@@ -798,26 +794,15 @@ class HermesRuntimeBridge(
         foregroundResultPosted = false
         eventBus.emit(RuntimeEvent.SessionStarted(sessionId))
         pushForegroundProgress(R.string.rt_bridge_starting, "Hermes Agent")
-        // Phase 4: in remote mode the turn goes to the user's Hermes gateway
-        // host instead of the embedded copy. The embedded path below is
-        // untouched — no local install, provider key or workspace is needed
-        // for a remote turn, because the host owns all three.
+        // v31: Hermes runs EMBEDDED only — the full in-app agent is the
+        // only Hermes there is. The Phase 4 remote gateway route was
+        // removed at the user's order ("Woh render wala computer hata
+        // do"); every turn takes the embedded path below.
         // Hermes runs from its own profile in the shared profile system
         // (Agent → Hermes), exactly like the other agents: the route,
         // model and key were all resolved from the active Hermes profile
         // by the settings lambda (see HermesProfileRoute).
         val settings = hermesSettings()
-        val host = hostConfig()
-        if (host.remote) {
-            runCatching { runRemoteTurn(sessionId, projectId, prompt, settings.model, host) }
-                .onFailure { error ->
-                    Log.e("HermesBridge", "Remote Hermes session failed", error)
-                    emitFailureOnce(sessionId, friendlyError(error))
-                }
-            activeSessionId = null
-            RuntimeTaskController.stopAction = null
-            return@withContext sessionId
-        }
         val route = settings.route
         // A custom endpoint may legitimately run keyless (local servers);
         // Hermes's own custom-provider resolution sends its literal
@@ -998,93 +983,6 @@ class HermesRuntimeBridge(
         sessionId
     }
 
-    /**
-     * One chat turn against the remote Hermes gateway. The [prompt] arrives
-     * exactly as the embedded path receives it — MainViewModel has already
-     * appended the GenUI capability block — and is sent as the turn's single
-     * user message; the gateway keeps the conversation server-side under a
-     * session id this bridge mints per project chat (`mh-<uuid>`, persisted
-     * through [remoteConversationId]/[saveRemoteConversationId], separate
-     * from the embedded session store so the two backends never hand each
-     * other foreign ids). Tool and status frames render through the same
-     * RuntimeEvents the embedded stream produces, so chat UI, activity feed
-     * and GenUI rendering are identical. Host-side file changes are not
-     * checkpointed: the workspace they touch is the host's, not the phone's.
-     */
-    private suspend fun runRemoteTurn(
-        sessionId: String,
-        projectId: String,
-        prompt: String,
-        model: String,
-        host: HermesHostConfig,
-    ) {
-        if (host.baseUrl.isBlank()) throw HermesSessionException(HermesRemoteMessages.NO_URL)
-        if (host.apiKey.isBlank()) throw HermesSessionException(HermesRemoteMessages.NO_KEY)
-        startForegroundRuntime(activeProjectSlug ?: "")
-        pushForegroundProgress(R.string.rt_bridge_working, "Hermes Agent")
-        val client = HermesGatewayClient()
-        activeGatewayClient = client
-        RuntimeTaskController.stopAction = {
-            userStopRequested = true
-            client.disconnect()
-        }
-        try {
-            val gatewaySessionId = remoteConversationId(projectId)?.takeIf(String::isNotBlank)
-                ?: "mh-${UUID.randomUUID()}".also { minted -> saveRemoteConversationId(projectId, minted) }
-            val outcome = client.streamChat(
-                config = host,
-                model = model,
-                prompt = prompt,
-                sessionId = gatewaySessionId,
-                isStopped = { userStopRequested },
-                onWaking = { pushForegroundProgress(HOST_WAKING_PROGRESS) },
-                onEvent = { event ->
-                    when (event) {
-                        is HermesGatewayEvent.TextDelta -> {
-                            pushForegroundProgress(R.string.rt_bridge_working, "Hermes Agent")
-                            eventBus.emit(RuntimeEvent.AssistantDelta(sessionId, event.text))
-                        }
-                        is HermesGatewayEvent.ToolProgress -> {
-                            val displayName = hermesToolDisplayName(event.tool.ifBlank { "Tool" })
-                            if (event.status == "running") {
-                                pushForegroundProgress(
-                                    AppStrings.get(context, R.string.rt_bridge_running_tool, displayName, event.label),
-                                )
-                                eventBus.emit(
-                                    RuntimeEvent.ToolStarted(
-                                        sessionId,
-                                        displayName,
-                                        event.label.ifBlank { "Working on the host" },
-                                    ),
-                                )
-                            } else if (event.status == "completed") {
-                                // The gateway sends no result text for a
-                                // completed tool; use the placeholder the UI
-                                // already localizes for empty summaries.
-                                eventBus.emit(RuntimeEvent.ToolCompleted(sessionId, displayName, "Completed successfully"))
-                            }
-                        }
-                        is HermesGatewayEvent.Status -> pushForegroundProgress(event.text)
-                        else -> Unit // Reasoning deltas and approval requests have no remote UI yet.
-                    }
-                },
-            )
-            if (userStopRequested) throw HermesSessionException("Stopped by user")
-            when (outcome) {
-                is HermesGatewayOutcome.Completed -> {
-                    // The gateway echoes the live session id in a response
-                    // header (it can rotate under compression); persist
-                    // whatever it reports so the next turn continues there.
-                    outcome.sessionId?.takeIf(String::isNotBlank)?.let { saveRemoteConversationId(projectId, it) }
-                    emitCompletedOnce(sessionId)
-                }
-                is HermesGatewayOutcome.Failed -> throw HermesSessionException(outcome.message)
-            }
-        } finally {
-            if (activeGatewayClient === client) activeGatewayClient = null
-        }
-    }
-
     override suspend fun respondToApproval(request: ToolRequest, approved: Boolean) {
         // One-shot runs expose no approval channel; the generated config.yaml
         // carries the deterministic approval policy for this mode. Interactive
@@ -1094,7 +992,6 @@ class HermesRuntimeBridge(
     override suspend fun stopSession(sessionId: String) = withContext(Dispatchers.IO) {
         if (activeSessionId == sessionId) {
             userStopRequested = true
-            activeGatewayClient?.disconnect()
             activeProcess?.destroy()
             delay(500)
             if (activeProcess?.isAlive == true) activeProcess?.destroyForcibly()
@@ -1423,7 +1320,6 @@ class HermesRuntimeBridge(
 
     companion object {
         const val HERMES_HOME_GUEST_PATH = "/root/.hermes"
-        private const val HOST_WAKING_PROGRESS = "Waking the Hermes host…"
         private const val FOREGROUND_PROGRESS_MIN_INTERVAL_MS = 750L
         private const val MAX_CONVERSATION_HISTORY_CHARACTERS = 160_000
         /** Byte budget for the `-q` prompt: under the kernel's 128 KiB per-argument exec cap, with headroom. */

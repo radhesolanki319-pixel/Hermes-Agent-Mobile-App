@@ -159,32 +159,41 @@ class AppPreferences(private val context: Context) {
         get() = preferences.getLong("last_hermes_update_check_millis", 0L)
         set(value) { preferences.edit().putLong("last_hermes_update_check_millis", value).apply() }
 
-    /** Hermes runs embedded on this phone (false) or against a remote gateway host (true). */
+    /**
+     * Stored Hermes host mode from the remote era: embedded on this
+     * phone (false) or against a remote gateway host (true). Since v31
+     * Hermes is embedded only — chat resolution never reads this value;
+     * it is kept as stored data, and the one-time v31 migration flips a
+     * stored true to false so the record itself matches reality.
+     */
     var hermesHostRemote: Boolean
         get() = preferences.getBoolean("hermes_host_remote", false)
         set(value) { preferences.edit().putBoolean("hermes_host_remote", value).apply() }
 
-    /** Base URL of the remote Hermes gateway ("" when unset). The gateway key lives in ApiKeyVault. */
+    /** Stored base URL of the remote Hermes gateway ("" when unset). Inert since v31; left in place, unused. */
     var hermesHostUrl: String
         get() = preferences.getString("hermes_host_url", "") ?: ""
         set(value) { preferences.edit().putString("hermes_host_url", value).apply() }
 
     /**
      * v26: true once the user has saved any Hermes host setting from the
-     * host card. With the stored mode/URL/key it marks an explicit host
-     * choice, which the baked-in gateway pre-connect (see
-     * HermesGatewayPreconnect) must never override. Absent on installs
-     * that predate v26; there, a stored remote mode, URL or key serves
-     * as the trace of a choice instead.
+     * host card. Inert since v31 (the pre-connect it guarded is gone);
+     * kept as stored data and preserved by the v31 migration.
      */
     var hermesHostConfigured: Boolean
         get() = preferences.getBoolean("hermes_host_configured_v26", false)
         set(value) { preferences.edit().putBoolean("hermes_host_configured_v26", value).apply() }
 
+    /** One-time v31 flag: the stored Hermes host mode has been flipped to embedded-only. */
+    var hermesEmbeddedOnlyMigrated: Boolean
+        get() = preferences.getBoolean("hermes_embedded_only_v31", false)
+        set(value) { preferences.edit().putBoolean("hermes_embedded_only_v31", value).apply() }
+
     /**
      * Gateway session ids for remote Hermes, keyed per project chat like
      * [loadAgentConversation] but in their own namespace: an id minted by
      * the gateway host means nothing to the embedded Hermes and vice versa.
+     * Stored data only since v31 — the remote route that used them is gone.
      */
     fun loadHermesRemoteConversation(projectId: String, chatId: String): String? =
         preferences.getString(hermesRemoteConversationKey(projectId, chatId), null)

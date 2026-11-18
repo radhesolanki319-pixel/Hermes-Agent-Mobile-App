@@ -71,12 +71,10 @@ import com.jarves.mh.runtime.AntigravityAuthController
 import com.jarves.mh.runtime.AntigravityAuthState
 import com.jarves.mh.runtime.AntigravityAuthStatus
 import com.jarves.mh.runtime.AntigravityRuntimeBridge
-import com.jarves.mh.runtime.HERMES_GATEWAY_VAULT_ID
 import com.jarves.mh.runtime.HERMES_SETUP_VAULT_ID
 import com.jarves.mh.runtime.HermesConfigOptions
-import com.jarves.mh.runtime.HermesGatewayPreconnect
+import com.jarves.mh.runtime.HermesEmbeddedOnly
 import com.jarves.mh.runtime.HermesHostConfig
-import com.jarves.mh.runtime.HermesRemoteMessages
 import com.jarves.mh.runtime.HermesProfileRoute
 import com.jarves.mh.runtime.HermesProfileSeeding
 import com.jarves.mh.runtime.HermesProviderCatalog
@@ -499,13 +497,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         },
         saveConversationId = { projectId, id ->
             _state.value.activeChatId?.let { preferences.saveAgentConversation(AgentKind.HERMES, projectId, it, id) }
-        },
-        hostConfig = { effectiveHermesHostConfig() },
-        remoteConversationId = { projectId ->
-            _state.value.activeChatId?.let { preferences.loadHermesRemoteConversation(projectId, it) }
-        },
-        saveRemoteConversationId = { projectId, id ->
-            _state.value.activeChatId?.let { preferences.saveHermesRemoteConversation(projectId, it, id) }
         },
     )
     private val agentRegistry = AgentRegistry.builtIns(hermesRuntime, claudeRuntime, antigravityRuntime)
@@ -2108,32 +2099,28 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _state.update { it.copy(initialLanguageSelected = false) }
     }
 
-    fun getSavedHermesHostKey(): String = vault.get(HERMES_GATEWAY_VAULT_ID).orEmpty()
-
     /**
-     * The Hermes host config a turn actually uses, resolved live from the
-     * stored state on every call: the user's own host-card choice when one
-     * is on record, otherwise — on builds carrying a gateway key — the
-     * baked-in connection to Hermes's own computer (v26). A user-entered
-     * vault key always wins over the baked key.
+     * The Hermes host config for chat, resolved live on every call.
+     * Since v31 Hermes is EMBEDDED ONLY (the Render gateway route was
+     * removed at the user's order), this resolves embedded for every
+     * install — fresh, migrated, or carrying stored remote prefs from
+     * the host-card / pre-connect era, which are inert data now. The
+     * resolution itself is the pure [HermesEmbeddedOnly.chatHostConfig],
+     * so the invariant is unit-tested against the full matrix of stored
+     * states.
      */
-    private fun effectiveHermesHostConfig(): HermesHostConfig = HermesGatewayPreconnect.resolve(
-        configured = preferences.hermesHostConfigured,
+    private fun effectiveHermesHostConfig(): HermesHostConfig = HermesEmbeddedOnly.chatHostConfig(
         storedRemote = preferences.hermesHostRemote,
         storedUrl = preferences.hermesHostUrl,
-        storedKey = getSavedHermesHostKey(),
-        bakedUrl = BuildConfig.GATEWAY_URL,
-        bakedKey = BuildConfig.GATEWAY_KEY,
     )
 
     /**
-     * The single "this turn runs on the remote Hermes host" decision (v29):
-     * true only for a Hermes turn whose effective host config is remote.
-     * Prompt assembly (which environment brief, which attached-files
-     * block) and failure handling (the key-rotation gate) all key on this
-     * one predicate, resolved from the same [effectiveHermesHostConfig]
-     * the bridge's hostConfig lambda uses, so they can never disagree
-     * about where a turn runs or ran.
+     * The single "this turn runs on the remote Hermes host" decision
+     * (v29): true only for a Hermes turn whose effective host config is
+     * remote. Since v31 the effective config is always embedded, so this
+     * is always false — it remains the one predicate the key-rotation
+     * gate keys on, so prompt assembly and failure handling can never
+     * disagree about where a turn runs or ran.
      */
     private fun isRemoteHermesTurn(agentKind: AgentKind): Boolean =
         agentKind == AgentKind.HERMES && effectiveHermesHostConfig().remote
@@ -2198,6 +2185,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         migrateProviderKeysIfNeeded()
         seedHermesProfileIfNeeded()
         clearSeededVirtualHermesModelIfNeeded()
+        migrateHermesToEmbeddedOnlyIfNeeded()
         seedFreeLlmDefaultsIfFresh()
         viewModelScope.launch { RuntimeSetupController.snapshot.collect(::onSetupSnapshot) }
         viewModelScope.launch { claudeRuntime.events.collect(::onRuntimeEvent) }
@@ -2279,6 +2267,34 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 )
             }
         }
+    }
+
+    /**
+     * One-time v31 migration: at the user's order ("Woh render wala
+     * computer hata do") the remote gateway route is removed and Hermes
+     * is embedded only. An install that still carries a stored remote
+     * host mode (host-card era, or the v26 pre-connect) has that stored
+     * mode flipped to embedded on first v31 launch. The write set is
+     * exactly the stored host mode plus this flag: the stored gateway
+     * URL and the gateway key in the vault are left in place (inert,
+     * unused), and NO provider profile, model, endpoint or key anywhere
+     * is touched — the decision and the preserved fields are the pure
+     * [HermesEmbeddedOnly.migrateHostPrefs]. Chat resolution no longer
+     * reads the stored mode at all ([effectiveHermesHostConfig] always
+     * resolves embedded); this migration simply makes the stored state
+     * itself tell the same truth.
+     */
+    private fun migrateHermesToEmbeddedOnlyIfNeeded() {
+        if (!HermesEmbeddedOnly.shouldMigrateEmbeddedOnly(preferences.hermesEmbeddedOnlyMigrated)) return
+        preferences.hermesEmbeddedOnlyMigrated = true
+        val migrated = HermesEmbeddedOnly.migrateHostPrefs(
+            HermesEmbeddedOnly.HostPrefs(
+                remote = preferences.hermesHostRemote,
+                url = preferences.hermesHostUrl,
+                configured = preferences.hermesHostConfigured,
+            ),
+        )
+        preferences.hermesHostRemote = migrated.remote
     }
 
     /**
@@ -5293,40 +5309,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         // what app/environment it runs in, that the whole guest filesystem
         // is reachable, and where the sister agents' chat transcripts and
         // the shared team-notes file live.
-        // v29: a Hermes turn that will run on the remote gateway host gets
-        // the remote brief instead — the v21 brief describes the phone
-        // (PRoot, /workspace, transcripts, team notes), none of which
-        // exists on the host, and Hermes went hunting for them there. The
-        // decision is the single isRemoteHermesTurn predicate, resolved
-        // from the same effectiveHermesHostConfig() the bridge's
-        // hostConfig lambda uses for this very turn; embedded Hermes and
-        // the other agents keep the v21 brief byte-for-byte. The same
-        // decision governs the attached-files block below: on a remote
-        // turn the listed guest paths exist only on the phone, so the
-        // block names the files and says plainly that their contents
-        // stay on the phone instead of sending Hermes to inspect them.
+        // v31: every turn runs on this phone (Hermes is embedded only —
+        // the remote gateway route and its host brief were removed), so
+        // the v21 brief and the guest-path attached-files block apply to
+        // every agent exactly as they did for embedded turns before.
         val agentKind = state.value.agentKind
-        val remoteHermesTurn = isRemoteHermesTurn(agentKind)
-        val environmentBrief = if (remoteHermesTurn) {
-            AgentEnvironmentBrief.buildRemoteHermes(project.name)
-        } else {
-            AgentEnvironmentBrief.build(agentKind, project.name, project.slug)
-        }
+        val environmentBrief = AgentEnvironmentBrief.build(agentKind, project.name, project.slug)
         val runtimePrompt = (if (attachments.isEmpty()) requestText else buildString {
             appendLine(requestText)
             appendLine()
             appendLine("<attached_files>")
-            if (remoteHermesTurn) {
-                attachments.forEach { attachment ->
-                    appendLine("- ${attachment.displayName} (${attachment.mimeType})")
-                }
-                appendLine("These files were attached by the user in the app. Their contents are on the user's phone and are not accessible from this computer — do not look for them here. If the request needs their contents, say so in one line.")
-            } else {
-                attachments.forEach { attachment ->
-                    appendLine("- ${attachment.displayName}: ${projectGuestRoot(project)}/${attachment.relativePath} (${attachment.mimeType})")
-                }
-                appendLine("These files were explicitly attached by the user. Inspect them only as needed for the request.")
+            attachments.forEach { attachment ->
+                appendLine("- ${attachment.displayName}: ${projectGuestRoot(project)}/${attachment.relativePath} (${attachment.mimeType})")
             }
+            appendLine("These files were explicitly attached by the user. Inspect them only as needed for the request.")
             appendLine("</attached_files>")
         }) + "\n\n" + environmentBrief +
             "\n\n" + GenUiProtocol.CAPABILITY_PROMPT_BLOCK
@@ -5896,12 +5892,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val current = _state.value
         if (!current.isRunning || current.activeSessionId != event.sessionId) return false
         // v29: the rotate/skip decision is pure (ApiKeyRotationPolicy).
-        // A remote Hermes turn never rotates: the gateway relays the
-        // HOST provider's error text verbatim, so a host-side rate-limit
-        // or key error matches the trigger substrings — but the failing
-        // key lives on the host, and swapping the phone's key, toasting
-        // and re-running the remote turn would only repeat the failure.
-        // The remote failure surfaces as-is through the v28 messages.
+        // Its remote-turn gate is moot since v31 (Hermes is embedded
+        // only, so isRemoteHermesTurn is always false), but the policy
+        // shape is unchanged: a non-Antigravity turn whose failure text
+        // indicts the phone's key may rotate it and re-run.
         if (!ApiKeyRotationPolicy.shouldRotate(current.agentKind, isRemoteHermesTurn(current.agentKind), event.reason)) return false
         val request = activeRuntimeRequest ?: return false
         // The unified provider pool this turn's key came from: every
@@ -5970,12 +5964,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             "No Claude subscription token is saved. Add one from Agent → AI provider." -> str(R.string.md_reason_no_claude_token)
             "Antigravity CLI is not installed. Open Settings → Coding agent to install it." -> str(R.string.md_reason_antigravity_not_installed)
             "Antigravity did not answer. Try again." -> str(R.string.vm_antigravity_no_answer)
-            HermesRemoteMessages.KEY_REJECTED -> str(R.string.md_reason_hermes_host_key_rejected)
-            HermesRemoteMessages.NO_URL -> str(R.string.md_reason_hermes_host_no_url)
-            HermesRemoteMessages.NO_KEY -> str(R.string.md_reason_hermes_host_no_key)
-            HermesRemoteMessages.UNREACHABLE -> str(R.string.md_reason_hermes_host_unreachable)
-            HermesRemoteMessages.STILL_WAKING -> str(R.string.md_reason_hermes_host_still_waking)
-            HermesRemoteMessages.DROPPED -> str(R.string.md_reason_hermes_host_dropped)
             else -> reason
         }
     }

@@ -14,10 +14,13 @@ import org.junit.Test
  */
 class ApiKeyRotationPolicyTest {
 
-    // The gateway-error passthrough shape (HermesRemoteClient composes
-    // "The Hermes host reported an error: <detail>") carrying a host-side
-    // FreeLLM rate-limit/quota/key failure — several trigger substrings
-    // at once, none of them about a key the phone holds.
+    // The gateway-error passthrough shape (the removed remote client
+    // composed "The Hermes host reported an error: <detail>") carrying a
+    // host-side FreeLLM rate-limit/quota/key failure — several trigger
+    // substrings at once, none of them about a key the phone holds.
+    // Since v31 the remote route is gone and the policy's remote gate is
+    // never fed true in production; the pin stays as the policy's own
+    // contract for that input.
     private val hostRelayedKeyFailure =
         "The Hermes host reported an error: Rate limit exceeded — quota for this API key is exhausted (HTTP 429)"
 
