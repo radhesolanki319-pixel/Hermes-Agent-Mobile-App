@@ -796,8 +796,13 @@ private fun SettingsAccordion(
  * no provider jargon, no env-var names. Every field reads and writes the
  * SAME vault pool the advanced surfaces use (see [ApiKeysPlan]), so a key
  * entered here is the key the Agent screen shows, and vice versa. The
- * Fusion/Auto model choice sits under the Hermes field; the full setup
- * stays one tap away under "Advanced" (it lives on the Agent screen).
+ * surface is provider-neutral (v17): the Hermes field is labelled with
+ * whichever provider is currently chosen in the advanced setup — the
+ * user's stored choice is final and nothing here steers it. The
+ * Fusion/Auto model choice sits under the Hermes field ONLY in the
+ * Custom/FreeLLM configuration, where those virtual models exist; the
+ * full setup stays one tap away under "Advanced" (it lives on the
+ * Agent screen).
  */
 @Composable
 private fun ApiKeysSimpleContent(
@@ -826,16 +831,12 @@ private fun ApiKeysSimpleContent(
             SimpleKeyFieldKind.HERMES -> {
                 SimpleKeyFieldEditor(
                     heading = AgentKind.HERMES.localizedTitle(),
-                    label = if (field.hermesFusion) {
-                        stringResource(R.string.api_keys_freellm_label)
-                    } else {
-                        stringResource(R.string.api_keys_provider_label, field.providerName)
-                    },
-                    hint = if (field.hermesFusion) {
-                        stringResource(R.string.api_keys_freellm_hint)
-                    } else {
-                        stringResource(R.string.api_keys_hermes_provider_hint, field.providerName)
-                    },
+                    // Provider-neutral (v17): the field always names the
+                    // CURRENTLY CHOSEN provider — in the fusion
+                    // configuration providerName is "FreeLLM", so the
+                    // label reads the same there without a special case.
+                    label = stringResource(R.string.api_keys_provider_label, field.providerName),
+                    hint = stringResource(R.string.api_keys_hermes_provider_hint, field.providerName),
                     initialValue = getSavedHermesApiKey(),
                     fieldKey = field.vaultId,
                     onSave = onSaveHermesApiKey,

@@ -205,17 +205,18 @@ enum class HermesModelChoice(val storedValue: String) {
 }
 
 /**
- * One-time migration to the fusion defaults for installs that predate them.
+ * NEUTRALIZED (2026-11-18, v17) — this object used to compute a one-time
+ * migration that overwrote a stored pre-fusion setup (Anthropic provider,
+ * no model, no custom base URL) with the fusion defaults.
  *
- * Before the fusion defaults landed, an untouched Hermes setup resolved to
- * the Anthropic provider with no model and no custom base URL — and an
- * install from that era may have those exact values STORED (older builds
- * persisted the setup), where the new getter defaults can no longer reach
- * them. When the raw stored triple is still that old untouched-equivalent
- * state, [migratedSetup] returns the fusion configuration to overwrite it
- * with. Anything else — nothing stored at all (the getters already resolve
- * to fusion), or any deliberate combination the user picked — returns null
- * and is left untouched. Pure and side-effect free; `AppPreferences` owns
+ * The user correction of 2026-11-18 reversed that policy: a stored
+ * provider/model/base-URL choice is FINAL and is never overridden by
+ * defaults or migrations — the user runs whichever provider and key they
+ * want. The fusion values remain only as getter defaults for a fresh
+ * install where nothing is stored at all. [migratedSetup] therefore
+ * always returns null; it is kept (rather than deleted) so the reversal
+ * is explicit at the old call site and no future code can resurrect the
+ * rewrite by accident. Pure and side-effect free; `AppPreferences` owns
  * the stored values and the one-time flag.
  */
 object HermesSetupMigration {
@@ -223,63 +224,39 @@ object HermesSetupMigration {
     /** Provider id an untouched setup resolved to before the fusion defaults. */
     const val OLD_DEFAULT_PROVIDER_ID = "anthropic"
 
-    /** The fusion setup to store, or null when no migration applies. */
+    /** Always null since the v17 neutralization: no stored setup is ever rewritten. */
     fun migratedSetup(
         providerId: String?,
         model: String?,
         customBaseUrl: String?,
-    ): HermesSetupSettings? =
-        if (providerId == OLD_DEFAULT_PROVIDER_ID && model.isNullOrBlank() && customBaseUrl.isNullOrBlank()) {
-            HermesSetupSettings(
-                providerId = HermesProviderCatalog.DEFAULT_PROVIDER_ID,
-                model = HermesProviderCatalog.DEFAULT_MODEL,
-                customBaseUrl = HermesProviderCatalog.DEFAULT_CUSTOM_BASE_URL,
-            )
-        } else {
-            null
-        }
+    ): HermesSetupSettings? = null
 }
 
 /**
- * Stronger one-time reset to the fusion configuration (v14), for installs
- * carrying a LEFTOVER stored Hermes provider from before the fusion
- * defaults existed.
+ * NEUTRALIZED (2026-11-18, v17) — this object used to compute the v14
+ * one-time reset that overwrote ANY stored non-Custom Hermes provider
+ * with the fusion configuration, on the theory that such a provider was
+ * a leftover from exploring an early build.
  *
- * The v12 migration above only rewrote the exact old untouched state
- * (Anthropic + no model + no base URL). On-device evidence (2026-11-18)
- * showed a stored provider picked while exploring an early build —
- * "openrouter" — surviving both the fusion getter defaults and that
- * migration, so Hermes kept running against the leftover provider, whose
- * saved key it rejected. The user's only ever stated Hermes choice is the
- * FreeLLM fusion configuration, so on the FIRST check of this migration
- * any stored provider that is not the Custom id is treated as such a
- * leftover: [resetSetup] returns the fusion configuration to overwrite
- * the stored triple with. A stored Custom setup — whatever base URL and
- * model the user put there — is a live deliberate configuration and is
- * left untouched, as is an install with nothing stored (the getters
- * already resolve to fusion). [alreadyMigrated] is this migration's own
- * one-time flag: once it has run, the decision never fires again, so any
- * provider the user deliberately picks afterwards persists. Pure and
+ * The user correction of 2026-11-18 reversed that policy outright: the
+ * "leftover" provider (OpenRouter) was a deliberate choice, and resetting
+ * it — together with the reinstalls the signing churn forced — made the
+ * user re-enter keys and re-pick providers again and again. A stored
+ * provider/model/base-URL choice is FINAL: [resetSetup] always returns
+ * null, whatever is stored and whatever the flag says. It is kept
+ * (rather than deleted) so the reversal is explicit at the old call site
+ * and no future code can resurrect the reset by accident. Pure and
  * side-effect free; `AppPreferences` owns the stored values and the flag.
  */
 object HermesFusionResetMigration {
 
-    /** The fusion setup to store, or null when no reset applies. */
+    /** Always null since the v17 neutralization: a stored setup is never reset. */
     fun resetSetup(
         alreadyMigrated: Boolean,
         providerId: String?,
         model: String?,
         customBaseUrl: String?,
-    ): HermesSetupSettings? =
-        if (!alreadyMigrated && providerId != null && providerId != HermesProviderCatalog.CUSTOM_ID) {
-            HermesSetupSettings(
-                providerId = HermesProviderCatalog.DEFAULT_PROVIDER_ID,
-                model = HermesProviderCatalog.DEFAULT_MODEL,
-                customBaseUrl = HermesProviderCatalog.DEFAULT_CUSTOM_BASE_URL,
-            )
-        } else {
-            null
-        }
+    ): HermesSetupSettings? = null
 }
 
 /**

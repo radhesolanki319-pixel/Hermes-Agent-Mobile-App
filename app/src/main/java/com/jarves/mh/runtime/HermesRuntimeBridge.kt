@@ -148,6 +148,17 @@ internal object HermesConfigFiles {
             // #49: after code edits the agent must produce fresh
             // verification evidence before its final answer.
             "  verify_on_stop: true",
+            // Latency (v17): cap the model's reasoning depth for chat.
+            // 0.19.0 resolves agent.reasoning_effort at CLI startup
+            // (hermes_constants.resolve_reasoning_config; valid levels
+            // none|minimal|low|medium|high|xhigh|max|ultra) — unset
+            // means the provider's default depth, which visibly
+            // "thinks" even over a greeting before answering.
+            // "minimal" is the lowest enabled level: near-instant
+            // simple replies while tool planning keeps a sliver of
+            // reasoning. Ensure-if-absent like every static here, so a
+            // value Hermes or the user sets deliberately always wins.
+            "  reasoning_effort: \"minimal\"",
         ),
         "checkpoints" to listOf(
             // #36: snapshot the working dir once per turn; /rollback
@@ -827,8 +838,8 @@ class HermesRuntimeBridge(
             // shell, so no quoting hazard) in quiet mode `-Q`. The prompt is
             // byte-capped below the kernel's 128 KiB per-argument exec limit;
             // see buildHermesPrompt.
-            val contextPrompt = buildHermesPrompt(prompt, conversationHistory, guestWorkspacePath, projectKind)
             val resumeId = conversationId(projectId)?.takeIf(String::isNotBlank)
+            val contextPrompt = buildHermesPrompt(prompt, conversationHistory, guestWorkspacePath, projectKind, resumed = resumeId != null)
             val command = buildList {
                 add(RuntimeInstaller.HERMES_GUEST_PATH)
                 add("chat")
@@ -1169,9 +1180,18 @@ class HermesRuntimeBridge(
      * history is shed until the assembled prompt fits the byte budget;
      * the final hard truncation only fires for a pathological current
      * message and never splits a UTF-8 sequence.
+     *
+     * On a resumed session ([resumed]) the history embed is skipped
+     * entirely: Hermes's own session store already holds the prior turns
+     * (that is what `--resume` restores), so re-embedding them would make
+     * the model process every prior turn twice — in fusion mode, once
+     * per panel model plus the judge. The full embed remains for fresh
+     * sessions: the first message of a chat, and the first message after
+     * a failed resume cleared the stored id (see the failure path in
+     * [startSession]), so continuity never depends on the embed alone.
      */
-    private fun buildHermesPrompt(currentPrompt: String, history: List<ChatMessage>, guestWorkspacePath: String, projectKind: ProjectKind): String {
-        var remaining = history
+    private fun buildHermesPrompt(currentPrompt: String, history: List<ChatMessage>, guestWorkspacePath: String, projectKind: ProjectKind, resumed: Boolean = false): String {
+        var remaining = if (resumed) emptyList() else history
         var assembled = buildContextPrompt(currentPrompt, remaining, guestWorkspacePath, projectKind)
         while (utf8ByteCount(assembled) > MAX_HERMES_PROMPT_BYTES && remaining.size > 1) {
             remaining = remaining.drop(1)

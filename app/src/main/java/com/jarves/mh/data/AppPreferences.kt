@@ -32,62 +32,34 @@ class AppPreferences(private val context: Context) {
     }
 
     /**
-     * One-time migration (2026-11-18): an install that still has the OLD
-     * untouched Hermes setup stored — Anthropic provider, no model, no
-     * custom base URL, from before the fusion defaults landed — is moved
-     * onto the fusion defaults (Custom + FreeLLM + "fusion"). Any other
-     * stored combination is a deliberate user choice and is left untouched;
-     * a never-stored setup needs nothing (the getters already default to
-     * fusion). The flag records that the check has run, so a user who later
-     * deliberately recreates the old combination keeps it.
+     * NEUTRALIZED (2026-11-18, v17): this check used to rewrite a stored
+     * pre-fusion Hermes setup (Anthropic provider, no model, no custom
+     * base URL) onto the fusion defaults. The user's correction reversed
+     * the policy: a stored provider/model/base-URL choice is final and is
+     * never overridden by defaults or migrations — the fusion values are
+     * only the getters' defaults for a fresh install where nothing is
+     * stored. The check now only records its flag and touches nothing.
+     * [HermesSetupMigration.migratedSetup] is likewise a permanent no-op.
      */
     private fun migrateHermesSetupToFusionDefaultIfNeeded() {
         if (preferences.getBoolean(HERMES_FUSION_MIGRATION_FLAG, false)) return
-        val migrated = HermesSetupMigration.migratedSetup(
-            providerId = preferences.getString("hermes_provider_id", null),
-            model = preferences.getString("hermes_model", null),
-            customBaseUrl = preferences.getString("hermes_custom_base_url", null),
-        )
-        preferences.edit().apply {
-            if (migrated != null) {
-                putString("hermes_provider_id", migrated.providerId)
-                putString("hermes_model", migrated.model)
-                putString("hermes_custom_base_url", migrated.customBaseUrl)
-            }
-            putBoolean(HERMES_FUSION_MIGRATION_FLAG, true)
-        }.apply()
+        preferences.edit().putBoolean(HERMES_FUSION_MIGRATION_FLAG, true).apply()
     }
 
     /**
-     * Stronger one-time reset (2026-11-18, v14): the migration above only
-     * rewrote the exact old untouched setup, but a LEFTOVER provider stored
-     * while exploring an early build (seen on-device: "openrouter")
-     * survived it, and Hermes kept running against that provider with a
-     * key it rejects. The user's only ever stated Hermes choice is the
-     * FreeLLM fusion configuration, so on this migration's first check any
-     * stored provider other than Custom is reset to the fusion defaults.
-     * A stored Custom setup — whatever URL/model it carries — is left
-     * untouched. This migration has its OWN flag, separate from the one
-     * above; once it has run it never runs again, so any provider the
-     * user deliberately picks afterwards persists.
+     * NEUTRALIZED (2026-11-18, v17): the v14 reset used to overwrite ANY
+     * stored non-Custom Hermes provider with the fusion configuration,
+     * treating it as a leftover from an early build. The "leftover"
+     * (OpenRouter) was the user's deliberate choice, and the reset —
+     * together with the reinstalls the signing churn forced — made them
+     * re-enter keys and re-pick providers repeatedly. A stored choice is
+     * final: this check now only records its flag and touches nothing.
+     * [HermesFusionResetMigration.resetSetup] is likewise a permanent
+     * no-op, so the reset cannot come back through the pure layer either.
      */
     private fun resetHermesSetupToFusionIfNeeded() {
-        val alreadyMigrated = preferences.getBoolean(HERMES_FUSION_RESET_FLAG, false)
-        val reset = HermesFusionResetMigration.resetSetup(
-            alreadyMigrated = alreadyMigrated,
-            providerId = preferences.getString("hermes_provider_id", null),
-            model = preferences.getString("hermes_model", null),
-            customBaseUrl = preferences.getString("hermes_custom_base_url", null),
-        )
-        if (reset == null && alreadyMigrated) return
-        preferences.edit().apply {
-            if (reset != null) {
-                putString("hermes_provider_id", reset.providerId)
-                putString("hermes_model", reset.model)
-                putString("hermes_custom_base_url", reset.customBaseUrl)
-            }
-            putBoolean(HERMES_FUSION_RESET_FLAG, true)
-        }.apply()
+        if (preferences.getBoolean(HERMES_FUSION_RESET_FLAG, false)) return
+        preferences.edit().putBoolean(HERMES_FUSION_RESET_FLAG, true).apply()
     }
 
     var onboardingComplete: Boolean

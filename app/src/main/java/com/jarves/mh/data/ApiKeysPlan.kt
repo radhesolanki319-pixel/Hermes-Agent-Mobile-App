@@ -33,10 +33,12 @@ enum class SimpleKeyFieldKind { HERMES, CLAUDE_CODE, ANTIGRAVITY, HERMES_HOST }
  * @property providerKind the profile provider the field belongs to (profile
  * fields only; null for the Hermes-native and host fields).
  * @property providerName plain display name of the provider the key belongs
- * to, for the field's hint line (e.g. "FreeLLM", "Anthropic", "OpenRouter").
- * @property hermesFusion true when the Hermes field is in the default
- * FreeLLM fusion configuration (Custom provider on the FreeLLM endpoint) —
- * the one configuration the screen labels "FreeLLM API Key".
+ * to — the field's label and hint always use it, for every provider
+ * alike (e.g. "FreeLLM", "Anthropic", "OpenRouter").
+ * @property hermesFusion true when the Hermes field is in the FreeLLM
+ * fusion configuration (Custom provider on the FreeLLM endpoint). Since
+ * v17 this drives ONLY the Fusion/Auto model selector's visibility: the
+ * label and hint are the current provider's name in every configuration.
  */
 data class SimpleKeyField(
     val kind: SimpleKeyFieldKind,
@@ -59,9 +61,10 @@ object ApiKeysPlan {
      * The fields to show, in display order: Hermes first, then the other
      * agents' active-provider keys, then the Hermes host key.
      *
-     * - Hermes is always present. In the fusion configuration it is the
-     *   single "FreeLLM API Key" field; if the user changed the provider in
-     *   the advanced Hermes setup, the field follows that provider instead.
+     * - Hermes is always present, and the field always follows the
+     *   provider currently chosen in the advanced Hermes setup (the
+     *   fusion configuration included — its provider name is "FreeLLM").
+     *   The simple screen never steers the stored choice (v17).
      * - Claude Code / Antigravity appear only when the agent's current
      *   profile provider is one of the providers that agent actually takes
      *   an API key (or, for Claude's subscription kind, its setup token)

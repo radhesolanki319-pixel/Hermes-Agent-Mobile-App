@@ -2322,27 +2322,33 @@ private fun AgentHermesSetupCard(
             shape = RoundedCornerShape(12.dp),
         )
         // Quick picks for the FreeLLM virtual models — the same two choices
-        // the simple API Keys screen offers. They only fill the field above;
-        // the free-text value stays editable and is stored on Save as usual.
-        Row(
-            Modifier.padding(top = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            HermesModelChoice.entries.forEach { choice ->
-                FilterChip(
-                    selected = model.trim() == choice.storedValue,
-                    onClick = { model = choice.storedValue; status = null },
-                    label = {
-                        Text(
-                            stringResource(
-                                when (choice) {
-                                    HermesModelChoice.FUSION -> R.string.api_keys_model_fusion
-                                    HermesModelChoice.AUTO -> R.string.api_keys_model_auto
-                                },
-                            ),
-                        )
-                    },
-                )
+        // the simple API Keys screen offers. They exist only on the Custom
+        // endpoint (v17): "fusion"/"auto" are that endpoint's virtual
+        // models, so offering them under any other provider would steer
+        // the model field to names that provider does not have. They only
+        // fill the field above; the free-text value stays editable and is
+        // stored on Save as usual.
+        if (isCustom) {
+            Row(
+                Modifier.padding(top = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                HermesModelChoice.entries.forEach { choice ->
+                    FilterChip(
+                        selected = model.trim() == choice.storedValue,
+                        onClick = { model = choice.storedValue; status = null },
+                        label = {
+                            Text(
+                                stringResource(
+                                    when (choice) {
+                                        HermesModelChoice.FUSION -> R.string.api_keys_model_fusion
+                                        HermesModelChoice.AUTO -> R.string.api_keys_model_auto
+                                    },
+                                ),
+                            )
+                        },
+                    )
+                }
             }
         }
         AnimatedVisibility(isCustom) {

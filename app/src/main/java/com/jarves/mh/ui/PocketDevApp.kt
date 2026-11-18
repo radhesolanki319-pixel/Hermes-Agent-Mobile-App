@@ -6369,9 +6369,6 @@ private fun ChatTab(
                         LiveClaudeProcess(
                             processItems = liveProcess,
                             isRunning = isRunning,
-                            startedAtMillis = taskStartedAtMillis,
-                            finishedAtMillis = taskFinishedAtMillis,
-                            thinkingActive = thinkingActive,
                         )
                     }
                 }
@@ -6669,33 +6666,78 @@ private fun QueuedFollowUpCard(
 private fun LiveClaudeProcess(
     processItems: List<ActivityItem>,
     isRunning: Boolean,
-    startedAtMillis: Long?,
-    finishedAtMillis: Long?,
-    thinkingActive: Boolean,
 ) {
-    val elapsedSeconds = startedAtMillis?.let { rememberLiveElapsedSeconds(it).toLong() } ?: 0L
     ClaudeActivityDisclosure(
         items = processItems,
-        headline = activityHeadline(processItems, elapsedSeconds, thinkingActive),
         isRunning = isRunning,
     )
 }
 
+/**
+ * Transcript hygiene (v17, rendering only — stored session events are
+ * never touched): reasoning narration ("Think" rows) and turn-outcome
+ * status items are not chat content and never render as loose rows.
+ * Tool-action rows (Running <tool>, <tool> completed, files changed, …)
+ * are the agent's work and stay. A turn's failure is not dropped with
+ * its status row — [WorkBlockCard] renders it as the turn's
+ * assistant-side bubble instead.
+ */
+private fun isFailureActivityItem(item: ActivityItem, interruptedTitle: String): Boolean =
+    item.title.startsWith("Task stopped") || item.title == "Task interrupted" || item.title == interruptedTitle
+
+private fun chatVisibleActivityItems(items: List<ActivityItem>, interruptedTitle: String): List<ActivityItem> =
+    items.filterNot { it.title == "Think" || isFailureActivityItem(it, interruptedTitle) }
+
 @Composable
 private fun WorkBlockCard(message: ChatMessage) {
-    val seconds = (message.workedMillis / 1_000L).coerceAtLeast(1L)
+    val interruptedTitle = stringResource(R.string.vm_task_interrupted)
+    val failure = message.workItems.lastOrNull { isFailureActivityItem(it, interruptedTitle) }
+    val actionItems = chatVisibleActivityItems(message.workItems, interruptedTitle)
     Column {
-        ClaudeActivityDisclosure(
-            items = message.workItems,
-            headline = activityHeadline(message.workItems, seconds, message.workItems.isEmpty()),
-        )
-        if (message.workItems.lastOrNull()?.title?.startsWith("Task stopped") == true) {
-            Text(
-                text = stringResource(R.string.ws_worked_for, formatDuration(seconds)),
-                modifier = Modifier.padding(start = 29.dp, bottom = 6.dp),
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                fontSize = 11.sp,
+        if (actionItems.isNotEmpty()) {
+            ClaudeActivityDisclosure(
+                items = actionItems,
+                isRunning = false,
             )
+        }
+        if (failure != null) {
+            TurnFailureBubble(reason = failure.detail)
+        }
+    }
+}
+
+/**
+ * A failed turn's explanation, rendered as the turn's assistant-side
+ * bubble (v17) instead of a loose "Task stopped · …" transcript line.
+ * The text is the failure item's detail — the bridge's own explanation
+ * (e.g. the provider's rejection) — with the localized outcome as the
+ * fallback when no detail was recorded.
+ */
+@Composable
+private fun TurnFailureBubble(reason: String) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Start) {
+        Surface(
+            color = PocketMuseSurface,
+            shape = RoundedCornerShape(24.dp),
+            modifier = Modifier.fillMaxWidth(.92f),
+        ) {
+            Row(
+                Modifier.padding(start = 14.dp, end = 14.dp, top = 12.dp, bottom = 12.dp),
+                verticalAlignment = Alignment.Top,
+            ) {
+                Icon(
+                    Icons.Default.Warning,
+                    null,
+                    Modifier.size(17.dp).padding(top = 2.dp),
+                    tint = MaterialTheme.colorScheme.error,
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = reason.ifBlank { stringResource(R.string.ws_task_stopped) },
+                    style = MaterialTheme.typography.bodyMedium.copy(lineHeight = 22.sp),
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+            }
         }
     }
 }
@@ -6703,38 +6745,48 @@ private fun WorkBlockCard(message: ChatMessage) {
 @Composable
 private fun ClaudeActivityDisclosure(
     items: List<ActivityItem>,
-    headline: String,
     isRunning: Boolean = false,
 ) {
     var expandedItems by rememberSaveable { mutableStateOf(emptyList<Int>()) }
-    // Older saved chats may contain hundreds of polling steps. Rendering all of them inside
-    // one lazy-list item can monopolize the UI thread, so show the latest useful window.
-    val visibleItems = items.takeLast(32)
+    // Narration and turn-outcome items never render (see
+    // chatVisibleActivityItems). Older saved chats may also contain
+    // hundreds of polling steps; rendering all of them inside one
+    // lazy-list item can monopolize the UI thread, so show the latest
+    // useful window.
+    val visibleItems = chatVisibleActivityItems(items, stringResource(R.string.vm_task_interrupted)).takeLast(32)
+    if (visibleItems.isEmpty()) {
+        // Nothing but narration so far. While the turn runs, the only
+        // affordance is the pulsing dots — no headline text (v17). A
+        // finished segment with no action rows renders nothing at all.
+        if (isRunning) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    Icons.Default.AutoAwesome,
+                    null,
+                    Modifier.size(16.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.width(9.dp))
+                AnimatedThinkingDots()
+            }
+        }
+        return
+    }
     Column(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 6.dp)) {
-        if (visibleItems.isEmpty()) {
+        visibleItems.forEachIndexed { index, item ->
             ActivitySummaryRow(
-                item = null,
-                text = headline,
-                expanded = 0 in expandedItems,
-                showProgress = isRunning,
+                item = item,
+                text = compactActivityText(item),
+                expanded = index in expandedItems,
+                showProgress = isRunning && !item.isComplete,
                 onToggle = {
-                    expandedItems = if (0 in expandedItems) expandedItems - 0 else expandedItems + 0
+                    expandedItems = if (index in expandedItems) expandedItems - index else expandedItems + index
                 },
             )
-            if (0 in expandedItems) ActivityExpandedDetail(null, stringResource(R.string.ws_activity_reviewing_request))
-        } else {
-            visibleItems.forEachIndexed { index, item ->
-                ActivitySummaryRow(
-                    item = item,
-                    text = compactActivityText(item),
-                    expanded = index in expandedItems,
-                    showProgress = isRunning && !item.isComplete,
-                    onToggle = {
-                        expandedItems = if (index in expandedItems) expandedItems - index else expandedItems + index
-                    },
-                )
-                if (index in expandedItems) ActivityExpandedDetail(item, activityDetail(item))
-            }
+            if (index in expandedItems) ActivityExpandedDetail(item, activityDetail(item))
         }
     }
 }
@@ -6962,17 +7014,6 @@ private fun activityDetail(item: ActivityItem): String {
     return item.detail.ifBlank { activityDisplayName(item) }
 }
 
-@Composable
-private fun activityHeadline(items: List<ActivityItem>, seconds: Long, thinking: Boolean): String {
-    val latest = items.lastOrNull()
-    val thinkLabel = stringResource(R.string.ws_activity_think)
-    if (latest == null) return "$thinkLabel · ${stringResource(R.string.ws_activity_analyzing_request)} · ${formatDuration(seconds)}"
-    if (thinking && latest.title == "Think") return "$thinkLabel · ${latest.detail} · ${formatDuration(seconds)}"
-    val latestName = activityDisplayName(latest)
-    val detail = latest.detail.take(180).replace(Regex("\\s+"), " ").trim().ifBlank { latestName }
-    return "$latestName · ${detail.take(100)} · ${formatDuration(seconds)}"
-}
-
 /**
  * Activity titles are stored as written: internal English markers ("Think", "Task stopped",
  * "Running <tool>", "<tool> completed") that the logic above parses, titles already localized
@@ -7073,84 +7114,81 @@ private fun MessageBubble(
             resolveGenUiParts(message.text, message.genUiPayload)
         }
     }
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = if (message.fromUser) Arrangement.End else Arrangement.Start) {
-        // Muse-app chat look (2026-11-18): assistant = dark-grey rounded card,
-        // user = solid Muse blue bubble; no gradients, no avatar.
-        Surface(
-            color = if (message.fromUser) PocketMuseBlue else PocketMuseSurface,
-            shape = RoundedCornerShape(24.dp),
-            modifier = Modifier.fillMaxWidth(if (message.fromUser) .82f else .92f),
-        ) {
-            Column(Modifier.padding(top = 12.dp)) {
-                SelectionContainer {
-                    if (message.fromUser) {
-                        Text(
-                            text = message.text,
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        val userBubbleMaxWidth = maxWidth * 0.85f
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = if (message.fromUser) Arrangement.End else Arrangement.Start) {
+            // Muse-app chat look (2026-11-18): assistant = dark-grey rounded card,
+            // user = solid Muse blue bubble; no gradients, no avatar. The user bubble
+            // hugs its text (v17): it sizes to the message, capped at 85% of the
+            // row, instead of always stretching to a fixed fraction of it.
+            Surface(
+                color = if (message.fromUser) PocketMuseBlue else PocketMuseSurface,
+                shape = RoundedCornerShape(24.dp),
+                modifier = if (message.fromUser) Modifier.widthIn(max = userBubbleMaxWidth) else Modifier.fillMaxWidth(.92f),
+            ) {
+                Column(Modifier.padding(top = 12.dp)) {
+                    SelectionContainer {
+                        if (message.fromUser) {
+                            Text(
+                                text = message.text,
+                                modifier = Modifier.padding(start = 14.dp, end = 14.dp, bottom = 8.dp),
+                                style = MaterialTheme.typography.bodyMedium.copy(lineHeight = 22.sp),
+                                color = Color.White,
+                            )
+                        } else {
+                            val parts = genUiParts
+                            if (parts == null || parts.payload == null) {
+                                MarkdownText(
+                                    markdown = displayedText,
+                                    modifier = Modifier.padding(start = 14.dp, end = 14.dp, bottom = 8.dp),
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    onRunCode = onRunInTerminal,
+                                )
+                            } else if (parts.prose.isNotBlank()) {
+                                MarkdownText(
+                                    markdown = parts.prose,
+                                    modifier = Modifier.padding(start = 14.dp, end = 14.dp, bottom = 8.dp),
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    onRunCode = onRunInTerminal,
+                                )
+                            }
+                        }
+                    }
+                    val resolvedParts = genUiParts
+                    if (!message.fromUser && resolvedParts != null && resolvedParts.payload != null) {
+                        GenerativeUiView(
+                            payload = resolvedParts.payload,
+                            state = genUiState,
+                            enabled = genUiEnabled,
+                            onEvent = { event -> onGenUiAction(message.id, event) },
                             modifier = Modifier.padding(start = 14.dp, end = 14.dp, bottom = 8.dp),
-                            style = MaterialTheme.typography.bodyMedium.copy(lineHeight = 22.sp),
-                            color = Color.White,
                         )
-                    } else {
-                        val parts = genUiParts
-                        if (parts == null || parts.payload == null) {
-                            MarkdownText(
-                                markdown = displayedText,
-                                modifier = Modifier.padding(start = 14.dp, end = 14.dp, bottom = 8.dp),
-                                color = MaterialTheme.colorScheme.onSurface,
-                                onRunCode = onRunInTerminal,
-                            )
-                        } else if (parts.prose.isNotBlank()) {
-                            MarkdownText(
-                                markdown = parts.prose,
-                                modifier = Modifier.padding(start = 14.dp, end = 14.dp, bottom = 8.dp),
-                                color = MaterialTheme.colorScheme.onSurface,
-                                onRunCode = onRunInTerminal,
+                    } else if (!message.fromUser && resolvedParts?.payloadIncomplete == true) {
+                        Row(
+                            Modifier.padding(start = 14.dp, end = 14.dp, bottom = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp, color = PocketMuseBlue)
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                stringResource(R.string.genui_preparing),
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
                     }
-                }
-                val resolvedParts = genUiParts
-                if (!message.fromUser && resolvedParts != null && resolvedParts.payload != null) {
-                    GenerativeUiView(
-                        payload = resolvedParts.payload,
-                        state = genUiState,
-                        enabled = genUiEnabled,
-                        onEvent = { event -> onGenUiAction(message.id, event) },
-                        modifier = Modifier.padding(start = 14.dp, end = 14.dp, bottom = 8.dp),
-                    )
-                } else if (!message.fromUser && resolvedParts?.payloadIncomplete == true) {
-                    Row(
-                        Modifier.padding(start = 14.dp, end = 14.dp, bottom = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp, color = PocketMuseBlue)
-                        Spacer(Modifier.width(8.dp))
-                        Text(
-                            stringResource(R.string.genui_preparing),
-                            fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
-                if (!message.fromUser && message.workedMillis > 0L) {
-                    Text(
-                        text = stringResource(R.string.ws_worked_for, formatDuration((message.workedMillis / 1_000L).coerceAtLeast(1L))),
-                        modifier = Modifier.padding(start = 14.dp, end = 14.dp, top = 6.dp, bottom = 10.dp),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontSize = 11.sp,
-                    )
-                }
-                if (message.attachments.isNotEmpty()) {
-                    Column(
-                        Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, bottom = 12.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp),
-                    ) {
-                        message.attachments.forEach { attachment ->
-                            AttachmentChip(attachment = attachment, onOpen = { onOpenAttachment(attachment) }, onRemove = null)
+                    if (message.attachments.isNotEmpty()) {
+                        Column(
+                            Modifier.then(if (message.fromUser) Modifier else Modifier.fillMaxWidth()).padding(start = 12.dp, end = 12.dp, bottom = 12.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            message.attachments.forEach { attachment ->
+                                AttachmentChip(attachment = attachment, onOpen = { onOpenAttachment(attachment) }, onRemove = null)
+                            }
                         }
                     }
+                    Spacer(Modifier.height(4.dp))
                 }
-                Spacer(Modifier.height(4.dp))
             }
         }
     }
