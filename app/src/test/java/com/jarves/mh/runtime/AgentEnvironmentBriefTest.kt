@@ -112,6 +112,69 @@ class AgentEnvironmentBriefTest {
         val brief = AgentEnvironmentBrief.buildRemoteHermes("P")
         assertTrue(brief.contains("This computer is always on"))
         assertTrue(brief.contains("keeps running after your turn ends"))
-        assertTrue(brief.contains("End your reply by stating what you did and what you changed"))
+        // v30: the closing summary is scoped to turns that did work.
+        assertTrue(brief.contains("When a turn actually involved doing work, end by stating what you did and what you changed"))
+    }
+
+    // v30: the v29 facts were right but Hermes recited them — the
+    // phone-files disclaimer in every reply, unprompted, plus a stock
+    // "What would you like to do?" tail on every message. The facts are
+    // now silent background and the conversation rules are explicit.
+
+    @Test
+    fun remoteBriefFramesTheFactsAsSilentBackground() {
+        val brief = AgentEnvironmentBrief.buildRemoteHermes("Swift Bose")
+        assertTrue(brief.contains("Background, for your own orientation only"))
+        assertTrue(brief.contains("do not announce it, repeat it, or remind the user about it"))
+    }
+
+    @Test
+    fun remoteBriefMentionsThePhoneLimitationOnlyWhenAsked() {
+        val brief = AgentEnvironmentBrief.buildRemoteHermes("P")
+        assertTrue(brief.contains("may be mentioned only when the user actually asks"))
+        assertTrue(brief.contains("exactly one short line, once"))
+        assertTrue(brief.contains("carry on with whatever you can do from here"))
+    }
+
+    @Test
+    fun remoteBriefTreatsSmallTalkAsPlainChat() {
+        val brief = AgentEnvironmentBrief.buildRemoteHermes("P")
+        assertTrue(brief.contains("be a natural chat partner"))
+        assertTrue(brief.contains("If the user just greets you or makes small talk, just chat back"))
+        assertTrue(brief.contains("no project talk, no capability talk, no disclaimers"))
+    }
+
+    @Test
+    fun remoteBriefMatchesTheUsersLanguageAndLength() {
+        val brief = AgentEnvironmentBrief.buildRemoteHermes("P")
+        assertTrue(brief.contains("Match the user's language and register"))
+        assertTrue(brief.contains("Roman Hinglish"))
+        assertTrue(brief.contains("not stiff, formal language"))
+        assertTrue(brief.contains("a short message gets a short reply"))
+        assertTrue(brief.contains("do not pad"))
+    }
+
+    @Test
+    fun remoteBriefForbidsStockClosingQuestions() {
+        val brief = AgentEnvironmentBrief.buildRemoteHermes("P")
+        assertTrue(brief.contains("Do not end replies with a stock question"))
+        assertTrue(brief.contains("\"What would you like to do?\""))
+        assertTrue(brief.contains("\"Kya chahiye?\""))
+        assertTrue(brief.contains("end naturally"))
+        assertTrue(brief.contains("only when you genuinely need the answer to proceed"))
+    }
+
+    @Test
+    fun remoteBriefForbidsRepeatsAndRepeatedApologies() {
+        val brief = AgentEnvironmentBrief.buildRemoteHermes("P")
+        assertTrue(brief.contains("Do not repeat anything you have already said in earlier turns"))
+        assertTrue(brief.contains("do not keep apologising"))
+    }
+
+    @Test
+    fun remoteBriefScopesTheClosingSummaryToWorkTurns() {
+        val brief = AgentEnvironmentBrief.buildRemoteHermes("P")
+        assertTrue(brief.contains("When a turn actually involved doing work"))
+        assertTrue(brief.contains("in a plain chat reply there is nothing to report"))
     }
 }
