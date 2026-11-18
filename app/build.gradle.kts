@@ -27,6 +27,13 @@ val hasUploadSigning = listOf(
 ).all { !it.isNullOrBlank() }
 val runtimeReleaseBaseUrl =
     "https://github.com/techjarves/Mobile-Harness/releases/download/runtime-2026.09.4"
+// The Hermes bundle is too big to ride inside every online update (~52 MB of
+// the ~118 MB APK), so it is published once as a release asset in the user's
+// own repo and the online flavor downloads it on first install instead (the
+// installer verifies it against the bundle's pinned SHA-256). The offline
+// flavor still embeds it — see offlineRuntimeBundleFiles below.
+val hermesBundleBaseUrl =
+    "https://github.com/radhesolanki319-pixel/Mobile-Harness/releases/download/hermes-bundle-0.19.0"
 val appUpdateManifestUrl =
     "https://github.com/techjarves/Mobile-Harness/releases/latest/download/mobile-harness-update.json"
 val runtimeBundleDir = rootProject.layout.projectDirectory.dir("dist/runtime-bundles")
@@ -36,12 +43,13 @@ val generatedRuntimeAssets = layout.buildDirectory.dir("generated/runtime-assets
 // but are gitignored — this repo copy only has manifest.json. The app downloads
 // missing runtimes at first run (RUNTIME_RELEASE_BASE_URL), so skip absent bundles
 // instead of failing the build. On a machine with the bundles present nothing changes.
-// The Hermes bundle follows the same rule: when present it is embedded in BOTH
-// flavors (shared assets) so Hermes is pre-installed on first run; when absent
-// (CI), the build stays green and Hermes falls back to its network install.
+// The Hermes bundle is the one exception to "shared": since v16 it is embedded
+// ONLY in the offline flavor (offlineRuntimeBundleFiles below). The online flavor
+// downloads the same archive once, at first Hermes install, from
+// hermesBundleBaseUrl — so online updates no longer re-download its ~52 MB.
 val agyBundleFile = runtimeBundleDir.file("pocketdev-agy-arm64-2026.09.1.tar.zst")
 val hermesBundleFile = runtimeBundleDir.file("pocketdev-hermes-arm64-0.19.0.tar.zst")
-val sharedBundleFiles = listOf(agyBundleFile, hermesBundleFile)
+val sharedBundleFiles = listOf(agyBundleFile)
 val prepareBundledAgentAssets = tasks.register<Sync>("prepareBundledAgentAssets") {
     onlyIf { sharedBundleFiles.any { it.asFile.isFile } }
     from(sharedBundleFiles.filter { it.asFile.isFile })
@@ -54,9 +62,14 @@ val offlineBundleFiles = listOf(
     "pocketdev-python-arm64-2026.09.2.tar.zst",
     "pocketdev-android-arm64-2026.09.1.tar.zst",
 ).map { runtimeBundleDir.file(it) }
+// Hermes joins the offline-only set: it is embedded in the offline flavor
+// (same single Sync into offline/runtime — two Sync tasks must never share a
+// destination dir, the later one would wipe the earlier one's output) and
+// deliberately NOT in the shared set, so the online flavor never embeds it.
+val offlineRuntimeBundleFiles = offlineBundleFiles + hermesBundleFile
 val prepareOfflineRuntimeAssets = tasks.register<Sync>("prepareOfflineRuntimeAssets") {
-    onlyIf { offlineBundleFiles.any { it.asFile.isFile } }
-    from(offlineBundleFiles.filter { it.asFile.isFile })
+    onlyIf { offlineRuntimeBundleFiles.any { it.asFile.isFile } }
+    from(offlineRuntimeBundleFiles.filter { it.asFile.isFile })
     into(generatedRuntimeAssets.map { it.dir("offline/runtime") })
 }
 
@@ -108,8 +121,8 @@ android {
         targetSdk = if (playBuild) 36 else 28
         // Keep literal defaults so F-Droid's static manifest parser can detect
         // the tagged release. Gradle properties may still override Play builds.
-        versionCode = 15
-        versionName = "1.0.14"
+        versionCode = 16
+        versionName = "1.0.15"
         providers.gradleProperty("appVersionCode").orNull?.toIntOrNull()?.let { versionCode = it }
         providers.gradleProperty("appVersionName").orNull?.let { versionName = it }
 
@@ -120,6 +133,7 @@ android {
 
         buildConfigField("boolean", "IS_PLAY_BUILD", playBuild.toString())
         buildConfigField("String", "PRIVACY_POLICY_URL", buildConfigString(privacyPolicyUrl))
+        buildConfigField("String", "HERMES_BUNDLE_BASE_URL", buildConfigString(hermesBundleBaseUrl))
 
         buildConfigField(
             "String",

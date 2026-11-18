@@ -55,6 +55,10 @@ private data class RuntimeBundle(
     val fileName: String,
     val sha256: String,
     val compressedBytes: Long,
+    // Per-bundle download source for the network path, when the bundle is not
+    // published under BuildConfig.RUNTIME_RELEASE_BASE_URL (Hermes lives in
+    // the user's own repo — see HERMES_BUNDLE). Null = the shared base URL.
+    val releaseBaseUrl: String? = null,
 )
 
 class RuntimeInstaller(private val context: Context) {
@@ -632,10 +636,11 @@ class RuntimeInstaller(private val context: Context) {
      * Hermes install. All routes end in the same venv under
      * /root/.pocket-hermes (HERMES_GUEST_PATH):
      *
-     * - First, the prebuilt bundle that ships inside the APK (both flavors) —
-     *   see [installHermesFromBundle]. This is the normal first-run path: a
-     *   local extraction during the regular setup sequence, with no network
-     *   access and no separate install step for the user.
+     * - First, the prebuilt bundle — see [installHermesFromBundle]. In the
+     *   offline flavor it ships inside the APK and is extracted locally; in
+     *   the online flavor the same archive is downloaded once from the
+     *   Hermes release URL (SHA-256 verified) during the regular setup
+     *   sequence. Either way there is no separate install step for the user.
      * - On any bundle failure, the Phase 1 network routes run unchanged:
      *   if a Hermes source checkout exists in the guest at
      *   [HERMES_SOURCE_GUEST_PATH] (recognised by its `pyproject.toml` and
@@ -676,14 +681,18 @@ class RuntimeInstaller(private val context: Context) {
     }
 
     /**
-     * Bundle route (Phase 2): the prebuilt Hermes overlay ships inside the
-     * APK, so installation is a local extraction of the standalone CPython
-     * 3.14 tree and the pinned release's site-packages into
-     * /root/.pocket-hermes, followed by the same in-guest verification and
-     * marker discipline as the PyPI route (the marker records the pinned
-     * version only after the installed binary verifies). Throws on any
-     * problem — a missing embedded asset (CI builds made without the bundle
-     * file), a checksum mismatch, or a binary that does not run — and the
+     * Bundle route (Phase 2): the prebuilt Hermes overlay — the standalone
+     * CPython 3.14 tree and the pinned release's site-packages — is extracted
+     * into /root/.pocket-hermes, followed by the same in-guest verification
+     * and marker discipline as the PyPI route (the marker records the pinned
+     * version only after the installed binary verifies). The archive comes
+     * from the APK's assets in the offline flavor; the online flavor does
+     * NOT embed it (it would add ~52 MB to every app update), so
+     * [obtainRuntimeBundle] downloads it from [HERMES_BUNDLE]'s release URL
+     * instead — the flavor decides via [installRuntimeOverlay], exactly like
+     * the other stack bundles. Throws on any problem — a missing embedded
+     * asset (CI builds made without the bundle file), a failed or
+     * checksum-mismatching download, or a binary that does not run — and the
      * caller falls back to the network routes.
      */
     private suspend fun installHermesFromBundle(
@@ -697,7 +706,6 @@ class RuntimeInstaller(private val context: Context) {
             from = fraction,
             to = 0.995f,
             onProgress = onProgress,
-            forceEmbedded = true,
         )
         verifyGuest(proot, "$HERMES_GUEST_PATH --version", str(R.string.rt_install_verify_failed, "Hermes Agent"))
         hermesMarker.writeText(HERMES_VERSION)
@@ -1152,7 +1160,7 @@ class RuntimeInstaller(private val context: Context) {
             return destination
         }
 
-        val url = "${BuildConfig.RUNTIME_RELEASE_BASE_URL}/${bundle.fileName}"
+        val url = "${bundle.releaseBaseUrl ?: BuildConfig.RUNTIME_RELEASE_BASE_URL}/${bundle.fileName}"
         val downloadingLabel = str(R.string.rt_install_downloading_bundle, bundle.label)
         downloadVerified(url, destination, bundle.sha256) { downloaded, total ->
             val ratio = if (total > 0) downloaded.toFloat() / total else 0f
@@ -2138,6 +2146,10 @@ printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decis
             fileName = "pocketdev-hermes-arm64-0.19.0.tar.zst",
             sha256 = "081addd1a8f4560e4738160dda135521f6631a48247211e2ec6aadda52d1752f",
             compressedBytes = 51_983_819L,
+            // Published as a release asset in the user's repo (tag
+            // hermes-bundle-0.19.0), not under the upstream runtime release —
+            // the online flavor downloads it from here, SHA-256 verified.
+            releaseBaseUrl = BuildConfig.HERMES_BUNDLE_BASE_URL,
         )
         private const val MAX_TERMINAL_LINE = 500
         private const val MAX_COLLECTED_OUTPUT = 24_000
