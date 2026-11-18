@@ -72,6 +72,7 @@ import com.jarves.mh.runtime.AntigravityAuthStatus
 import com.jarves.mh.runtime.AntigravityRuntimeBridge
 import com.jarves.mh.runtime.HERMES_GATEWAY_VAULT_ID
 import com.jarves.mh.runtime.HermesConfigOptions
+import com.jarves.mh.runtime.HermesGatewayPreconnect
 import com.jarves.mh.runtime.HermesGatewayUrls
 import com.jarves.mh.runtime.HermesHostConfig
 import com.jarves.mh.runtime.HermesHostProbe
@@ -408,6 +409,8 @@ data class AppUiState(
     val antigravityEffort: String = "high",
     val hermesHostRemote: Boolean = false,
     val hermesHostUrl: String = "",
+    /** v26: the baked-in gateway connection is live (no explicit host choice on record). */
+    val hermesHostPreconnected: Boolean = false,
     val antigravityModels: List<String> = emptyList(),
     val antigravityModelsLoading: Boolean = false,
     val androidBuildRunning: Boolean = false,
@@ -486,13 +489,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         saveConversationId = { projectId, id ->
             _state.value.activeChatId?.let { preferences.saveAgentConversation(AgentKind.HERMES, projectId, it, id) }
         },
-        hostConfig = {
-            HermesHostConfig(
-                remote = preferences.hermesHostRemote,
-                baseUrl = preferences.hermesHostUrl,
-                apiKey = getSavedHermesHostKey(),
-            )
-        },
+        hostConfig = { effectiveHermesHostConfig() },
         remoteConversationId = { projectId ->
             _state.value.activeChatId?.let { preferences.loadHermesRemoteConversation(projectId, it) }
         },
@@ -549,6 +546,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         preferences.antigravityAccountEmail = email.orEmpty()
         if (!signedIn) preferences.clearAgentConversations(AgentKind.ANTIGRAVITY)
     }
+    // v26: the host state the UI starts from is the EFFECTIVE config —
+    // on an unconfigured install with a baked gateway key that is the
+    // pre-connected remote gateway, not the raw (empty) stored values.
+    private val initialHermesHostPreconnected = hermesHostPreconnectActive()
+    private val initialHermesHostConfig = effectiveHermesHostConfig()
     private val _state = MutableStateFlow(
         AppUiState(
             startupMessage = str(R.string.vm_checking_device),
@@ -568,8 +570,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             ),
             antigravityModel = preferences.antigravityModel,
             antigravityEffort = preferences.antigravityEffort,
-            hermesHostRemote = preferences.hermesHostRemote,
-            hermesHostUrl = preferences.hermesHostUrl,
+            hermesHostRemote = initialHermesHostConfig.remote,
+            hermesHostUrl = initialHermesHostConfig.baseUrl,
+            hermesHostPreconnected = initialHermesHostPreconnected,
             themeMode = runCatching { com.jarves.mh.ui.theme.AppThemeMode.valueOf(preferences.themeMode.uppercase()) }
                 .getOrDefault(com.jarves.mh.ui.theme.AppThemeMode.DARK),
             languageCode = preferences.languageCode,
@@ -2104,17 +2107,59 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun getSavedHermesHostKey(): String = vault.get(HERMES_GATEWAY_VAULT_ID).orEmpty()
 
+    /** v26: whether the baked-in gateway connection is the one in force (see HermesGatewayPreconnect). */
+    private fun hermesHostPreconnectActive(): Boolean = HermesGatewayPreconnect.isActive(
+        configured = preferences.hermesHostConfigured,
+        storedRemote = preferences.hermesHostRemote,
+        storedUrl = preferences.hermesHostUrl,
+        storedKey = getSavedHermesHostKey(),
+        bakedKey = BuildConfig.GATEWAY_KEY,
+    )
+
+    /**
+     * The Hermes host config a turn actually uses, resolved live from the
+     * stored state on every call: the user's own host-card choice when one
+     * is on record, otherwise — on builds carrying a gateway key — the
+     * baked-in connection to Hermes's own computer (v26). A user-entered
+     * vault key always wins over the baked key.
+     */
+    private fun effectiveHermesHostConfig(): HermesHostConfig = HermesGatewayPreconnect.resolve(
+        configured = preferences.hermesHostConfigured,
+        storedRemote = preferences.hermesHostRemote,
+        storedUrl = preferences.hermesHostUrl,
+        storedKey = getSavedHermesHostKey(),
+        bakedUrl = BuildConfig.GATEWAY_URL,
+        bakedKey = BuildConfig.GATEWAY_KEY,
+    )
+
     /** Persists the Hermes host choice; the gateway key is stored in the encrypted vault like provider keys. */
     fun saveHermesHost(remote: Boolean, url: String, key: String) {
         val normalized = HermesGatewayUrls.normalizeBaseUrl(url)
         preferences.hermesHostRemote = remote
         preferences.hermesHostUrl = normalized
+        // v26: any host-card save is an explicit choice — the baked-in
+        // pre-connect never applies again after this, whatever was saved.
+        preferences.hermesHostConfigured = true
         if (key.isBlank()) vault.remove(HERMES_GATEWAY_VAULT_ID) else vault.put(HERMES_GATEWAY_VAULT_ID, key)
-        _state.update { it.copy(hermesHostRemote = remote, hermesHostUrl = normalized) }
+        _state.update {
+            it.copy(hermesHostRemote = remote, hermesHostUrl = normalized, hermesHostPreconnected = false)
+        }
     }
 
     suspend fun testHermesHost(url: String, key: String): ConnectionValidation {
-        val effectiveKey = key.ifBlank { getSavedHermesHostKey() }
+        val typedOrSavedKey = key.ifBlank { getSavedHermesHostKey() }
+        val effectiveKey = typedOrSavedKey.ifBlank {
+            // v26: the baked gateway's key is built in, so testing that
+            // exact host needs no typed key. Any other URL only ever gets
+            // a user-entered or saved key — never the baked one.
+            if (HermesGatewayUrls.normalizeBaseUrl(url) ==
+                HermesGatewayUrls.normalizeBaseUrl(BuildConfig.GATEWAY_URL)
+            ) {
+                BuildConfig.GATEWAY_KEY
+            } else {
+                ""
+            }
+        }
         return when (val probe = probeHermesHost(url, effectiveKey)) {
             HermesHostProbe.Awake -> ConnectionValidation.Success(HermesRemoteMessages.PROBE_OK)
             is HermesHostProbe.Failed -> ConnectionValidation.Failure(probe.message)

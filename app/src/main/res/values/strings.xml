@@ -293,6 +293,7 @@
     <string name="agent_title_hermes">Hermes Agent</string>
     <string name="hermes_host_title">Hermes host</string>
     <string name="hermes_host_desc">Hermes can run on this phone, or on a Hermes gateway hosted on your own always-on machine (for example a cloud server). Remote mode needs no local Hermes install — chats, memory and tools live on the host.</string>
+    <string name="hermes_host_preconnected">Hermes is connected to its own computer — the gateway is built into the app, so there is nothing to set up. You can still override it below.</string>
     <string name="hermes_host_mode_local">On this phone</string>
     <string name="hermes_host_mode_local_desc">Embedded Hermes inside the app workspace</string>
     <string name="hermes_host_mode_remote">Remote host</string>

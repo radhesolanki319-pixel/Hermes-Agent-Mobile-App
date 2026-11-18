@@ -87,6 +87,79 @@ internal object HermesGatewayUrls {
     fun healthUrl(normalizedBaseUrl: String): String = "$normalizedBaseUrl/health"
 }
 
+/**
+ * v26: the baked-in gateway pre-connect. Hermes's own always-on computer
+ * (the gateway on Render) is connected from inside the app — the user
+ * never types a URL or a key, the way a hosted agent simply arrives
+ * connected. The gateway URL is a public constant baked into the build
+ * (`BuildConfig.GATEWAY_URL`); the gateway key reaches the build only
+ * through CI (`BuildConfig.GATEWAY_KEY`, from the HERMES_GATEWAY_KEY
+ * Actions secret) and is never committed or shown in the UI.
+ *
+ * The baked connection applies ONLY while the user has never made an
+ * explicit Hermes host choice. Any host-card save records one (the
+ * [configured] flag), and the stored choice is then respected forever —
+ * this resolver never overrides it. On a build whose baked key is empty
+ * nothing here activates and the pre-v26 manual flow is unchanged.
+ */
+internal object HermesGatewayPreconnect {
+
+    /**
+     * Whether an explicit host choice exists: the v26 configured flag
+     * (set by every host-card save), or — for installs that predate the
+     * flag — any stored trace of one. A stored remote mode, URL or vault
+     * key can only exist because the user saved host settings, so each
+     * counts as a choice even with the flag absent.
+     */
+    fun hasExplicitChoice(
+        configured: Boolean,
+        storedRemote: Boolean,
+        storedUrl: String,
+        storedKey: String,
+    ): Boolean =
+        configured || storedRemote || storedUrl.isNotBlank() || storedKey.isNotBlank()
+
+    /** The baked connection is live only with a baked key AND no explicit choice on record. */
+    fun isActive(
+        configured: Boolean,
+        storedRemote: Boolean,
+        storedUrl: String,
+        storedKey: String,
+        bakedKey: String,
+    ): Boolean =
+        bakedKey.isNotBlank() && !hasExplicitChoice(configured, storedRemote, storedUrl, storedKey)
+
+    /**
+     * The host config a Hermes turn (and the host card's initial state)
+     * actually uses. Unconfigured + baked key → the baked gateway:
+     * remote, baked URL, baked key. Otherwise the stored choice stands
+     * verbatim — except the key, where a user-entered vault key always
+     * wins and the baked key only fills a blank (so a host card saved
+     * against this same gateway works without re-typing the key the app
+     * already carries). With an empty baked key the result is exactly
+     * the stored config.
+     */
+    fun resolve(
+        configured: Boolean,
+        storedRemote: Boolean,
+        storedUrl: String,
+        storedKey: String,
+        bakedUrl: String,
+        bakedKey: String,
+    ): HermesHostConfig {
+        val key = storedKey.ifBlank { bakedKey }
+        return if (isActive(configured, storedRemote, storedUrl, storedKey, bakedKey)) {
+            HermesHostConfig(
+                remote = true,
+                baseUrl = HermesGatewayUrls.normalizeBaseUrl(bakedUrl),
+                apiKey = key,
+            )
+        } else {
+            HermesHostConfig(remote = storedRemote, baseUrl = storedUrl, apiKey = key)
+        }
+    }
+}
+
 internal object HermesGatewayRequests {
     /**
      * OpenAI chat-completions body for one turn: the prompt is the only

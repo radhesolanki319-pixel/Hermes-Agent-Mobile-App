@@ -159,6 +159,18 @@ class AppPreferences(private val context: Context) {
         set(value) { preferences.edit().putString("hermes_host_url", value).apply() }
 
     /**
+     * v26: true once the user has saved any Hermes host setting from the
+     * host card. With the stored mode/URL/key it marks an explicit host
+     * choice, which the baked-in gateway pre-connect (see
+     * HermesGatewayPreconnect) must never override. Absent on installs
+     * that predate v26; there, a stored remote mode, URL or key serves
+     * as the trace of a choice instead.
+     */
+    var hermesHostConfigured: Boolean
+        get() = preferences.getBoolean("hermes_host_configured_v26", false)
+        set(value) { preferences.edit().putBoolean("hermes_host_configured_v26", value).apply() }
+
+    /**
      * Gateway session ids for remote Hermes, keyed per project chat like
      * [loadAgentConversation] but in their own namespace: an id minted by
      * the gateway host means nothing to the embedded Hermes and vice versa.

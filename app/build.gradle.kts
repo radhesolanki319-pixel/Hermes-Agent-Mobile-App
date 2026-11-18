@@ -36,6 +36,16 @@ val hermesBundleBaseUrl =
     "https://github.com/radhesolanki319-pixel/Mobile-Harness/releases/download/hermes-bundle-0.19.0"
 val appUpdateManifestUrl =
     "https://github.com/techjarves/Mobile-Harness/releases/latest/download/mobile-harness-update.json"
+// v26: Hermes's own always-on gateway ("Hermes's computer" on Render) is
+// pre-connected from inside the app — the user never types a URL or key.
+// The URL is public and baked in as a constant. The gateway key reaches the
+// build ONLY through the HERMES_GATEWAY_KEY environment variable (a GitHub
+// Actions secret on the user's repo, mapped into the build step's env);
+// no key material is ever committed here. A build without the variable
+// carries an empty key, the baked connection stays inactive, and the
+// manual host-card flow remains exactly as before.
+val hermesGatewayUrl = "https://hermes-gateway-l14d.onrender.com"
+val hermesGatewayKey = System.getenv("HERMES_GATEWAY_KEY") ?: ""
 val runtimeBundleDir = rootProject.layout.projectDirectory.dir("dist/runtime-bundles")
 val generatedRuntimeAssets = layout.buildDirectory.dir("generated/runtime-assets")
 
@@ -121,8 +131,8 @@ android {
         targetSdk = if (playBuild) 36 else 28
         // Keep literal defaults so F-Droid's static manifest parser can detect
         // the tagged release. Gradle properties may still override Play builds.
-        versionCode = 25
-        versionName = "1.0.24"
+        versionCode = 26
+        versionName = "1.0.25"
         providers.gradleProperty("appVersionCode").orNull?.toIntOrNull()?.let { versionCode = it }
         providers.gradleProperty("appVersionName").orNull?.let { versionName = it }
 
@@ -150,6 +160,8 @@ android {
             buildConfigField("String", "RUNTIME_RELEASE_BASE_URL", buildConfigString(runtimeReleaseBaseUrl))
             buildConfigField("String", "APP_UPDATE_MANIFEST_URL", buildConfigString(appUpdateManifestUrl))
             buildConfigField("String", "APP_VARIANT", "\"online\"")
+            buildConfigField("String", "GATEWAY_URL", buildConfigString(hermesGatewayUrl))
+            buildConfigField("String", "GATEWAY_KEY", buildConfigString(hermesGatewayKey))
         }
         create("offline") {
             dimension = "runtimeDelivery"
@@ -157,6 +169,8 @@ android {
             buildConfigField("String", "RUNTIME_RELEASE_BASE_URL", buildConfigString(runtimeReleaseBaseUrl))
             buildConfigField("String", "APP_UPDATE_MANIFEST_URL", buildConfigString(appUpdateManifestUrl))
             buildConfigField("String", "APP_VARIANT", "\"offline\"")
+            buildConfigField("String", "GATEWAY_URL", buildConfigString(hermesGatewayUrl))
+            buildConfigField("String", "GATEWAY_KEY", buildConfigString(hermesGatewayKey))
         }
     }
 

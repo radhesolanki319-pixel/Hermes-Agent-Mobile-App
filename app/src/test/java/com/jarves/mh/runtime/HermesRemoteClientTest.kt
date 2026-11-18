@@ -270,6 +270,107 @@ class HermesRemoteClientTest {
         assertFalse(HermesGatewayErrors.isAuthStatus(404))
     }
 
+    // ── Baked gateway pre-connect (v26) ───────────────────────────────
+
+    private val bakedGatewayUrl = "https://hermes-gateway-l14d.onrender.com"
+    private val bakedGatewayKey = "baked-gateway-key"
+
+    private fun preconnectResolve(
+        configured: Boolean = false,
+        storedRemote: Boolean = false,
+        storedUrl: String = "",
+        storedKey: String = "",
+        bakedKey: String = bakedGatewayKey,
+    ): HermesHostConfig = HermesGatewayPreconnect.resolve(
+        configured = configured,
+        storedRemote = storedRemote,
+        storedUrl = storedUrl,
+        storedKey = storedKey,
+        bakedUrl = bakedGatewayUrl,
+        bakedKey = bakedKey,
+    )
+
+    @Test
+    fun preconnectExplicitChoiceDetectionMatrix() {
+        // Nothing stored, no flag → no explicit choice (fresh install or
+        // an update whose host prefs were never touched).
+        assertFalse(HermesGatewayPreconnect.hasExplicitChoice(false, false, "", ""))
+        // Each single trace of a host-card save counts as a choice.
+        assertTrue(HermesGatewayPreconnect.hasExplicitChoice(true, false, "", ""))
+        assertTrue(HermesGatewayPreconnect.hasExplicitChoice(false, true, "", ""))
+        assertTrue(HermesGatewayPreconnect.hasExplicitChoice(false, false, "https://h.example.com", ""))
+        assertTrue(HermesGatewayPreconnect.hasExplicitChoice(false, false, "", "user-key"))
+        // Whitespace-only stored values are not a choice.
+        assertFalse(HermesGatewayPreconnect.hasExplicitChoice(false, false, "  ", " "))
+    }
+
+    @Test
+    fun preconnectDefaultsUnconfiguredInstallToTheBakedGateway() {
+        val config = preconnectResolve()
+        assertTrue(config.remote)
+        assertEquals(bakedGatewayUrl, config.baseUrl)
+        assertEquals(bakedGatewayKey, config.apiKey)
+        assertTrue(
+            HermesGatewayPreconnect.isActive(
+                configured = false, storedRemote = false, storedUrl = "", storedKey = "",
+                bakedKey = bakedGatewayKey,
+            ),
+        )
+    }
+
+    @Test
+    fun preconnectStaysInactiveWhenTheBuildCarriesNoKey() {
+        // Empty GATEWAY_KEY → exactly the pre-v26 manual flow: the stored
+        // (here untouched) values come back verbatim.
+        val config = preconnectResolve(bakedKey = "")
+        assertFalse(config.remote)
+        assertEquals("", config.baseUrl)
+        assertEquals("", config.apiKey)
+        assertFalse(
+            HermesGatewayPreconnect.isActive(
+                configured = false, storedRemote = false, storedUrl = "", storedKey = "",
+                bakedKey = "",
+            ),
+        )
+    }
+
+    @Test
+    fun preconnectRespectsAnExplicitLocalChoiceForever() {
+        // "On this phone" saved on the host card (flag set, remote off):
+        // the baked gateway must never override it.
+        val config = preconnectResolve(configured = true, storedRemote = false)
+        assertFalse(config.remote)
+        assertEquals("", config.baseUrl)
+        // A later remote pick is likewise the user's, down to the URL.
+        val remote = preconnectResolve(configured = true, storedRemote = true, storedUrl = "https://my.host.example")
+        assertTrue(remote.remote)
+        assertEquals("https://my.host.example", remote.baseUrl)
+    }
+
+    @Test
+    fun preconnectRespectsChoicesStoredBeforeTheFlagExisted() {
+        // Pre-v26 installs have no configured flag; a stored remote mode
+        // or URL is the trace of the user's choice and stands verbatim.
+        val config = preconnectResolve(storedRemote = true, storedUrl = "https://old.host.example/")
+        assertTrue(config.remote)
+        assertEquals("https://old.host.example/", config.baseUrl)
+        val urlOnly = preconnectResolve(storedUrl = "https://old.host.example")
+        assertFalse(urlOnly.remote)
+        assertEquals("https://old.host.example", urlOnly.baseUrl)
+    }
+
+    @Test
+    fun preconnectUserEnteredKeyAlwaysWinsOverTheBakedKey() {
+        // A stored vault key is itself an explicit trace, and it — never
+        // the baked key — is what the client sends.
+        val config = preconnectResolve(storedRemote = true, storedUrl = "https://my.host.example", storedKey = "user-key")
+        assertEquals("user-key", config.apiKey)
+        // With no stored key, the baked key only fills the blank, so a
+        // configured gateway still authenticates.
+        val filled = preconnectResolve(configured = true, storedRemote = true, storedUrl = "https://my.host.example")
+        assertEquals(bakedGatewayKey, filled.apiKey)
+    }
+
     @Test
     fun failureMessagesAvoidProviderKeyRotationTriggers() {
         // MainViewModel.retryWithNextApiKey rotates the *provider* key pool

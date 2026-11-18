@@ -2251,6 +2251,17 @@ private fun AgentHermesHostCard(
                 lineHeight = 17.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            if (state.hermesHostPreconnected) {
+                // v26: the baked-in gateway is in force — say so plainly;
+                // the card below stays as the override surface.
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    stringResource(R.string.hermes_host_preconnected),
+                    fontSize = 12.sp,
+                    lineHeight = 17.sp,
+                    color = Color(0xFF2E9D72),
+                )
+            }
             Spacer(Modifier.height(12.dp))
             Surface(
                 shape = RoundedCornerShape(14.dp),
