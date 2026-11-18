@@ -53,4 +53,65 @@ class AgentEnvironmentBriefTest {
         assertFalse(brief.contains("radio_group"))
         assertTrue(brief.contains("generative-ui protocol described below"))
     }
+
+    // v29: the remote variant. A Hermes turn on the gateway host must be
+    // told the truth about the HOST — the phone brief sent it hunting for
+    // /workspace, sister transcripts and team notes that do not exist
+    // there, and it wrote long replies reporting them missing.
+
+    @Test
+    fun remoteBriefStatesTheHostTruths() {
+        val brief = AgentEnvironmentBrief.buildRemoteHermes("Swift Bose")
+        assertTrue(brief.contains("<app_environment>"))
+        assertTrue(brief.contains("</app_environment>"))
+        assertTrue(brief.contains("You are Hermes"))
+        assertTrue(brief.contains("your own always-on computer"))
+        assertTrue(brief.contains("cloud host"))
+        assertTrue(brief.contains("\"Hermes Agent\" Android app"))
+        assertTrue(brief.contains("connects to this computer over the internet"))
+        assertTrue(brief.contains("generative-ui protocol described below"))
+        assertTrue(brief.contains("HERMES_HOME"))
+        assertTrue(brief.contains("may create your own workspace folders on this computer"))
+    }
+
+    @Test
+    fun remoteBriefTreatsTheProjectNameAsAnAppLabelOnly() {
+        val brief = AgentEnvironmentBrief.buildRemoteHermes("Swift Bose")
+        assertTrue(brief.contains("\"Swift Bose\""))
+        assertTrue(brief.contains("only the app's label for this conversation"))
+        assertTrue(brief.contains("NOT present on this computer"))
+        assertTrue(brief.contains("never report them missing"))
+        assertTrue(brief.contains("not visible from this computer"))
+        assertTrue(brief.contains("do not go searching for them"))
+    }
+
+    @Test
+    fun remoteBriefPlacesTheSisterAgentsOnThePhone() {
+        val brief = AgentEnvironmentBrief.buildRemoteHermes("P")
+        assertTrue(brief.contains("Claude Code and Antigravity"))
+        assertTrue(brief.contains("run on the user's phone, not on this computer"))
+        assertTrue(brief.contains("their chats are not readable from here"))
+    }
+
+    @Test
+    fun remoteBriefCarriesNoPhoneEnvironmentClaims() {
+        val brief = AgentEnvironmentBrief.buildRemoteHermes("Swift Bose")
+        // No phone-side paths, no transcript/team-notes instructions, no
+        // PRoot/phone claims — nothing for Hermes to go looking for.
+        assertFalse(brief.contains("/workspace"))
+        assertFalse(brief.contains("team-notes"))
+        assertFalse(brief.contains(".agent-chats"))
+        assertFalse(brief.contains("PRoot"))
+        assertFalse(brief.contains("running inside the \"Hermes Agent\" Android app"))
+        assertFalse(brief.contains("Your working directory is"))
+        assertFalse(brief.contains("separate chat"))
+    }
+
+    @Test
+    fun remoteBriefKeepsTheAlwaysOnWorkGuidance() {
+        val brief = AgentEnvironmentBrief.buildRemoteHermes("P")
+        assertTrue(brief.contains("This computer is always on"))
+        assertTrue(brief.contains("keeps running after your turn ends"))
+        assertTrue(brief.contains("End your reply by stating what you did and what you changed"))
+    }
 }

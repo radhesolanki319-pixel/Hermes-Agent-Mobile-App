@@ -2126,6 +2126,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         bakedKey = BuildConfig.GATEWAY_KEY,
     )
 
+    /**
+     * The single "this turn runs on the remote Hermes host" decision (v29):
+     * true only for a Hermes turn whose effective host config is remote.
+     * Prompt assembly (which environment brief, which attached-files
+     * block) and failure handling (the key-rotation gate) all key on this
+     * one predicate, resolved from the same [effectiveHermesHostConfig]
+     * the bridge's hostConfig lambda uses, so they can never disagree
+     * about where a turn runs or ran.
+     */
+    private fun isRemoteHermesTurn(agentKind: AgentKind): Boolean =
+        agentKind == AgentKind.HERMES && effectiveHermesHostConfig().remote
+
     /** The stored provider profile for any agent (the Agent screen's per-agent form reads these). */
     fun providerProfileFor(agent: AgentKind): ProviderProfile = preferences.loadProvider(vault, agent)
 
@@ -5281,16 +5293,42 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         // what app/environment it runs in, that the whole guest filesystem
         // is reachable, and where the sister agents' chat transcripts and
         // the shared team-notes file live.
+        // v29: a Hermes turn that will run on the remote gateway host gets
+        // the remote brief instead — the v21 brief describes the phone
+        // (PRoot, /workspace, transcripts, team notes), none of which
+        // exists on the host, and Hermes went hunting for them there. The
+        // decision is the single isRemoteHermesTurn predicate, resolved
+        // from the same effectiveHermesHostConfig() the bridge's
+        // hostConfig lambda uses for this very turn; embedded Hermes and
+        // the other agents keep the v21 brief byte-for-byte. The same
+        // decision governs the attached-files block below: on a remote
+        // turn the listed guest paths exist only on the phone, so the
+        // block names the files and says plainly that their contents
+        // stay on the phone instead of sending Hermes to inspect them.
+        val agentKind = state.value.agentKind
+        val remoteHermesTurn = isRemoteHermesTurn(agentKind)
+        val environmentBrief = if (remoteHermesTurn) {
+            AgentEnvironmentBrief.buildRemoteHermes(project.name)
+        } else {
+            AgentEnvironmentBrief.build(agentKind, project.name, project.slug)
+        }
         val runtimePrompt = (if (attachments.isEmpty()) requestText else buildString {
             appendLine(requestText)
             appendLine()
             appendLine("<attached_files>")
-            attachments.forEach { attachment ->
-                appendLine("- ${attachment.displayName}: ${projectGuestRoot(project)}/${attachment.relativePath} (${attachment.mimeType})")
+            if (remoteHermesTurn) {
+                attachments.forEach { attachment ->
+                    appendLine("- ${attachment.displayName} (${attachment.mimeType})")
+                }
+                appendLine("These files were attached by the user in the app. Their contents are on the user's phone and are not accessible from this computer — do not look for them here. If the request needs their contents, say so in one line.")
+            } else {
+                attachments.forEach { attachment ->
+                    appendLine("- ${attachment.displayName}: ${projectGuestRoot(project)}/${attachment.relativePath} (${attachment.mimeType})")
+                }
+                appendLine("These files were explicitly attached by the user. Inspect them only as needed for the request.")
             }
-            appendLine("These files were explicitly attached by the user. Inspect them only as needed for the request.")
             appendLine("</attached_files>")
-        }) + "\n\n" + AgentEnvironmentBrief.build(state.value.agentKind, project.name, project.slug) +
+        }) + "\n\n" + environmentBrief +
             "\n\n" + GenUiProtocol.CAPABILITY_PROMPT_BLOCK
         failedApiKeyIds.clear()
         activeRuntimeRequest = RuntimeRetryRequest(
@@ -5856,9 +5894,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun retryWithNextApiKey(event: RuntimeEvent.SessionFailed): Boolean {
         val current = _state.value
-        if (current.agentKind == AgentKind.ANTIGRAVITY) return false
         if (!current.isRunning || current.activeSessionId != event.sessionId) return false
-        if (!isApiKeyFailure(event.reason)) return false
+        // v29: the rotate/skip decision is pure (ApiKeyRotationPolicy).
+        // A remote Hermes turn never rotates: the gateway relays the
+        // HOST provider's error text verbatim, so a host-side rate-limit
+        // or key error matches the trigger substrings — but the failing
+        // key lives on the host, and swapping the phone's key, toasting
+        // and re-running the remote turn would only repeat the failure.
+        // The remote failure surfaces as-is through the v28 messages.
+        if (!ApiKeyRotationPolicy.shouldRotate(current.agentKind, isRemoteHermesTurn(current.agentKind), event.reason)) return false
         val request = activeRuntimeRequest ?: return false
         // The unified provider pool this turn's key came from: every
         // agent — Hermes included, since v20 — resolves through its
@@ -5894,8 +5938,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
-     * Runtime bridges report failures in English (matched by [isApiKeyFailure] and the toast
-     * check), so known reasons are translated only for display.
+     * Runtime bridges report failures in English (matched by [ApiKeyRotationPolicy.isApiKeyFailure]
+     * and the toast check), so known reasons are translated only for display.
      */
     private fun localizedFailureReason(reason: String): String {
         val trimmed = reason.trim()
@@ -5934,13 +5978,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             HermesRemoteMessages.DROPPED -> str(R.string.md_reason_hermes_host_dropped)
             else -> reason
         }
-    }
-
-    private fun isApiKeyFailure(reason: String): Boolean {
-        val value = reason.lowercase()
-        return "api key" in value || "authentication" in value || "user not found" in value ||
-            "http 401" in value || "http 403" in value || "http 429" in value ||
-            "expired" in value || "quota" in value || "rate limit" in value
     }
 
     private fun touchProject(projectId: String) {
