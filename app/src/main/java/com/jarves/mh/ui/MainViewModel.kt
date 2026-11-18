@@ -2721,9 +2721,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun updateProvider(profile: ProviderProfile, secret: String) = finishOnboarding(profile, secret)
 
-    /** The persisted provider profile for any agent — the Agent screen's tabs edit per-agent profiles. */
-    fun providerProfileFor(kind: AgentKind): ProviderProfile = preferences.loadProvider(vault, kind)
-
     /**
      * Saves a provider profile for a specific agent (Agent screen tab).
      * Saving the ACTIVE agent keeps the full onboarding/state-refresh
