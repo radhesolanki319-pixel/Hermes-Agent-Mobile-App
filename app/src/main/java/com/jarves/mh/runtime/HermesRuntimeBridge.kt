@@ -65,7 +65,10 @@ internal fun hermesToolDisplayName(name: String): String = when (name.lowercase(
  *  - always updates the provider/model fields the app owns
  *    (`model.provider`, `model.default`, `model.base_url`,
  *    `model.max_tokens` and the `providers.<name>` block of a custom
- *    endpoint), because the app is where the user picks the provider;
+ *    endpoint), because the app is where the user picks the provider.
+ *    One v24 exception: when the profile's model is UNSET, `model.default`
+ *    is not written but REMOVED — the app must not leave a model of its
+ *    own choosing in Hermes's config ("Hermes khud decide kare");
  *  - adds the app's unlock/safety keys (see [STATIC_SECTIONS]) only where
  *    they are absent — a value already present belongs to Hermes or the
  *    user and is preserved verbatim, like every other line of the file;
@@ -421,7 +424,12 @@ internal object HermesConfigFiles {
     private fun modelSectionLines(route: HermesRoute, model: String): List<String> = buildList {
         add("model:")
         add("  provider: ${quote(route.provider)}")
-        add("  default: ${quote(model)}")
+        // Unset model (v24): no `default:` line at all — Hermes's own
+        // resolution decides; an empty `default: ''` would be a value
+        // the app chose, and a stale one would override Hermes.
+        if (model.isNotBlank()) {
+            add("  default: ${quote(model)}")
+        }
         if (!route.custom && route.baseUrl.isNotBlank()) {
             add("  base_url: ${quote(route.baseUrl)}")
         }
@@ -453,7 +461,15 @@ internal object HermesConfigFiles {
             section.inlineValue -> Unit
             else -> {
                 var current = setChildLine(lines, section, indent = 2, key = "provider", "  provider: ${quote(route.provider)}")
-                current = setChildLine(lines, current, indent = 2, key = "default", "  default: ${quote(model)}")
+                current = if (model.isNotBlank()) {
+                    setChildLine(lines, current, indent = 2, key = "default", "  default: ${quote(model)}")
+                } else {
+                    // Unset model (v24): withdraw the app-owned
+                    // `default` line entirely — leaving a previous
+                    // launch's value in place would keep forcing that
+                    // model after the user unset it.
+                    removeChildLine(lines, current, indent = 2, key = "default")
+                }
                 current = if (!route.custom && route.baseUrl.isNotBlank()) {
                     setChildLine(lines, current, indent = 2, key = "base_url", "  base_url: ${quote(route.baseUrl)}")
                 } else {
@@ -820,16 +836,13 @@ class HermesRuntimeBridge(
             )
             return@withContext sessionId
         }
+        // v24: a blank model is a legitimate state, not an error — the
+        // profile leaves the model UNSET ("Hermes khud decide kare"),
+        // so the launch below omits the model entirely (no `-m` flag,
+        // no `model.default` in config.yaml) and hermes-agent's own
+        // resolution picks one (see HermesProfileRoute.modelFor for
+        // the behaviour verified against the pinned 0.19.0 wheel).
         val model = settings.model
-        if (model.isBlank()) {
-            eventBus.emit(
-                RuntimeEvent.SessionFailed(
-                    sessionId,
-                    "No model is set for Hermes Agent. Open Agent → Hermes and set a model, then try again.",
-                ),
-            )
-            return@withContext sessionId
-        }
 
         runCatching {
             RuntimeTaskController.stopAction = {
@@ -869,8 +882,12 @@ class HermesRuntimeBridge(
                 add("-Q")
                 add("--provider")
                 add(route.provider)
-                add("-m")
-                add(model)
+                // Unset model (v24): no `-m` at all — an empty argument
+                // would still count as "set" for Hermes's resolution.
+                if (model.isNotBlank()) {
+                    add("-m")
+                    add(model)
+                }
                 add("-t")
                 add(HERMES_TOOLSETS)
                 add("--yolo")

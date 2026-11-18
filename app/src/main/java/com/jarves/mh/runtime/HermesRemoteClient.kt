@@ -88,14 +88,23 @@ internal object HermesGatewayUrls {
 }
 
 internal object HermesGatewayRequests {
-    /** OpenAI chat-completions body for one turn: the prompt is the only message (see class doc). */
-    fun chatCompletionBody(model: String, prompt: String): JSONObject = JSONObject()
-        .put("model", model)
-        .put("stream", true)
-        .put(
-            "messages",
-            JSONArray().put(JSONObject().put("role", "user").put("content", prompt)),
-        )
+    /**
+     * OpenAI chat-completions body for one turn: the prompt is the only
+     * message (see class doc). A blank [model] (the profile leaves the
+     * model UNSET, v24) omits the `model` field entirely so the
+     * gateway's own `HERMES_MODEL` governs — sending an empty string
+     * would hand the gateway a value it must reject or guess at.
+     */
+    fun chatCompletionBody(model: String, prompt: String): JSONObject {
+        val body = JSONObject()
+            .put("stream", true)
+            .put(
+                "messages",
+                JSONArray().put(JSONObject().put("role", "user").put("content", prompt)),
+            )
+        if (model.isNotBlank()) body.put("model", model)
+        return body
+    }
 }
 
 /** One decoded frame of the gateway's chat-completions SSE stream. */

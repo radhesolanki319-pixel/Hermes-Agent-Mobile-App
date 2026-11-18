@@ -154,8 +154,9 @@ object HermesProviderCatalog {
  * Hermes catalog: while the profile's base URL is the kind's untouched
  * default, Hermes's own endpoint for the provider is used; a base URL
  * the user actually edited in the profile is honoured as-is. The model
- * is the profile's pick, falling back to the provider's curated first
- * model when the profile leaves it blank.
+ * is the profile's pick, verbatim — since v24 a blank profile model
+ * stays blank (UNSET): the launch omits the model entirely and Hermes's
+ * own resolution decides (see [modelFor]).
  */
 object HermesProfileRoute {
 
@@ -182,14 +183,24 @@ object HermesProfileRoute {
         )
     }
 
-    /** The model Hermes runs: the profile's pick, else the provider's curated default. */
-    fun modelFor(profile: ProviderProfile): String {
-        val model = profile.model.trim()
-        if (model.isNotBlank()) return model
-        if (profile.kind == ProviderKind.CUSTOM) return ""
-        return HermesProviderCatalog.find(ProviderKeys.canonicalForKind(profile.kind))
-            ?.defaultModel.orEmpty()
-    }
+    /**
+     * The model Hermes runs: the profile's pick, verbatim. A blank
+     * profile model is UNSET (v24 — the user's order: "Model bilkul set
+     * mat karo — Hermes khud decide kare"): the bridge then passes no
+     * `-m` flag and writes no `model.default`, so hermes-agent's own
+     * resolution decides — verified against the pinned 0.19.0 wheel:
+     * the chat transport resolves an empty model through the custom
+     * provider entry's own `model` field, a localhost endpoint's
+     * auto-detected model, or `get_default_model_for_provider` (the
+     * provider's catalog default — for OpenRouter the cost-safe
+     * catalog-labeled `z-ai/glm-5.2`, NOT this catalog's curated
+     * `anthropic/claude-sonnet-4.6`); a custom endpoint has no catalog,
+     * so the request goes out with an empty model and the endpoint
+     * itself decides. Before v24 this function substituted the app
+     * catalog's curated default for a blank model — an app-chosen
+     * model, which is exactly what the user forbade.
+     */
+    fun modelFor(profile: ProviderProfile): String = profile.model.trim()
 }
 
 /**
@@ -215,19 +226,26 @@ data class LegacyHermesSetup(
  * verbatim. A stored Custom setup maps to a Custom profile with its
  * base URL untouched.
  *
- * ONE exception (v23): a stored FreeLLM virtual model (`fusion` /
- * `auto`) is NEVER carried over. In the pre-v20 setup system those ids
- * were the simple surface's factory defaults — Fusion was literally
- * the default choice of the old selector — so a stored virtual id is
- * indistinguishable from "never chose anything", and carrying it over
- * manufactured a Fusion/Auto binding the user never picked in the
- * profile system (exactly what happened on the user's device: the
- * seeded Hermes profile sat on `auto` and, because model picks only
- * persisted after a successful connection test, kept coming back).
- * The seeded profile therefore falls back to the provider's default
- * model instead. Since v23 the ONLY way a profile can hold a virtual
+ * ONE exception (v23, narrowed by v24): a stored FreeLLM virtual model
+ * (`fusion` / `auto`) is NEVER carried over. In the pre-v20 setup
+ * system those ids were the simple surface's factory defaults — Fusion
+ * was literally the default choice of the old selector — so a stored
+ * virtual id is indistinguishable from "never chose anything", and
+ * carrying it over manufactured a Fusion/Auto binding the user never
+ * picked in the profile system (exactly what happened on the user's
+ * device: the seeded Hermes profile sat on `auto` and, because model
+ * picks only persisted after a successful connection test, kept
+ * coming back). Since v23 the ONLY way a profile can hold a virtual
  * model is an explicit tap on its row in the model sheet
  * ([VirtualModels.bind] at the pick site).
+ *
+ * v24 (the user's order: "Model bilkul set mat karo — Hermes khud
+ * decide kare"): a virtual OR absent stored model now seeds the
+ * profile with the model UNSET (empty) — v23's fallback to the
+ * provider's default model is gone, because a provider default is
+ * still an app-chosen model. A real stored model still carries over
+ * verbatim. With the model unset, the launch omits it entirely and
+ * Hermes's own resolution decides (see [HermesProfileRoute.modelFor]).
  *
  * A Hermes-catalogue provider the profile system has NO kind for (xAI,
  * Gemini, Z.AI, …) cannot be a first-class profile; it is carried as a
@@ -255,9 +273,10 @@ object HermesProfileSeeding {
     )
 
     fun profileFor(legacy: LegacyHermesSetup): ProviderProfile {
-        // v23: never seed a FreeLLM virtual model — see the object doc.
-        // A real stored model carries over verbatim; a virtual one (or a
-        // blank) falls back to the target provider's default model.
+        // Never seed a FreeLLM virtual model (v23) — see the object
+        // doc. A real stored model carries over verbatim; a virtual
+        // one (or a blank) seeds the model UNSET (v24): no provider
+        // default is substituted, Hermes itself decides at launch.
         val carriedModel = legacy.model.trim()
             .takeUnless { VirtualModels.isVirtual(it) }
             .orEmpty()
@@ -270,14 +289,14 @@ object HermesProfileSeeding {
                 } else {
                     kind.defaultBaseUrl
                 },
-                model = carriedModel.ifBlank { kind.defaultModel },
+                model = carriedModel,
             )
         }
         val def = HermesProviderCatalog.find(legacy.providerId)
         return ProviderProfile(
             kind = ProviderKind.CUSTOM,
             baseUrl = def?.baseUrl.orEmpty(),
-            model = carriedModel.ifBlank { def?.defaultModel.orEmpty() },
+            model = carriedModel,
         )
     }
 
@@ -293,6 +312,35 @@ object HermesProfileSeeding {
         } else {
             ProviderKeys.canonicalForHermes(legacy.providerId)
         }
+}
+
+/**
+ * The guard for the one-time v24 clear of the stale SEEDED virtual
+ * model (the user's current device state: his Hermes profile still
+ * sits on the `auto` the v20 seeding planted, and at his order —
+ * "Model bilkul set mat karo — Hermes khud decide kare" — that value
+ * is to be removed, leaving the model unset).
+ *
+ * The clear fires only when BOTH hold:
+ *  - the v20 seed flag (`hermes_profile_seeded_v20`) was consumed —
+ *    the profile on this device passed through the seeding era; and
+ *  - the Hermes profile's stored model is exactly `fusion` or `auto`
+ *    ([VirtualModels.isVirtual], exact match — no trimming, no
+ *    prefix games).
+ *
+ * Anything else — a real model he picked, an unset model, a missing
+ * profile, a device that never consumed the seed flag — is left
+ * exactly as stored. The clear touches ONLY the Hermes profile's
+ * model field: provider, endpoint and credentials are never read or
+ * written by it, no other agent's profile is involved, and it is the
+ * only migration v24 adds (flag-guarded, runs once). Pure; the
+ * execution (flag + raw-key write) lives in AppPreferences /
+ * MainViewModel.
+ */
+object HermesSeededModelClear {
+
+    fun shouldClear(seedFlagConsumed: Boolean, storedModel: String?): Boolean =
+        seedFlagConsumed && storedModel != null && VirtualModels.isVirtual(storedModel)
 }
 
 /**

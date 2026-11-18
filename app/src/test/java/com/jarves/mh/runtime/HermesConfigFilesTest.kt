@@ -76,6 +76,35 @@ class HermesConfigFilesTest {
     }
 
     @Test
+    fun freshConfigWithUnsetModelOmitsTheDefaultLine() {
+        // v24: model UNSET — no `default:` line is written at all, so
+        // Hermes's own resolution decides. Provider, endpoint and the
+        // token cap are still the app's to write.
+        val config = HermesConfigFiles.freshConfig(anthropicRoute, "")
+        assertTrue(config.contains("model:\n  provider: 'anthropic'\n  base_url: 'https://api.anthropic.com'\n"))
+        assertFalse(config.contains("default:"))
+        assertTrue(config.contains("  max_tokens: 8192\n"))
+    }
+
+    @Test
+    fun mergeWithUnsetModelRemovesTheAppOwnedDefaultLine() {
+        // A previous launch (model set) left `default:` in the file;
+        // unsetting the model must withdraw it — leaving it would keep
+        // forcing the old model. Foreign keys in the section survive.
+        val existing = HermesConfigFiles.freshConfig(anthropicRoute, "claude-sonnet-4")
+        assertTrue(existing.contains("  default: 'claude-sonnet-4'\n"))
+        val merged = HermesConfigFiles.mergedConfig(existing, anthropicRoute, "")
+        assertFalse(merged.contains("default:"))
+        assertTrue(merged.contains("  provider: 'anthropic'\n"))
+        assertTrue(merged.contains("  max_tokens: 8192\n"))
+        // Stable: merging the merged file again changes nothing.
+        assertEquals(merged, HermesConfigFiles.mergedConfig(merged, anthropicRoute, ""))
+        // And setting a model again brings the line back.
+        val restored = HermesConfigFiles.mergedConfig(merged, anthropicRoute, "claude-sonnet-4")
+        assertTrue(restored.contains("  default: 'claude-sonnet-4'\n"))
+    }
+
+    @Test
     fun freshCustomConfigWritesNamedProviderWithoutModelBaseUrl() {
         val config = HermesConfigFiles.freshConfig(customRoute, "my-model")
         assertTrue(config.contains("  provider: 'custom-provider'\n"))

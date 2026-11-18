@@ -112,4 +112,5 @@
     <string name="st_update_channel_overridden">ओवरराइड किया गया · केवल डिबग</string>
     <string name="st_use_and_check">उपयोग करें और जाँचें</string>
     <string name="st_use_custom_model_id">कस्टम मॉडल ID उपयोग करें:</string>
+    <string name="st_hermes_no_model">Koi model nahi — Hermes khud decide kare</string>
 </resources>

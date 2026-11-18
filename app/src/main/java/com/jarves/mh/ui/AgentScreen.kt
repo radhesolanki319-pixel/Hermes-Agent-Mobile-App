@@ -375,6 +375,16 @@ fun AgentScreen(
     }
 
     /**
+     * Hermes only (v24): "Koi model nahi — Hermes khud decide kare".
+     * Sets the profile model to UNSET (empty) through the same
+     * save-on-pick path as any other pick, so it persists immediately;
+     * provider, endpoint and key are untouched. At launch the bridge
+     * then omits the model entirely and Hermes's own resolution
+     * decides (see HermesProfileRoute.modelFor).
+     */
+    fun selectNoModel() = selectModel("")
+
+    /**
      * Picking a pinned FreeLLM virtual model (Fusion / Auto) rebinds the
      * whole profile to the Custom/FreeLLM configuration — provider, base
      * URL and model change together, visibly, in this card's own state
@@ -620,6 +630,41 @@ fun AgentScreen(
                     shape = RoundedCornerShape(14.dp),
                 )
                 Spacer(Modifier.height(12.dp))
+
+                // Hermes only (v24): the top option leaves the model
+                // UNSET — "Koi model nahi — Hermes khud decide kare".
+                // Hermes's own resolution then picks the model at
+                // launch; the app sets nothing. Saves immediately, like
+                // every pick (selectNoModel → selectModel("")).
+                if (viewedAgent == AgentKind.HERMES) {
+                    val isSelected = model.isBlank()
+                    Surface(
+                        shape = RoundedCornerShape(14.dp),
+                        color = if (isSelected) PocketOrange.copy(alpha = 0.10f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.28f),
+                        border = BorderStroke(
+                            1.dp,
+                            if (isSelected) PocketOrange.copy(alpha = 0.45f) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f),
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { selectNoModel() },
+                    ) {
+                        Row(
+                            Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                stringResource(R.string.st_hermes_no_model),
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 14.sp,
+                                color = if (isSelected) PocketOrange else MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.weight(1f),
+                            )
+                            AgentSelectionDot(selected = isSelected)
+                        }
+                    }
+                    Spacer(Modifier.height(12.dp))
+                }
 
                 // Pinned FreeLLM virtual models: always offered, for every
                 // agent and every provider, above discovered/recommended
@@ -934,6 +979,11 @@ fun AgentScreen(
                             Text(
                                 if (isAntigravity) {
                                     "Antigravity · ${formatAntigravityModelName(state.antigravityModel)}"
+                                } else if (viewedAgent == AgentKind.HERMES && model.isBlank()) {
+                                    // Unset model (v24): no model name —
+                                    // and no provider name standing in
+                                    // for one. Hermes decides itself.
+                                    viewedAgent.localizedTitle()
                                 } else {
                                     "${viewedAgent.localizedTitle()} · ${model.ifBlank { selectedKind.localizedTitle() }}"
                                 },

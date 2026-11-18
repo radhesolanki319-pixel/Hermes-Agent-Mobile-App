@@ -130,6 +130,11 @@ class AppPreferences(private val context: Context) {
         get() = preferences.getBoolean("hermes_profile_seeded_v20", false)
         set(value) { preferences.edit().putBoolean("hermes_profile_seeded_v20", value).apply() }
 
+    /** One-time v24 flag: the stale seeded virtual model has been cleared from the Hermes profile. */
+    var hermesSeededVirtualModelCleared: Boolean
+        get() = preferences.getBoolean("hermes_seeded_virtual_model_cleared_v24", false)
+        set(value) { preferences.edit().putBoolean("hermes_seeded_virtual_model_cleared_v24", value).apply() }
+
     var testProviderDefaultsVersion: Int
         get() = preferences.getInt("test_provider_defaults_version", 0)
         set(value) { preferences.edit().putInt("test_provider_defaults_version", value).apply() }
@@ -203,6 +208,33 @@ class AppPreferences(private val context: Context) {
     /** Whether a per-agent profile has ever been saved for [agent]. */
     fun hasAgentProfile(agent: AgentKind): Boolean =
         preferences.contains("${providerPrefix(agent)}kind")
+
+    /**
+     * The Hermes profile's raw stored model, exactly as saved — null
+     * when no Hermes profile exists (or no model was ever stored for
+     * it). Raw on purpose: the v24 one-time clear guards on the exact
+     * stored value (see HermesSeededModelClear), which [loadProvider]'s
+     * defaulting would mask.
+     */
+    fun storedHermesProfileModel(): String? =
+        if (hasAgentProfile(AgentKind.HERMES)) {
+            preferences.getString("${providerPrefix(AgentKind.HERMES)}model", null)
+        } else {
+            null
+        }
+
+    /**
+     * Clears ONLY the Hermes profile's stored model (writes the empty
+     * string — the profile system's "unset"). Provider, base URL and
+     * every other field stay byte-identical; no other agent's keys are
+     * touched. Used solely by the flag-guarded v24 clear.
+     */
+    fun clearHermesProfileModel() {
+        if (!hasAgentProfile(AgentKind.HERMES)) return
+        preferences.edit()
+            .putString("${providerPrefix(AgentKind.HERMES)}model", "")
+            .apply()
+    }
 
     /**
      * Debug-only manifest URL override. Empty in release builds; populated via

@@ -98,20 +98,27 @@ class HermesProfileMappingTest {
     }
 
     @Test
-    fun blankProfileModelFallsBackToTheCuratedDefault() {
+    fun blankProfileModelStaysUnset() {
+        // v24: a blank profile model is UNSET for every kind — the app
+        // substitutes nothing (before v24 modelFor fell back to the
+        // catalog's curated default, an app-chosen model). The launch
+        // omits the model and Hermes's own resolution decides.
         assertEquals(
-            "claude-fable-5",
+            "",
             HermesProfileRoute.modelFor(ProviderProfile(ProviderKind.ANTHROPIC, model = "")),
         )
         assertEquals(
-            "anthropic/claude-sonnet-4.6",
+            "",
             HermesProfileRoute.modelFor(ProviderProfile(ProviderKind.LLM_ROUTER, model = "  ")),
         )
-        // Custom has no curated default: blank stays blank (the bridge
-        // asks the user for a model, as the old setup did).
         assertEquals(
             "",
             HermesProfileRoute.modelFor(ProviderProfile(ProviderKind.CUSTOM, model = "")),
+        )
+        // A real pick still resolves verbatim, whitespace trimmed.
+        assertEquals(
+            "anthropic/claude-sonnet-4.6",
+            HermesProfileRoute.modelFor(ProviderProfile(ProviderKind.LLM_ROUTER, model = " anthropic/claude-sonnet-4.6 ")),
         )
     }
 
@@ -140,10 +147,11 @@ class HermesProfileMappingTest {
 
     @Test
     fun customFusionSetupSeedsTheEndpointWithoutTheVirtualModel() {
-        // v23: the pre-v20 setup's stored `fusion` was that system's
-        // factory default, not a pick made in the profile system — the
-        // seeding must NOT turn it into a Fusion binding. The stored
-        // endpoint still carries over verbatim; the model does not.
+        // v23/v24: the pre-v20 setup's stored `fusion` was that
+        // system's factory default, not a pick made in the profile
+        // system — the seeding must NOT turn it into a Fusion binding.
+        // The stored endpoint still carries over verbatim; the model
+        // seeds UNSET (empty), never the virtual id.
         val legacy = LegacyHermesSetup(
             "custom",
             "fusion",
@@ -161,18 +169,20 @@ class HermesProfileMappingTest {
     }
 
     @Test
-    fun virtualModelOnAMappableProviderSeedsTheKindDefaultInstead() {
+    fun virtualModelOnAMappableProviderSeedsUnset() {
         // The user's actual device state: the legacy setup's stored
-        // model was `auto`. Seeded onto OpenRouter it must fall back to
-        // the kind's default model — never the virtual id.
+        // model was `auto`. Seeded onto OpenRouter it must come out
+        // UNSET (v24) — never the virtual id, and no provider default
+        // substituted (v23 substituted the kind default; the user's
+        // "Hermes khud decide kare" order removed that too).
         val legacy = LegacyHermesSetup("openrouter", "auto", "")
         val profile = HermesProfileSeeding.profileFor(legacy)
         assertEquals(ProviderKind.LLM_ROUTER, profile.kind)
-        assertEquals(ProviderKind.LLM_ROUTER.defaultModel, profile.model)
+        assertEquals("", profile.model)
 
         val anthropic = HermesProfileSeeding.profileFor(LegacyHermesSetup("anthropic", "fusion", ""))
         assertEquals(ProviderKind.ANTHROPIC, anthropic.kind)
-        assertEquals(ProviderKind.ANTHROPIC.defaultModel, anthropic.model)
+        assertEquals("", anthropic.model)
     }
 
     @Test
@@ -195,8 +205,8 @@ class HermesProfileMappingTest {
         val anthropic = HermesProfileSeeding.profileFor(LegacyHermesSetup("anthropic", "", ""))
         assertEquals(ProviderKind.ANTHROPIC, anthropic.kind)
         assertEquals(ProviderKind.ANTHROPIC.defaultBaseUrl, anthropic.baseUrl)
-        // Blank stored model falls back to the profile kind's default.
-        assertEquals(ProviderKind.ANTHROPIC.defaultModel, anthropic.model)
+        // Blank stored model seeds UNSET (v24) — no kind default.
+        assertEquals("", anthropic.model)
 
         val kimi = HermesProfileSeeding.profileFor(LegacyHermesSetup("kimi-coding", "kimi-k3", ""))
         assertEquals(ProviderKind.KIMI, kimi.kind)
@@ -221,16 +231,48 @@ class HermesProfileMappingTest {
     }
 
     @Test
-    fun unmappableProviderWithBlankModelUsesTheCatalogDefault() {
+    fun unmappableProviderWithBlankModelSeedsUnset() {
+        // v24: no catalog default is substituted either — unset.
         val profile = HermesProfileSeeding.profileFor(LegacyHermesSetup("zai", "", ""))
         assertEquals(ProviderKind.CUSTOM, profile.kind)
         assertEquals("https://api.z.ai/api/paas/v4", profile.baseUrl)
-        assertEquals("glm-5.2", profile.model)
+        assertEquals("", profile.model)
     }
 
     @Test
-    fun blankModelOnAMappableProviderFallsBackToTheKindDefault() {
+    fun unmappableProviderWithVirtualModelSeedsUnset() {
+        val profile = HermesProfileSeeding.profileFor(LegacyHermesSetup("xai", "auto", ""))
+        assertEquals(ProviderKind.CUSTOM, profile.kind)
+        assertEquals("https://api.x.ai/v1", profile.baseUrl)
+        assertEquals("", profile.model)
+    }
+
+    @Test
+    fun blankModelOnAMappableProviderSeedsUnset() {
         val profile = HermesProfileSeeding.profileFor(LegacyHermesSetup("openrouter", " ", ""))
-        assertEquals(ProviderKind.LLM_ROUTER.defaultModel, profile.model)
+        assertEquals("", profile.model)
+    }
+
+    // ── One-time v24 clear of the stale seeded virtual model ──────────
+
+    @Test
+    fun seededVirtualModelClearFiresOnlyForTheSeededVirtualState() {
+        // The user's device: seed flag consumed, profile still on the
+        // seeded virtual id → clear.
+        assertTrue(HermesSeededModelClear.shouldClear(seedFlagConsumed = true, storedModel = "auto"))
+        assertTrue(HermesSeededModelClear.shouldClear(seedFlagConsumed = true, storedModel = "fusion"))
+        // A real model he picked is never cleared.
+        assertFalse(HermesSeededModelClear.shouldClear(seedFlagConsumed = true, storedModel = "anthropic/claude-sonnet-4.6"))
+        assertFalse(HermesSeededModelClear.shouldClear(seedFlagConsumed = true, storedModel = "claude-fable-5"))
+        // Already unset / no profile: nothing to clear.
+        assertFalse(HermesSeededModelClear.shouldClear(seedFlagConsumed = true, storedModel = ""))
+        assertFalse(HermesSeededModelClear.shouldClear(seedFlagConsumed = true, storedModel = null))
+        // No seeding era on this device: hands off, whatever is stored.
+        assertFalse(HermesSeededModelClear.shouldClear(seedFlagConsumed = false, storedModel = "auto"))
+        assertFalse(HermesSeededModelClear.shouldClear(seedFlagConsumed = false, storedModel = "fusion"))
+        // Exact match only — a near-miss string is a real (if odd)
+        // model id as far as the guard is concerned.
+        assertFalse(HermesSeededModelClear.shouldClear(seedFlagConsumed = true, storedModel = " auto"))
+        assertFalse(HermesSeededModelClear.shouldClear(seedFlagConsumed = true, storedModel = "AUTO"))
     }
 }

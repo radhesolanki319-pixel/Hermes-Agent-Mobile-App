@@ -48,6 +48,21 @@ class HermesRemoteClientTest {
         assertEquals(prompt, message.getString("content"))
     }
 
+    @Test
+    fun chatCompletionBodyOmitsTheModelFieldWhenUnset() {
+        // v24: profile model UNSET → no `model` field at all, so the
+        // gateway's own HERMES_MODEL governs (an empty string would be
+        // a value the gateway must reject or guess at).
+        val body = HermesGatewayRequests.chatCompletionBody("", "hello")
+        assertFalse(body.has("model"))
+        assertTrue(body.getBoolean("stream"))
+        val messages = body.getJSONArray("messages")
+        assertEquals(1, messages.length())
+        assertEquals("hello", messages.getJSONObject(0).getString("content"))
+        // Whitespace-only counts as unset too.
+        assertFalse(HermesGatewayRequests.chatCompletionBody("  ", "hello").has("model"))
+    }
+
     // ── SSE parsing ───────────────────────────────────────────────────────
 
     private fun feedAll(parser: HermesGatewaySseParser, rawStream: String): List<HermesGatewayEvent> {

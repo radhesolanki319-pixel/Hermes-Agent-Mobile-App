@@ -81,6 +81,7 @@ import com.jarves.mh.runtime.HermesProfileSeeding
 import com.jarves.mh.runtime.HermesProviderCatalog
 import com.jarves.mh.runtime.HermesRuntimeBridge
 import com.jarves.mh.runtime.HermesRuntimeSettings
+import com.jarves.mh.runtime.HermesSeededModelClear
 import com.jarves.mh.runtime.probeHermesHost
 import com.jarves.mh.runtime.NativeSpawnProcess
 import com.jarves.mh.runtime.RuntimeInstallProgress
@@ -2172,6 +2173,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     init {
         migrateProviderKeysIfNeeded()
         seedHermesProfileIfNeeded()
+        clearSeededVirtualHermesModelIfNeeded()
         viewModelScope.launch { RuntimeSetupController.snapshot.collect(::onSetupSnapshot) }
         viewModelScope.launch { claudeRuntime.events.collect(::onRuntimeEvent) }
         viewModelScope.launch { bootstrap() }
@@ -2242,6 +2244,42 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         // The initial state snapshot may predate the seeding; refresh the
         // active profile when Hermes is the agent on screen.
+        if (_state.value.agentKind == AgentKind.HERMES) {
+            val refreshed = preferences.loadProvider(vault, AgentKind.HERMES)
+            _state.update { current ->
+                current.copy(
+                    provider = refreshed,
+                    activeApiKeyName = vault.list(ProviderKeys.canonicalForKind(refreshed.kind))
+                        .firstOrNull(ApiKeyInfo::isActive)?.name,
+                )
+            }
+        }
+    }
+
+    /**
+     * One-time v24 clear: on the user's device the v20 seeding planted
+     * the legacy setup's stored `auto` into the Hermes profile (see
+     * [HermesProfileSeeding]), and v23 made picks stick but left that
+     * stale value in place. At the user's explicit order — "Model
+     * bilkul set mat karo — Hermes khud decide kare" — the seeded
+     * virtual model is removed so the Hermes model is UNSET and Hermes
+     * decides itself. The guard is [HermesSeededModelClear.shouldClear]
+     * (seed flag consumed AND the stored Hermes model exactly
+     * `fusion`/`auto`); the write is the raw model key only — provider,
+     * endpoint and credentials are untouched, no other profile or
+     * agent is involved, and no other migration is added.
+     */
+    private fun clearSeededVirtualHermesModelIfNeeded() {
+        if (preferences.hermesSeededVirtualModelCleared) return
+        preferences.hermesSeededVirtualModelCleared = true
+        val shouldClear = HermesSeededModelClear.shouldClear(
+            seedFlagConsumed = preferences.hermesProfileSeeded,
+            storedModel = preferences.storedHermesProfileModel(),
+        )
+        if (!shouldClear) return
+        preferences.clearHermesProfileModel()
+        // Refresh the on-screen profile when Hermes is the active agent,
+        // mirroring the seeding's refresh above.
         if (_state.value.agentKind == AgentKind.HERMES) {
             val refreshed = preferences.loadProvider(vault, AgentKind.HERMES)
             _state.update { current ->
