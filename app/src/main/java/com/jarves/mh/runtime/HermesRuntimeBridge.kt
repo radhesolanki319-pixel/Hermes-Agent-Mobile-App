@@ -766,13 +766,14 @@ class HermesRuntimeBridge(
         // host instead of the embedded copy. The embedded path below is
         // untouched — no local install, provider key or workspace is needed
         // for a remote turn, because the host owns all three.
-        // Hermes runs from its own settings (Agent → Hermes setup), not
-        // from the app provider profile the other agents use: provider,
-        // model and key all come from the Hermes-native store.
+        // Hermes runs from its own profile in the shared profile system
+        // (Agent → Hermes), exactly like the other agents: the route,
+        // model and key were all resolved from the active Hermes profile
+        // by the settings lambda (see HermesProfileRoute).
         val settings = hermesSettings()
         val host = hostConfig()
         if (host.remote) {
-            runCatching { runRemoteTurn(sessionId, projectId, prompt, settings.setup.resolvedModel(), host) }
+            runCatching { runRemoteTurn(sessionId, projectId, prompt, settings.model, host) }
                 .onFailure { error ->
                     Log.e("HermesBridge", "Remote Hermes session failed", error)
                     emitFailureOnce(sessionId, friendlyError(error))
@@ -781,7 +782,7 @@ class HermesRuntimeBridge(
             RuntimeTaskController.stopAction = null
             return@withContext sessionId
         }
-        val route = settings.setup.route()
+        val route = settings.route
         // A custom endpoint may legitimately run keyless (local servers);
         // Hermes's own custom-provider resolution sends its literal
         // "no-key-required" placeholder in that case. A first-class
@@ -794,17 +795,17 @@ class HermesRuntimeBridge(
             eventBus.emit(
                 RuntimeEvent.SessionFailed(
                     sessionId,
-                    "No API key is saved for Hermes Agent. Open Agent → Hermes setup and add the provider's API key.",
+                    "No API key is saved for Hermes Agent. Open Agent → Hermes and add the provider's API key.",
                 ),
             )
             return@withContext sessionId
         }
-        val model = settings.setup.resolvedModel()
+        val model = settings.model
         if (model.isBlank()) {
             eventBus.emit(
                 RuntimeEvent.SessionFailed(
                     sessionId,
-                    "No model is set for Hermes Agent. Open Agent → Hermes setup and set a model, then try again.",
+                    "No model is set for Hermes Agent. Open Agent → Hermes and set a model, then try again.",
                 ),
             )
             return@withContext sessionId

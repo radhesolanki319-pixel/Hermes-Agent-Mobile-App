@@ -109,8 +109,6 @@ import androidx.compose.material.icons.filled.Language
 import androidx.compose.ui.res.stringResource
 import com.jarves.mh.R
 import com.jarves.mh.runtime.AntigravityAuthStatus
-import com.jarves.mh.runtime.HermesModelChoice
-import com.jarves.mh.runtime.HermesSetupSettings
 import com.jarves.mh.ui.theme.AppLanguage
 import com.jarves.mh.ui.theme.AppThemeMode
 import com.jarves.mh.ui.theme.PocketOrange
@@ -157,7 +155,6 @@ fun SettingsScreen(
     onSaveHermesHostKey: (String) -> Unit = {},
     getAgentProfile: (AgentKind) -> ProviderProfile = { ProviderProfile(ProviderKind.ANTHROPIC) },
     onSaveProviderKey: (String, String) -> Unit = { _, _ -> },
-    onSaveHermesModel: (String) -> Unit = {},
     onOpenAgentSettings: () -> Unit = {},
     onImportZip: (Uri) -> Unit = {},
     onCloneGit: (String) -> Unit = {},
@@ -264,7 +261,6 @@ fun SettingsScreen(
                         getAgentProfile = getAgentProfile,
                         onSaveProviderKey = onSaveProviderKey,
                         onSaveHermesHostKey = onSaveHermesHostKey,
-                        onSaveHermesModel = onSaveHermesModel,
                         onOpenAgentSettings = onOpenAgentSettings,
                     )
                 }
@@ -827,11 +823,9 @@ private fun SettingsAccordion(
  * provider, there is ONE field for it — never a duplicate per agent.
  * The surface is provider-neutral (v17): fields are labelled with
  * whichever providers are currently chosen — the user's stored choice is
- * final and nothing here steers it. The Fusion/Auto model choice sits
- * under Hermes's provider field ONLY in the Custom/FreeLLM
- * configuration, where those virtual models exist; the full setup stays
- * one tap away under "Advanced" (it lives on the Agent screen). The
- * Hermes host key is not a provider key and keeps its own field.
+ * final and nothing here steers it. The full setup stays one tap away
+ * under "Advanced" (it lives on the Agent screen). The Hermes host key
+ * is not a provider key and keeps its own field.
  */
 @Composable
 private fun ApiKeysSimpleContent(
@@ -841,16 +835,13 @@ private fun ApiKeysSimpleContent(
     getAgentProfile: (AgentKind) -> ProviderProfile,
     onSaveProviderKey: (String, String) -> Unit,
     onSaveHermesHostKey: (String) -> Unit,
-    onSaveHermesModel: (String) -> Unit,
     onOpenAgentSettings: () -> Unit,
 ) {
-    val hermesSetup = remember(state.hermesProviderId, state.hermesModel, state.hermesCustomBaseUrl) {
-        HermesSetupSettings(state.hermesProviderId, state.hermesModel, state.hermesCustomBaseUrl)
-    }
+    val hermesProfile = remember(state.agentKind) { getAgentProfile(AgentKind.HERMES) }
     val claudeProfile = remember(state.agentKind) { getAgentProfile(AgentKind.CLAUDE_CODE) }
     val antigravityProfile = remember(state.agentKind) { getAgentProfile(AgentKind.ANTIGRAVITY) }
-    val fields = remember(hermesSetup, state.hermesHostRemote, claudeProfile, antigravityProfile) {
-        ApiKeysPlan.fields(hermesSetup, state.hermesHostRemote, claudeProfile, antigravityProfile)
+    val fields = remember(hermesProfile, state.hermesHostRemote, claudeProfile, antigravityProfile) {
+        ApiKeysPlan.fields(hermesProfile, state.hermesHostRemote, claudeProfile, antigravityProfile)
     }
 
     fields.forEach { field ->
@@ -882,12 +873,6 @@ private fun ApiKeysSimpleContent(
                     fieldKey = field.canonicalId,
                     onSave = { secret -> onSaveProviderKey(field.canonicalId, secret) },
                 )
-                if (field.showModelSelector) {
-                    HermesModelSelector(
-                        currentModel = state.hermesModel,
-                        onSelect = onSaveHermesModel,
-                    )
-                }
             }
             SimpleKeyFieldKind.HERMES_HOST -> {
                 SimpleKeyFieldEditor(
@@ -987,65 +972,6 @@ private fun SimpleKeyFieldEditor(
         ) {
             Text(stringResource(R.string.action_save))
         }
-    }
-}
-
-/**
- * The only two Hermes model choices on the simple surface — FreeLLM's
- * virtual models. Tapping one writes `hermes_model` immediately (the same
- * value the advanced setup edits). A model typed manually in Advanced is
- * shown as a note instead of silently replacing it.
- */
-@Composable
-private fun HermesModelSelector(
-    currentModel: String,
-    onSelect: (String) -> Unit,
-) {
-    val selected = HermesModelChoice.fromStored(currentModel)
-    Text(
-        stringResource(R.string.api_keys_model_title),
-        fontSize = 12.sp,
-        fontWeight = FontWeight.SemiBold,
-    )
-    HermesModelChoice.entries.forEach { choice ->
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .clickable { onSelect(choice.storedValue) }
-                .padding(vertical = 7.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(Modifier.weight(1f)) {
-                Text(
-                    stringResource(
-                        when (choice) {
-                            HermesModelChoice.FUSION -> R.string.api_keys_model_fusion
-                            HermesModelChoice.AUTO -> R.string.api_keys_model_auto
-                        },
-                    ),
-                    fontWeight = FontWeight.Medium,
-                    fontSize = 14.sp,
-                )
-                Text(
-                    stringResource(
-                        when (choice) {
-                            HermesModelChoice.FUSION -> R.string.api_keys_model_fusion_desc
-                            HermesModelChoice.AUTO -> R.string.api_keys_model_auto_desc
-                        },
-                    ),
-                    fontSize = 11.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            SelectionDot(selected == choice)
-        }
-    }
-    if (selected == null && currentModel.isNotBlank()) {
-        Text(
-            stringResource(R.string.api_keys_model_custom_note, currentModel),
-            fontSize = 11.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
     }
 }
 

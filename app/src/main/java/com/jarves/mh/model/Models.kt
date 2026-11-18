@@ -88,12 +88,12 @@ enum class AgentKind(
 }
 
 /**
- * Provider kinds the app profile system keeps for [AgentKind.HERMES] chats.
- * Hermes itself no longer runs from these profiles — it uses its own native
- * settings (see runtime/HermesNativeSettings.kt) — so this set now only
- * governs the stored chat-header profile of a Hermes chat. Claude
- * subscription login has no Hermes equivalent, and OpenCode Zen is not
- * offered to any agent (see [providersForAgent]).
+ * Provider kinds the app profile system offers for [AgentKind.HERMES].
+ * Since v20 Hermes runs from these profiles exactly like Claude Code —
+ * its separate native setup system was deleted (see
+ * runtime/HermesLaunchConfig.kt for how a profile becomes a launch
+ * route). Claude subscription login has no Hermes equivalent, and
+ * OpenCode Zen is not offered to any agent (see [providersForAgent]).
  */
 val HERMES_PROVIDERS: Set<ProviderKind> = setOf(
     ProviderKind.ANTHROPIC,
@@ -133,6 +133,47 @@ data class ProviderProfile(
             .map(String::trim)
             .filter(String::isNotBlank)
             .distinct()
+}
+
+/**
+ * Virtual models served only by the user's own FreeLLM router: `fusion`
+ * fans a prompt out to a panel of models and synthesizes one answer with a
+ * judge model; `auto` lets the router pick per request. They exist ONLY at
+ * the FreeLLM endpoint — no other provider serves them.
+ *
+ * The profile model picker pins both at the top of the model list for every
+ * agent and every provider (user's explicit choice). Picking one is a real
+ * binding, not a label: [bind] rewrites the profile to the Custom/FreeLLM
+ * configuration — provider kind CUSTOM, the FreeLLM base URL filled in
+ * (still editable afterwards), the literal virtual id as the model — so the
+ * profile UI itself shows the configuration that will be used, the key
+ * resolves from the unified store's `custom` pool
+ * (ProviderKeys.canonicalForKind(CUSTOM)), and both agent bridges pass the
+ * stored base URL, key and literal model id through unchanged.
+ */
+object VirtualModels {
+    const val FUSION_ID = "fusion"
+    const val AUTO_ID = "auto"
+
+    /** The user's FreeLLM router endpoint — the only place the virtual models exist. */
+    const val FREELLM_BASE_URL = "https://freellmapi-backup.onrender.com/v1"
+
+    data class Option(val id: String, val label: String)
+
+    /** Pinned at the top of every profile model list, Fusion first. */
+    val PINNED: List<Option> = listOf(Option(FUSION_ID, "Fusion"), Option(AUTO_ID, "Auto"))
+
+    fun isVirtual(modelId: String): Boolean = modelId == FUSION_ID || modelId == AUTO_ID
+
+    /**
+     * Rebinds [profile] to the Custom/FreeLLM configuration a virtual-model
+     * pick requires. Any previous provider/base URL is replaced — `fusion`
+     * and `auto` resolve nowhere else — and the result is an ordinary,
+     * fully editable Custom profile: no hidden state, no launch-time
+     * rerouting.
+     */
+    fun bind(profile: ProviderProfile, modelId: String): ProviderProfile =
+        profile.copy(kind = ProviderKind.CUSTOM, baseUrl = FREELLM_BASE_URL, model = modelId)
 }
 
 enum class ProjectKind { PROJECT, QUICK_PROJECT }

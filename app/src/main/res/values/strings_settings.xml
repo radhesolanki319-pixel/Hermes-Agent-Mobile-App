@@ -67,6 +67,7 @@
     <string name="st_provider_order_help">Optional OpenRouter provider slugs, separated by commas and tried in order.</string>
     <string name="st_reasoning_depth">Reasoning Depth</string>
     <string name="st_reasoning_effort">Reasoning effort</string>
+    <string name="st_virtual_models_header">FreeLLM virtual models</string>
     <string name="st_recommended_models">Recommended Models</string>
     <string name="st_reconnect_google">Reconnect with Google</string>
     <string name="st_reliability_help">If large builds stop unexpectedly, Android Developer options may provide a child-process restriction toggle.</string>

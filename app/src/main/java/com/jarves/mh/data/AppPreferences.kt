@@ -15,9 +15,7 @@ import com.jarves.mh.model.projectSlug
 import com.jarves.mh.model.providersForAgent
 import com.jarves.mh.genui.GenUiStateCodec
 import com.jarves.mh.runtime.HermesConfigOptions
-import com.jarves.mh.runtime.HermesProviderCatalog
-import com.jarves.mh.runtime.HermesFusionResetMigration
-import com.jarves.mh.runtime.HermesSetupMigration
+import com.jarves.mh.runtime.LegacyHermesSetup
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -25,42 +23,6 @@ import java.time.Instant
 
 class AppPreferences(private val context: Context) {
     private val preferences = context.getSharedPreferences("pocket_preferences", Context.MODE_PRIVATE)
-
-    init {
-        migrateHermesSetupToFusionDefaultIfNeeded()
-        resetHermesSetupToFusionIfNeeded()
-    }
-
-    /**
-     * NEUTRALIZED (2026-11-18, v17): this check used to rewrite a stored
-     * pre-fusion Hermes setup (Anthropic provider, no model, no custom
-     * base URL) onto the fusion defaults. The user's correction reversed
-     * the policy: a stored provider/model/base-URL choice is final and is
-     * never overridden by defaults or migrations — the fusion values are
-     * only the getters' defaults for a fresh install where nothing is
-     * stored. The check now only records its flag and touches nothing.
-     * [HermesSetupMigration.migratedSetup] is likewise a permanent no-op.
-     */
-    private fun migrateHermesSetupToFusionDefaultIfNeeded() {
-        if (preferences.getBoolean(HERMES_FUSION_MIGRATION_FLAG, false)) return
-        preferences.edit().putBoolean(HERMES_FUSION_MIGRATION_FLAG, true).apply()
-    }
-
-    /**
-     * NEUTRALIZED (2026-11-18, v17): the v14 reset used to overwrite ANY
-     * stored non-Custom Hermes provider with the fusion configuration,
-     * treating it as a leftover from an early build. The "leftover"
-     * (OpenRouter) was the user's deliberate choice, and the reset —
-     * together with the reinstalls the signing churn forced — made them
-     * re-enter keys and re-pick providers repeatedly. A stored choice is
-     * final: this check now only records its flag and touches nothing.
-     * [HermesFusionResetMigration.resetSetup] is likewise a permanent
-     * no-op, so the reset cannot come back through the pure layer either.
-     */
-    private fun resetHermesSetupToFusionIfNeeded() {
-        if (preferences.getBoolean(HERMES_FUSION_RESET_FLAG, false)) return
-        preferences.edit().putBoolean(HERMES_FUSION_RESET_FLAG, true).apply()
-    }
 
     var onboardingComplete: Boolean
         get() = preferences.getBoolean("onboarding_complete", false)
@@ -163,6 +125,11 @@ class AppPreferences(private val context: Context) {
         get() = preferences.getBoolean("provider_keys_unified_v19", false)
         set(value) { preferences.edit().putBoolean("provider_keys_unified_v19", value).apply() }
 
+    /** One-time v20 flag: the first Hermes profile has been seeded from a stored pre-v20 Hermes setup. */
+    var hermesProfileSeeded: Boolean
+        get() = preferences.getBoolean("hermes_profile_seeded_v20", false)
+        set(value) { preferences.edit().putBoolean("hermes_profile_seeded_v20", value).apply() }
+
     var testProviderDefaultsVersion: Int
         get() = preferences.getInt("test_provider_defaults_version", 0)
         set(value) { preferences.edit().putInt("test_provider_defaults_version", value).apply() }
@@ -204,41 +171,36 @@ class AppPreferences(private val context: Context) {
     private fun hermesRemoteConversationKey(projectId: String, chatId: String): String =
         "hermes_remote_conversation_${projectId}_$chatId"
 
-    // --- Hermes-native settings (Hermes's own setup system in the app) ---
-    // Provider/model/base-URL mirror `hermes setup`; the API key lives in
-    // the unified provider store (ApiKeyVault pool named by the provider's
-    // canonical id — see ProviderKeys; before v19 it sat in the single
-    // HERMES_SETUP pool). The option keys map one-to-one
-    // onto HermesConfigOptions and are written into the guest's config.yaml
+    // --- Hermes (profile system since v20; options below) ---
+    // Provider/model/base-URL for Hermes live in its ProviderProfile
+    // (saveProvider/loadProvider with AgentKind.HERMES), exactly like the
+    // other agents; the API key lives in the unified provider store
+    // (ApiKeyVault pool named by the provider's canonical id — see
+    // ProviderKeys). The option keys map one-to-one onto
+    // HermesConfigOptions and are written into the guest's config.yaml
     // on every launch. Defaults are the full-power posture.
 
     /**
-     * Hermes provider id from Hermes's own registry (e.g. "anthropic",
-     * "custom"). An untouched setup starts on the FreeLLM fusion
-     * configuration (Custom) — see [HermesProviderCatalog.DEFAULT_PROVIDER_ID].
+     * The pre-v20 Hermes setup exactly as stored, or null when no setup
+     * was ever stored (the `hermes_provider_id` key was never written).
+     * Read RAW — no defaults are substituted — because the v20 seeding
+     * must distinguish "a setup exists" from "fresh install", and the
+     * v19 key migration still needs the stored provider id. The stored
+     * keys themselves are left in place after seeding (they are part of
+     * backups); nothing reads them for a launch any more.
      */
-    var hermesProviderId: String
-        get() = preferences.getString("hermes_provider_id", HermesProviderCatalog.DEFAULT_PROVIDER_ID)
-            ?: HermesProviderCatalog.DEFAULT_PROVIDER_ID
-        set(value) { preferences.edit().putString("hermes_provider_id", value).apply() }
+    fun legacyHermesSetup(): LegacyHermesSetup? {
+        val providerId = preferences.getString("hermes_provider_id", null) ?: return null
+        return LegacyHermesSetup(
+            providerId = providerId,
+            model = preferences.getString("hermes_model", "") ?: "",
+            customBaseUrl = preferences.getString("hermes_custom_base_url", "") ?: "",
+        )
+    }
 
-    /**
-     * Model id for Hermes ("" = the provider's curated default). An
-     * untouched setup starts on FreeLLM's "fusion" virtual model.
-     */
-    var hermesModel: String
-        get() = preferences.getString("hermes_model", HermesProviderCatalog.DEFAULT_MODEL)
-            ?: HermesProviderCatalog.DEFAULT_MODEL
-        set(value) { preferences.edit().putString("hermes_model", value).apply() }
-
-    /**
-     * Base URL for the Custom endpoint provider ("" for first-class
-     * providers). An untouched setup starts on the user's FreeLLMAPI endpoint.
-     */
-    var hermesCustomBaseUrl: String
-        get() = preferences.getString("hermes_custom_base_url", HermesProviderCatalog.DEFAULT_CUSTOM_BASE_URL)
-            ?: HermesProviderCatalog.DEFAULT_CUSTOM_BASE_URL
-        set(value) { preferences.edit().putString("hermes_custom_base_url", value).apply() }
+    /** Whether a per-agent profile has ever been saved for [agent]. */
+    fun hasAgentProfile(agent: AgentKind): Boolean =
+        preferences.contains("${providerPrefix(agent)}kind")
 
     var hermesOptMemoryEnabled: Boolean
         get() = preferences.getBoolean("hermes_opt_memory_enabled", true)

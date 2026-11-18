@@ -1,36 +1,40 @@
 package com.jarves.mh.runtime
 
+import com.jarves.mh.data.ProviderKeys
+import com.jarves.mh.model.ProviderKind
+import com.jarves.mh.model.ProviderProfile
+
 /**
- * Hermes Agent's own setup/settings model for the app — the source of truth
- * for how Hermes runs, replacing the app's generic ProviderProfile system for
- * the HERMES agent (Claude Code and Antigravity keep using provider profiles).
+ * How a Hermes launch is configured, since v20 deleted Hermes's separate
+ * setup system.
  *
- * Everything here mirrors the PyPI **hermes-agent 0.19.0** release (the
- * version the app installs), inventoried in
- * `harness_genui/HERMES_0190_INVENTORY.md`:
+ * Before v20, Hermes had its own provider/key/model setup inside the app
+ * (a Hermes-native settings store mirroring `hermes setup`, with its own
+ * provider picker, key field and model field). The user ordered it
+ * removed entirely: Hermes now uses the SAME profile system as Claude
+ * Code and Antigravity — the Agent screen's Hermes tab shows the shared
+ * profile card (AI provider, Endpoint & protocol, AI model, Credentials,
+ * Test connection) bound to Hermes's own [ProviderProfile], and the
+ * launch resolves everything from that profile.
  *
- *  - the provider catalog is Hermes's canonical `hermes model` list
- *    restricted to the providers whose setup is an API key (the generic
- *    `_model_flow_api_key_provider` flow plus the key-based bespoke flows).
- *    OAuth providers (nous, openai-codex, xai-oauth, qwen-oauth,
- *    minimax-oauth), the external-process copilot-acp, virtual moa, and the
- *    SDK-auth vertex/bedrock are sign-in flows that store tokens in
- *    `auth.json`; they cannot be served by a key field and are not listed.
- *  - [HermesProviderDef.defaultModel] is the first entry of Hermes's curated
- *    `_PROVIDER_MODELS` list for that provider — the model `hermes model`
- *    pre-selects. Hermes itself has no hard per-provider default; the user's
- *    pick is what lands in `model.default`.
- *  - a custom endpoint is written the way `hermes model`'s named-custom flow
- *    resolves it: a keyed entry under `providers:` in config.yaml whose
- *    `key_env` names the environment variable holding the key, with the key
- *    itself kept in `.env` (never inline in config.yaml).
+ * What remains in this file is launch knowledge, not a settings store:
  *
- * The values are persisted by AppPreferences (ids/options) and ApiKeyVault
- * (the API key in the unified provider store — the pool named by the
- * selected provider's canonical id, see `data/ProviderKeys`) and
- * materialised into the guest's `/root/.hermes/config.yaml` + `.env` on
- * every launch by [HermesConfigFiles] — the same files `hermes setup`
- * would write.
+ *  - [HermesProviderCatalog]: Hermes 0.19.0's provider registry, kept
+ *    ONLY as mapping knowledge — the env var each provider's key is
+ *    stored under in the guest `.env`, Hermes's own endpoint for the
+ *    provider, and the curated first model `hermes model` pre-selects.
+ *  - [HermesProfileRoute]: turns the active Hermes profile into the
+ *    launch route + model the bridge writes into `config.yaml`/`.env`.
+ *  - [HermesProfileSeeding]: the one-time carry-over that seeds the
+ *    first Hermes profile from a pre-v20 stored Hermes setup.
+ *  - [HermesConfigOptions]: the Hermes options surface (memory,
+ *    curator, toolsets, approvals…) — not part of the provider/key
+ *    system, unchanged.
+ *  - [HermesRuntimeSettings]: everything one launch needs.
+ *
+ * The provider KEY itself lives in the unified provider store (see
+ * `data/ProviderKeys`): an ApiKeyVault pool named by the provider's
+ * canonical id, shared by every agent and resolved by the caller.
  */
 
 /**
@@ -55,7 +59,7 @@ data class HermesProviderDef(
 )
 
 /**
- * The launch route derived from the Hermes-native settings: which provider
+ * The launch route derived from the active Hermes profile: which provider
  * id Hermes is told to use (`--provider`), which env var carries the key,
  * and the endpoint for the model section / custom provider entry.
  */
@@ -87,21 +91,6 @@ object HermesProviderCatalog {
         baseUrl = "",
         defaultModel = "",
     )
-
-    /** Provider an untouched Hermes setup starts on: the user's own FreeLLM endpoint (Custom). */
-    const val DEFAULT_PROVIDER_ID = CUSTOM_ID
-
-    /** Base URL an untouched Hermes setup starts on: the user's FreeLLMAPI service. */
-    const val DEFAULT_CUSTOM_BASE_URL = "https://freellmapi-backup.onrender.com/v1"
-
-    /**
-     * Model an untouched Hermes setup starts on: FreeLLM's `fusion` virtual
-     * model — the endpoint fans the prompt out to a panel of models and a
-     * judge model synthesizes one answer, so no single model is pinned.
-     * These three defaults are only the setup screen's starting values;
-     * the user can change all of them there.
-     */
-    const val DEFAULT_MODEL = "fusion"
 
     val PROVIDERS: List<HermesProviderDef> = listOf(
         HermesProviderDef("anthropic", "Anthropic", "ANTHROPIC_API_KEY", "https://api.anthropic.com", "claude-fable-5"),
@@ -137,13 +126,13 @@ object HermesProviderCatalog {
         HermesProviderDef("azure-foundry", "Azure Foundry", "AZURE_FOUNDRY_API_KEY", "", ""),
     )
 
-    /** Every provider the setup picker offers, Custom last (as in `hermes model`). */
+    /** Every provider in the registry, Custom last (as in `hermes model`). */
     val ALL: List<HermesProviderDef> = PROVIDERS + CUSTOM_DEF
 
     fun find(id: String): HermesProviderDef? = ALL.firstOrNull { it.id == id }
 
     /**
-     * Every `.env` key this settings system owns: each catalog provider's key
+     * Every `.env` key this launch layer owns: each catalog provider's key
      * env plus the custom key env, plus `MH_HERMES_API_KEY` — the custom key
      * env written by older app builds — so a provider switch always replaces
      * the previous key line instead of leaving a stale credential behind.
@@ -153,117 +142,136 @@ object HermesProviderCatalog {
 }
 
 /**
- * The "Hermes setup" fields — provider, model, custom base URL — exactly the
- * choices `hermes setup` / `hermes model` ask for. The API key itself lives
- * in the vault (see [HermesRuntimeSettings.secret]).
+ * Turns the active Hermes [ProviderProfile] into the launch route and
+ * model Hermes runs with — the profile-system counterpart of the deleted
+ * Hermes setup's own derivation.
+ *
+ * The profile's fields are written for the profile system (its base URLs
+ * are the Claude-Code-facing endpoints, e.g. OpenRouter's
+ * `https://openrouter.ai/api`), so the route translates through the
+ * Hermes catalog: while the profile's base URL is the kind's untouched
+ * default, Hermes's own endpoint for the provider is used; a base URL
+ * the user actually edited in the profile is honoured as-is. The model
+ * is the profile's pick, falling back to the provider's curated first
+ * model when the profile leaves it blank.
  */
-data class HermesSetupSettings(
-    val providerId: String,
-    val model: String,
-    val customBaseUrl: String,
-) {
-    fun isCustom(): Boolean = providerId == HermesProviderCatalog.CUSTOM_ID
+object HermesProfileRoute {
 
-    fun providerDef(): HermesProviderDef? = HermesProviderCatalog.find(providerId)
-
-    /** The model Hermes runs: the user's pick, else the provider's curated default. */
-    fun resolvedModel(): String =
-        model.trim().ifBlank { providerDef()?.defaultModel.orEmpty() }
-
-
-    /** The launch route for these settings. */
-    fun route(): HermesRoute =
-        if (isCustom()) {
-            HermesRoute(
+    fun routeFor(profile: ProviderProfile): HermesRoute {
+        if (profile.kind == ProviderKind.CUSTOM) {
+            return HermesRoute(
                 provider = HermesProviderCatalog.CUSTOM_PROVIDER_KEY,
                 keyEnv = HermesProviderCatalog.CUSTOM_KEY_ENV,
-                baseUrl = customBaseUrl.trim(),
+                baseUrl = profile.resolvedBaseUrl.trim(),
                 custom = true,
             )
-        } else {
-            val def = providerDef()
-            HermesRoute(
-                provider = providerId,
-                keyEnv = def?.keyEnv.orEmpty(),
-                baseUrl = def?.baseUrl.orEmpty(),
-            )
         }
-}
+        val canonicalId = ProviderKeys.canonicalForKind(profile.kind)
+        val def = HermesProviderCatalog.find(canonicalId)
+        val storedBaseUrl = profile.resolvedBaseUrl.trim()
+        return HermesRoute(
+            provider = def?.id ?: canonicalId,
+            keyEnv = def?.keyEnv.orEmpty(),
+            baseUrl = if (storedBaseUrl.isBlank() || storedBaseUrl == profile.kind.defaultBaseUrl) {
+                def?.baseUrl.orEmpty()
+            } else {
+                storedBaseUrl
+            },
+        )
+    }
 
-/**
- * The only two model choices the simple surfaces offer for Hermes: the
- * FreeLLM endpoint's virtual models. [FUSION] (the default) fans a prompt
- * out to a panel of models and synthesizes one answer; [AUTO] lets the
- * endpoint's own smart routing pick the best model per request. Each maps
- * to the exact string stored in `hermes_model`, so [HermesSetupSettings]
- * and the launch path pick the choice up unchanged. Any other stored value
- * is a manual model entered in the advanced setup and maps to null here.
- */
-enum class HermesModelChoice(val storedValue: String) {
-    FUSION(HermesProviderCatalog.DEFAULT_MODEL),
-    AUTO("auto"),
-    ;
-
-    companion object {
-        /** The choice a stored `hermes_model` value represents, or null for a manual model. */
-        fun fromStored(model: String): HermesModelChoice? =
-            entries.firstOrNull { it.storedValue == model.trim() }
+    /** The model Hermes runs: the profile's pick, else the provider's curated default. */
+    fun modelFor(profile: ProviderProfile): String {
+        val model = profile.model.trim()
+        if (model.isNotBlank()) return model
+        if (profile.kind == ProviderKind.CUSTOM) return ""
+        return HermesProviderCatalog.find(ProviderKeys.canonicalForKind(profile.kind))
+            ?.defaultModel.orEmpty()
     }
 }
 
 /**
- * NEUTRALIZED (2026-11-18, v17) — this object used to compute a one-time
- * migration that overwrote a stored pre-fusion setup (Anthropic provider,
- * no model, no custom base URL) with the fusion defaults.
- *
- * The user correction of 2026-11-18 reversed that policy: a stored
- * provider/model/base-URL choice is FINAL and is never overridden by
- * defaults or migrations — the user runs whichever provider and key they
- * want. The fusion values remain only as getter defaults for a fresh
- * install where nothing is stored at all. [migratedSetup] therefore
- * always returns null; it is kept (rather than deleted) so the reversal
- * is explicit at the old call site and no future code can resurrect the
- * rewrite by accident. Pure and side-effect free; `AppPreferences` owns
- * the stored values and the one-time flag.
+ * The pre-v20 Hermes setup exactly as it was stored (Hermes-catalogue
+ * provider id, model, custom base URL) — read raw from preferences by
+ * AppPreferences for the one-time seeding; null when no setup was ever
+ * stored.
  */
-object HermesSetupMigration {
-
-    /** Provider id an untouched setup resolved to before the fusion defaults. */
-    const val OLD_DEFAULT_PROVIDER_ID = "anthropic"
-
-    /** Always null since the v17 neutralization: no stored setup is ever rewritten. */
-    fun migratedSetup(
-        providerId: String?,
-        model: String?,
-        customBaseUrl: String?,
-    ): HermesSetupSettings? = null
-}
+data class LegacyHermesSetup(
+    val providerId: String,
+    val model: String,
+    val customBaseUrl: String,
+)
 
 /**
- * NEUTRALIZED (2026-11-18, v17) — this object used to compute the v14
- * one-time reset that overwrote ANY stored non-Custom Hermes provider
- * with the fusion configuration, on the theory that such a provider was
- * a leftover from exploring an early build.
+ * The one-time v20 seeding plan: the Hermes profile a stored pre-v20
+ * Hermes setup carries over to.
  *
- * The user correction of 2026-11-18 reversed that policy outright: the
- * "leftover" provider (OpenRouter) was a deliberate choice, and resetting
- * it — together with the reinstalls the signing churn forced — made the
- * user re-enter keys and re-pick providers again and again. A stored
- * provider/model/base-URL choice is FINAL: [resetSetup] always returns
- * null, whatever is stored and whatever the flag says. It is kept
- * (rather than deleted) so the reversal is explicit at the old call site
- * and no future code can resurrect the reset by accident. Pure and
- * side-effect free; `AppPreferences` owns the stored values and the flag.
+ * Providers the profile system has a kind for map onto that kind, with
+ * the profile fields in the profile system's own terms (the kind's
+ * default base URL — the launch route translates it to Hermes's
+ * endpoint, see [HermesProfileRoute]) and the stored model kept
+ * verbatim. A stored Custom setup maps to a Custom profile with its
+ * base URL and model untouched (a FreeLLM `fusion` configuration
+ * carries over exactly).
+ *
+ * A Hermes-catalogue provider the profile system has NO kind for (xAI,
+ * Gemini, Z.AI, …) cannot be a first-class profile; it is carried as a
+ * Custom profile pointed at that provider's own endpoint with its
+ * stored model, which Hermes reaches through the generic
+ * custom-provider route just as it did through the old setup. Its key
+ * sits in the unified pool named by the legacy provider id, so
+ * [keyCopySourcePool] names that pool and the caller copies the key
+ * into the Custom pool the seeded profile reads.
+ *
+ * Pure and side-effect free; AppPreferences owns the one-time flag and
+ * MainViewModel executes the seeding (it holds the vault for the key
+ * copy). A Hermes profile the user already has is never seeded over.
  */
-object HermesFusionResetMigration {
+object HermesProfileSeeding {
 
-    /** Always null since the v17 neutralization: a stored setup is never reset. */
-    fun resetSetup(
-        alreadyMigrated: Boolean,
-        providerId: String?,
-        model: String?,
-        customBaseUrl: String?,
-    ): HermesSetupSettings? = null
+    /** Legacy Hermes provider ids that have a profile-system kind. */
+    private val KIND_BY_LEGACY_ID: Map<String, ProviderKind> = mapOf(
+        "anthropic" to ProviderKind.ANTHROPIC,
+        "openrouter" to ProviderKind.LLM_ROUTER,
+        "deepseek" to ProviderKind.DEEPSEEK,
+        "kimi-coding" to ProviderKind.KIMI,
+        "nvidia" to ProviderKind.NVIDIA_NIM,
+        HermesProviderCatalog.CUSTOM_ID to ProviderKind.CUSTOM,
+    )
+
+    fun profileFor(legacy: LegacyHermesSetup): ProviderProfile {
+        val kind = KIND_BY_LEGACY_ID[legacy.providerId]
+        if (kind != null) {
+            return ProviderProfile(
+                kind = kind,
+                baseUrl = if (kind == ProviderKind.CUSTOM) {
+                    legacy.customBaseUrl.trim().ifBlank { kind.defaultBaseUrl }
+                } else {
+                    kind.defaultBaseUrl
+                },
+                model = legacy.model.trim().ifBlank { kind.defaultModel },
+            )
+        }
+        val def = HermesProviderCatalog.find(legacy.providerId)
+        return ProviderProfile(
+            kind = ProviderKind.CUSTOM,
+            baseUrl = def?.baseUrl.orEmpty(),
+            model = legacy.model.trim().ifBlank { def?.defaultModel.orEmpty() },
+        )
+    }
+
+    /**
+     * The canonical unified-store pool holding the legacy setup's key
+     * when the seeded profile reads a different pool — only the
+     * unmappable-provider case (seeded as Custom, key under the legacy
+     * provider's own pool). Null when no copy is needed.
+     */
+    fun keyCopySourcePool(legacy: LegacyHermesSetup): String? =
+        if (legacy.providerId in KIND_BY_LEGACY_ID) {
+            null
+        } else {
+            ProviderKeys.canonicalForHermes(legacy.providerId)
+        }
 }
 
 /**
@@ -347,9 +355,10 @@ data class HermesConfigOptions(
     )
 }
 
-/** Everything one Hermes launch needs from the native settings store. */
+/** Everything one Hermes launch needs, resolved from the active Hermes profile. */
 data class HermesRuntimeSettings(
-    val setup: HermesSetupSettings,
+    val route: HermesRoute,
+    val model: String,
     val secret: String,
     val options: HermesConfigOptions,
 )

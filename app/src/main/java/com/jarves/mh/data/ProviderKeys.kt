@@ -19,10 +19,10 @@ import com.jarves.mh.runtime.HERMES_SETUP_VAULT_ID
  *
  * From v19 there is exactly ONE store per provider: an [ApiKeyVault] pool
  * whose id is the provider's canonical id (see [ProviderKeys]). Every
- * consumer — the Hermes bridge, the Claude Code bridge, the Hermes setup
- * card, the profile provider card, and the simple Settings → API Keys
- * screen — reads and writes that one pool, so a key entered anywhere is
- * the key everywhere.
+ * consumer — the Hermes bridge, the Claude Code bridge, the profile
+ * provider card (which the Hermes tab shares with Claude Code since
+ * v20), and the simple Settings → API Keys screen — reads and writes
+ * that one pool, so a key entered anywhere is the key everywhere.
  *
  * The one deliberate exception is the Hermes remote-host gateway key
  * (`HERMES_GATEWAY` pool): it authenticates to the user's own Hermes host

@@ -107,14 +107,13 @@ import com.jarves.mh.model.AgentKind
 import com.jarves.mh.model.ProviderKind
 import com.jarves.mh.model.ProviderProfile
 import com.jarves.mh.model.providersForAgent
+import com.jarves.mh.model.VirtualModels
 import com.jarves.mh.network.ConnectionValidation
 import com.jarves.mh.network.DiscoveredModel
 import com.jarves.mh.network.ModelDiscoveryResult
 import com.jarves.mh.runtime.AntigravityAuthStatus
 import com.jarves.mh.runtime.HermesConfigOptions
 import com.jarves.mh.runtime.HermesEnvText
-import com.jarves.mh.runtime.HermesModelChoice
-import com.jarves.mh.runtime.HermesProviderCatalog
 import com.jarves.mh.ui.theme.PocketBlue
 import com.jarves.mh.ui.theme.PocketOrange
 import kotlinx.coroutines.launch
@@ -205,8 +204,6 @@ fun AgentScreen(
     onTestHermesHost: suspend (String, String) -> ConnectionValidation = { _, _ ->
         ConnectionValidation.Failure("Hermes host test is unavailable")
     },
-    getSavedHermesApiKey: (String) -> String = { "" },
-    onSaveHermesSetup: (String, String, String, String) -> Unit = { _, _, _, _ -> },
     onSaveHermesOptions: (HermesConfigOptions) -> Unit = {},
     onReadHermesFile: suspend (String) -> String? = { null },
     onWriteHermesFile: suspend (String, String) -> Boolean = { _, _ -> false },
@@ -344,6 +341,26 @@ fun AgentScreen(
         }
     }
 
+    /**
+     * Picking a pinned FreeLLM virtual model (Fusion / Auto) rebinds the
+     * whole profile to the Custom/FreeLLM configuration — provider, base
+     * URL and model change together, visibly, in this card's own state
+     * (the credentials section follows selectedKind, so it switches to the
+     * unified store's `custom` pool). The bound profile is then saved and
+     * tested through the same paths as any other profile.
+     */
+    fun selectVirtualModel(modelId: String) {
+        val bound = VirtualModels.bind(
+            ProviderProfile(selectedKind, baseUrl, model),
+            modelId,
+        )
+        selectedKind = bound.kind
+        baseUrl = bound.baseUrl
+        model = bound.model
+        modelSearch = ""
+        showModels = false
+    }
+
     // ── Live connection status calculations ──
     val isAntigravity = state.agentKind == AgentKind.ANTIGRAVITY
     val antigravityTesting = isAntigravity && state.apiPingStatus == ApiPingStatus.PINGING
@@ -403,6 +420,52 @@ fun AgentScreen(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(14.dp),
                 )
+                Spacer(Modifier.height(12.dp))
+
+                // Pinned FreeLLM virtual models, as in the profile model
+                // sheet. Antigravity has no provider profile to rebind (its
+                // connection is a Google account), so picking one sets its
+                // model id literally, exactly like any other row here.
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    VirtualModels.PINNED.forEach { option ->
+                        val isSelected = state.antigravityModel == option.id
+                        Surface(
+                            shape = RoundedCornerShape(14.dp),
+                            color = if (isSelected) PocketOrange.copy(alpha = 0.10f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.28f),
+                            border = BorderStroke(
+                                1.dp,
+                                if (isSelected) PocketOrange.copy(alpha = 0.45f) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f),
+                            ),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    onSetAntigravityModel(option.id)
+                                    showAntigravityModelSheet = false
+                                },
+                        ) {
+                            Row(
+                                Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Column(Modifier.weight(1f)) {
+                                    Text(
+                                        option.label,
+                                        fontWeight = FontWeight.SemiBold,
+                                        fontSize = 14.sp,
+                                        color = if (isSelected) PocketOrange else MaterialTheme.colorScheme.onSurface,
+                                    )
+                                    Text(
+                                        option.id,
+                                        fontSize = 11.sp,
+                                        fontFamily = FontFamily.Monospace,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                                AgentSelectionDot(selected = isSelected)
+                            }
+                        }
+                    }
+                }
                 Spacer(Modifier.height(12.dp))
 
                 if (filteredAntigravityModels.isEmpty()) {
@@ -518,6 +581,54 @@ fun AgentScreen(
                     shape = RoundedCornerShape(14.dp),
                 )
                 Spacer(Modifier.height(12.dp))
+
+                // Pinned FreeLLM virtual models: always offered, for every
+                // agent and every provider, above discovered/recommended
+                // models. Picking one rebinds the profile (selectVirtualModel).
+                Text(
+                    stringResource(R.string.st_virtual_models_header),
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(8.dp))
+                VirtualModels.PINNED.forEach { option ->
+                    val isSelected = selectedKind == ProviderKind.CUSTOM && model == option.id
+                    Surface(
+                        shape = RoundedCornerShape(14.dp),
+                        color = if (isSelected) PocketOrange.copy(alpha = 0.10f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.28f),
+                        border = BorderStroke(
+                            1.dp,
+                            if (isSelected) PocketOrange.copy(alpha = 0.45f) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f),
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { selectVirtualModel(option.id) },
+                    ) {
+                        Row(
+                            Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    option.label,
+                                    fontWeight = FontWeight.SemiBold,
+                                    fontSize = 14.sp,
+                                    color = if (isSelected) PocketOrange else MaterialTheme.colorScheme.onSurface,
+                                )
+                                Text(
+                                    option.id,
+                                    fontSize = 11.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            AgentSelectionDot(selected = isSelected)
+                        }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                }
+                Spacer(Modifier.height(4.dp))
 
                 if (status != null) {
                     Surface(
@@ -1017,23 +1128,13 @@ fun AgentScreen(
                         onSetEffort = onSetAntigravityEffort,
                         onTest = onPing,
                     )
-                } else if (state.agentKind == AgentKind.HERMES) {
-                    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                        AgentHermesSetupCard(
-                            state = state,
-                            getSavedKey = getSavedHermesApiKey,
-                            onSave = onSaveHermesSetup,
-                        )
-                        AgentHermesOptionsCard(
-                            state = state,
-                            onSave = onSaveHermesOptions,
-                        )
-                        AgentHermesRawFilesCard(
-                            onRead = onReadHermesFile,
-                            onWrite = onWriteHermesFile,
-                        )
-                    }
                 } else {
+                    // Hermes and Claude Code share the SAME profile card
+                    // (v20): provider, endpoint, model, credentials and
+                    // test connection bind to the viewed agent's own
+                    // profile. Hermes adds its options and raw-files
+                    // cards below — those are not part of the key system.
+                    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                     AgentProviderCard(
                         onTest = onPing,
                         state = state,
@@ -1171,6 +1272,17 @@ fun AgentScreen(
                             }
                         },
                     )
+                    if (state.agentKind == AgentKind.HERMES) {
+                        AgentHermesOptionsCard(
+                            state = state,
+                            onSave = onSaveHermesOptions,
+                        )
+                        AgentHermesRawFilesCard(
+                            onRead = onReadHermesFile,
+                            onWrite = onWriteHermesFile,
+                        )
+                    }
+                    }
                 }
             }
 
@@ -2247,209 +2359,6 @@ private fun HermesStatusRow(status: String?, statusOk: Boolean) {
             lineHeight = 15.sp,
             color = if (statusOk) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.error,
             modifier = Modifier.weight(1f),
-        )
-    }
-}
-
-/**
- * Hermes's own setup inside the app: provider (from Hermes's registry),
- * model and API key — the same three choices `hermes setup` asks for. The
- * key is stored in the encrypted vault and lands in Hermes's .env under
- * the provider's own env name on every launch.
- */
-@Composable
-private fun AgentHermesSetupCard(
-    state: AppUiState,
-    getSavedKey: (String) -> String,
-    onSave: (String, String, String, String) -> Unit,
-) {
-    var providerId by rememberSaveable(state.hermesProviderId) { mutableStateOf(state.hermesProviderId) }
-    var model by rememberSaveable(state.hermesModel) { mutableStateOf(state.hermesModel) }
-    var baseUrl by rememberSaveable(state.hermesCustomBaseUrl) { mutableStateOf(state.hermesCustomBaseUrl) }
-    // One key per provider (unified store, v19): switching the provider
-    // reloads THAT provider's saved key instead of carrying one key
-    // across providers.
-    var key by rememberSaveable(providerId) { mutableStateOf(getSavedKey(providerId)) }
-    var keyVisible by rememberSaveable { mutableStateOf(false) }
-    var showPicker by remember { mutableStateOf(false) }
-    var status by remember { mutableStateOf<String?>(null) }
-    var statusOk by remember { mutableStateOf(false) }
-    val savedMessage = stringResource(R.string.hermes_setup_saved)
-    val selectedDef = HermesProviderCatalog.find(providerId) ?: HermesProviderCatalog.CUSTOM_DEF
-    val isCustom = providerId == HermesProviderCatalog.CUSTOM_ID
-
-    HermesSettingsCard(
-        title = stringResource(R.string.hermes_setup_title),
-        desc = stringResource(R.string.hermes_setup_desc),
-    ) {
-        Text(stringResource(R.string.hermes_setup_provider), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-        Spacer(Modifier.height(6.dp))
-        Surface(
-            shape = RoundedCornerShape(14.dp),
-            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.22f),
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable { showPicker = true },
-        ) {
-            Row(
-                Modifier.padding(horizontal = 13.dp, vertical = 12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Text(selectedDef.displayName, fontWeight = FontWeight.Medium, fontSize = 13.sp)
-                    Text(
-                        if (isCustom) selectedDef.id else "${selectedDef.id} · ${selectedDef.keyEnv}",
-                        fontSize = 11.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                Icon(Icons.Default.KeyboardArrowDown, null)
-            }
-        }
-        Spacer(Modifier.height(12.dp))
-        OutlinedTextField(
-            value = model,
-            onValueChange = { model = it; status = null },
-            label = { Text(stringResource(R.string.hermes_setup_model)) },
-            supportingText = {
-                Text(
-                    if (selectedDef.defaultModel.isNotBlank()) {
-                        stringResource(R.string.hermes_setup_model_hint, selectedDef.defaultModel)
-                    } else {
-                        stringResource(R.string.hermes_setup_model_hint_none)
-                    },
-                )
-            },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(12.dp),
-        )
-        // Quick picks for the FreeLLM virtual models — the same two choices
-        // the simple API Keys screen offers. They exist only on the Custom
-        // endpoint (v17): "fusion"/"auto" are that endpoint's virtual
-        // models, so offering them under any other provider would steer
-        // the model field to names that provider does not have. They only
-        // fill the field above; the free-text value stays editable and is
-        // stored on Save as usual.
-        if (isCustom) {
-            Row(
-                Modifier.padding(top = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                HermesModelChoice.entries.forEach { choice ->
-                    FilterChip(
-                        selected = model.trim() == choice.storedValue,
-                        onClick = { model = choice.storedValue; status = null },
-                        label = {
-                            Text(
-                                stringResource(
-                                    when (choice) {
-                                        HermesModelChoice.FUSION -> R.string.api_keys_model_fusion
-                                        HermesModelChoice.AUTO -> R.string.api_keys_model_auto
-                                    },
-                                ),
-                            )
-                        },
-                    )
-                }
-            }
-        }
-        AnimatedVisibility(isCustom) {
-            OutlinedTextField(
-                value = baseUrl,
-                onValueChange = { baseUrl = it; status = null },
-                label = { Text(stringResource(R.string.hermes_setup_base_url)) },
-                supportingText = { Text(stringResource(R.string.hermes_setup_base_url_hint)) },
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 12.dp),
-                shape = RoundedCornerShape(12.dp),
-            )
-        }
-        Spacer(Modifier.height(12.dp))
-        OutlinedTextField(
-            value = key,
-            onValueChange = { key = it; status = null },
-            label = { Text(stringResource(R.string.hermes_setup_key)) },
-            supportingText = {
-                Text(
-                    stringResource(
-                        if (isCustom) R.string.hermes_setup_key_hint_custom else R.string.hermes_setup_key_hint,
-                        if (isCustom) HermesProviderCatalog.CUSTOM_KEY_ENV else selectedDef.keyEnv,
-                    ),
-                )
-            },
-            singleLine = true,
-            visualTransformation = if (keyVisible) VisualTransformation.None else PasswordVisualTransformation(),
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-            trailingIcon = {
-                IconButton(onClick = { keyVisible = !keyVisible }) {
-                    Icon(
-                        if (keyVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                        contentDescription = null,
-                    )
-                }
-            },
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(12.dp),
-        )
-        HermesStatusRow(status, statusOk)
-        Spacer(Modifier.height(14.dp))
-        Button(
-            onClick = {
-                onSave(providerId, model.trim(), baseUrl.trim(), key.trim())
-                status = savedMessage
-                statusOk = true
-            },
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(12.dp),
-        ) {
-            Text(stringResource(R.string.hermes_setup_save))
-        }
-    }
-
-    if (showPicker) {
-        AlertDialog(
-            onDismissRequest = { showPicker = false },
-            title = { Text(stringResource(R.string.hermes_setup_provider)) },
-            text = {
-                Column(
-                    Modifier
-                        .height(420.dp)
-                        .verticalScroll(rememberScrollState()),
-                ) {
-                    HermesProviderCatalog.ALL.forEach { def ->
-                        HermesHostModeRow(
-                            title = def.displayName,
-                            subtitle = if (def.id == HermesProviderCatalog.CUSTOM_ID) {
-                                def.id
-                            } else {
-                                "${def.id} · ${def.keyEnv}"
-                            },
-                            selected = def.id == providerId,
-                            onClick = {
-                                if (def.id != providerId) {
-                                    providerId = def.id
-                                    // Like `hermes model`, switching provider
-                                    // pre-selects its curated first model; the
-                                    // field stays editable afterwards.
-                                    model = def.defaultModel
-                                }
-                                status = null
-                                showPicker = false
-                            },
-                        )
-                    }
-                }
-            },
-            confirmButton = {},
-            dismissButton = {
-                TextButton(onClick = { showPicker = false }) {
-                    Text(stringResource(R.string.hermes_files_cancel))
-                }
-            },
         )
     }
 }

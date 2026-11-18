@@ -101,6 +101,7 @@ import androidx.compose.material.icons.filled.Launch
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.ClearAll
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Check
@@ -2549,6 +2550,7 @@ private fun RootScreenHost(
                         onCreateQuickProject = viewModel::createQuickProject,
                         onRenameProject = viewModel::renameProject,
                         onDeleteProject = viewModel::deleteProject,
+                        onSelectAgent = viewModel::selectAgent,
                     )
                 } else {
                     // Transient: PocketDevApp auto-opens the most recent project
@@ -2583,8 +2585,6 @@ private fun RootScreenHost(
                     getSavedHermesHostKey = viewModel::getSavedHermesHostKey,
                     onSaveHermesHost = viewModel::saveHermesHost,
                     onTestHermesHost = viewModel::testHermesHost,
-                    getSavedHermesApiKey = viewModel::getSavedHermesApiKey,
-                    onSaveHermesSetup = viewModel::saveHermesSetup,
                     onSaveHermesOptions = viewModel::saveHermesOptions,
                     onReadHermesFile = viewModel::readHermesFile,
                     onWriteHermesFile = viewModel::writeHermesFile,
@@ -2643,7 +2643,6 @@ private fun RootScreenHost(
                     onSaveHermesHostKey = viewModel::updateHermesHostKey,
                     getAgentProfile = viewModel::providerProfileFor,
                     onSaveProviderKey = viewModel::updateProviderApiKey,
-                    onSaveHermesModel = viewModel::updateHermesModel,
                     onOpenAgentSettings = { screenName = RootScreen.AGENT.name },
                     onImportZip = viewModel::importZipProject,
                     onCloneGit = viewModel::clonePublicGitRepository,
@@ -4372,6 +4371,7 @@ private fun WorkspaceScreen(
     onCreateQuickProject: () -> Unit,
     onRenameProject: (String, String) -> Unit,
     onDeleteProject: (String) -> Unit,
+    onSelectAgent: (AgentKind) -> Unit,
 ) {
     val context = LocalContext.current
     val isAndroidProject = state.androidProjectDetected
@@ -4479,6 +4479,7 @@ private fun WorkspaceScreen(
     var sectionMenuOpen by remember { mutableStateOf(false) }
     var showChats by rememberSaveable { mutableStateOf(false) }
     var showProjects by rememberSaveable { mutableStateOf(false) }
+    var showAgentSwitcher by rememberSaveable { mutableStateOf(false) }
     // Chat-first: the workspace is the home screen, so Back never leaves the
     // project. From a workspace section it returns to Chat; on Chat itself the
     // system default applies (leaves the app) unless work is running — running
@@ -4584,6 +4585,16 @@ private fun WorkspaceScreen(
             },
         )
     }
+    if (showAgentSwitcher) {
+        AgentSwitchSheet(
+            selected = state.agentKind,
+            onSelect = { agent ->
+                onSelectAgent(agent)
+                showAgentSwitcher = false
+            },
+            onDismiss = { showAgentSwitcher = false },
+        )
+    }
     state.pendingTerminalCommand?.let { command ->
         AlertDialog(
             onDismissRequest = onTerminalCancel,
@@ -4634,6 +4645,38 @@ private fun WorkspaceScreen(
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                             )
+                        }
+                        // Active agent, always visible in the header. Tapping
+                        // the chip opens the agent switcher; the switch goes
+                        // through the same selectAgent path as the Agent tab
+                        // and keeps this chat and its history untouched. The
+                        // chip's own clickable consumes the tap, so it does
+                        // not also open the project switcher.
+                        Surface(
+                            shape = RoundedCornerShape(50),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
+                            modifier = Modifier
+                                .padding(start = 10.dp)
+                                .clickable { showAgentSwitcher = true },
+                        ) {
+                            Row(
+                                Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    state.agentKind.localizedTitle(),
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1,
+                                )
+                                Spacer(Modifier.width(4.dp))
+                                Icon(
+                                    Icons.Default.SwapHoriz,
+                                    contentDescription = stringResource(R.string.agent_choose_title),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(14.dp),
+                                )
+                            }
                         }
                         Icon(
                             Icons.Default.KeyboardArrowDown,

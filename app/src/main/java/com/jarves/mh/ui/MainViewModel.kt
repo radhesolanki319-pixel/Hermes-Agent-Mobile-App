@@ -74,10 +74,11 @@ import com.jarves.mh.runtime.HermesGatewayUrls
 import com.jarves.mh.runtime.HermesHostConfig
 import com.jarves.mh.runtime.HermesHostProbe
 import com.jarves.mh.runtime.HermesRemoteMessages
+import com.jarves.mh.runtime.HermesProfileRoute
+import com.jarves.mh.runtime.HermesProfileSeeding
+import com.jarves.mh.runtime.HermesProviderCatalog
 import com.jarves.mh.runtime.HermesRuntimeBridge
 import com.jarves.mh.runtime.HermesRuntimeSettings
-import com.jarves.mh.runtime.HermesProviderCatalog
-import com.jarves.mh.runtime.HermesSetupSettings
 import com.jarves.mh.runtime.probeHermesHost
 import com.jarves.mh.runtime.NativeSpawnProcess
 import com.jarves.mh.runtime.RuntimeInstallProgress
@@ -404,9 +405,6 @@ data class AppUiState(
     val antigravityEffort: String = "high",
     val hermesHostRemote: Boolean = false,
     val hermesHostUrl: String = "",
-    val hermesProviderId: String = HermesProviderCatalog.DEFAULT_PROVIDER_ID,
-    val hermesModel: String = HermesProviderCatalog.DEFAULT_MODEL,
-    val hermesCustomBaseUrl: String = HermesProviderCatalog.DEFAULT_CUSTOM_BASE_URL,
     val hermesOptions: HermesConfigOptions = HermesConfigOptions.FULL_POWER,
     val antigravityModels: List<String> = emptyList(),
     val antigravityModelsLoading: Boolean = false,
@@ -463,13 +461,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val hermesRuntime = HermesRuntimeBridge(
         application,
         hermesSettings = {
+            // Hermes resolves its launch from its own profile in the
+            // shared profile system (v20), exactly like the other
+            // agents: route + model from the profile (HermesProfileRoute
+            // translates through the Hermes catalog), key from the
+            // unified provider store under the profile provider's
+            // canonical id.
+            val profile = preferences.loadProvider(vault, AgentKind.HERMES)
             HermesRuntimeSettings(
-                setup = HermesSetupSettings(
-                    providerId = preferences.hermesProviderId,
-                    model = preferences.hermesModel,
-                    customBaseUrl = preferences.hermesCustomBaseUrl,
-                ),
-                secret = vault.get(ProviderKeys.canonicalForHermes(preferences.hermesProviderId)).orEmpty(),
+                route = HermesProfileRoute.routeFor(profile),
+                model = HermesProfileRoute.modelFor(profile),
+                secret = vault.get(ProviderKeys.canonicalForKind(profile.kind)).orEmpty(),
                 options = preferences.hermesConfigOptions(),
             )
         },
@@ -563,9 +565,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             antigravityEffort = preferences.antigravityEffort,
             hermesHostRemote = preferences.hermesHostRemote,
             hermesHostUrl = preferences.hermesHostUrl,
-            hermesProviderId = preferences.hermesProviderId,
-            hermesModel = preferences.hermesModel,
-            hermesCustomBaseUrl = preferences.hermesCustomBaseUrl,
             hermesOptions = preferences.hermesConfigOptions(),
             themeMode = runCatching { com.jarves.mh.ui.theme.AppThemeMode.valueOf(preferences.themeMode.uppercase()) }
                 .getOrDefault(com.jarves.mh.ui.theme.AppThemeMode.DARK),
@@ -2114,32 +2113,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /** The saved key for a Hermes provider, from the unified provider store. */
-    fun getSavedHermesApiKey(providerId: String): String =
-        vault.get(ProviderKeys.canonicalForHermes(providerId)).orEmpty()
-
-    /**
-     * Persists the Hermes-native setup (Hermes's own provider/model/base
-     * URL); the API key goes to the unified provider store under the
-     * selected provider's canonical id — the same key every other agent
-     * set to that provider uses. A blank key clears that provider's
-     * saved key, mirroring the host card.
-     */
-    fun saveHermesSetup(providerId: String, model: String, baseUrl: String, key: String) {
-        preferences.hermesProviderId = providerId
-        preferences.hermesModel = model.trim()
-        preferences.hermesCustomBaseUrl = baseUrl.trim()
-        val pool = ProviderKeys.canonicalForHermes(providerId)
-        if (key.isBlank()) vault.remove(pool) else vault.put(pool, key)
-        _state.update {
-            it.copy(
-                hermesProviderId = providerId,
-                hermesModel = model.trim(),
-                hermesCustomBaseUrl = baseUrl.trim(),
-            )
-        }
-    }
-
     // --- Simple "API Keys" screen (Settings) ---------------------------------
     // Key-only writes onto the unified provider store (v19): one pool per
     // provider, shared by every agent and every surface, so a key entered
@@ -2162,12 +2135,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     /** Saves only the Hermes host gateway key (HERMES_GATEWAY pool); host mode/URL are untouched. */
     fun updateHermesHostKey(secret: String) {
         if (secret.isBlank()) vault.remove(HERMES_GATEWAY_VAULT_ID) else vault.put(HERMES_GATEWAY_VAULT_ID, secret)
-    }
-
-    /** Persists the Fusion/Auto model choice into the same `hermes_model` the advanced setup edits. */
-    fun updateHermesModel(model: String) {
-        preferences.hermesModel = model.trim()
-        _state.update { it.copy(hermesModel = model.trim()) }
     }
 
     /** Persists the Hermes config options; they are written into config.yaml on the next launch. */
@@ -2250,6 +2217,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         migrateProviderKeysIfNeeded()
+        seedHermesProfileIfNeeded()
         viewModelScope.launch { RuntimeSetupController.snapshot.collect(::onSetupSnapshot) }
         viewModelScope.launch { claudeRuntime.events.collect(::onRuntimeEvent) }
         viewModelScope.launch { bootstrap() }
@@ -2276,7 +2244,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         ProviderKeyMigrator.migrate(
             vault,
             ProviderKeyMigration.plan(
-                hermesProviderId = preferences.hermesProviderId,
+                hermesProviderId = preferences.legacyHermesSetup()?.providerId
+                    ?: HermesProviderCatalog.CUSTOM_ID,
                 selectedKind = _state.value.provider.kind,
             ),
         )
@@ -2290,6 +2259,44 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 activeApiKeyName = vault.list(ProviderKeys.canonicalForKind(provider.kind))
                     .firstOrNull(ApiKeyInfo::isActive)?.name,
             )
+        }
+    }
+
+    /**
+     * One-time v20 seeding: v20 deleted Hermes's separate setup system,
+     * so the first Hermes profile is seeded from the stored pre-v20
+     * Hermes setup (see [HermesProfileSeeding] for the mapping) and the
+     * user's current provider/model carries over. Runs after the v19 key
+     * migration so an unmappable provider's key is already in its
+     * canonical pool for the copy below. A Hermes profile that already
+     * exists is never overwritten, and on a fresh install (no stored
+     * setup) nothing is seeded — the profile system's own defaults
+     * apply, exactly like a new Claude Code profile.
+     */
+    private fun seedHermesProfileIfNeeded() {
+        if (preferences.hermesProfileSeeded) return
+        preferences.hermesProfileSeeded = true
+        if (preferences.hasAgentProfile(AgentKind.HERMES)) return
+        val legacy = preferences.legacyHermesSetup() ?: return
+        val profile = HermesProfileSeeding.profileFor(legacy)
+        preferences.saveProvider(profile, AgentKind.HERMES)
+        HermesProfileSeeding.keyCopySourcePool(legacy)?.let { sourcePool ->
+            val customPool = ProviderKeys.canonicalForKind(ProviderKind.CUSTOM)
+            if (vault.get(customPool).isNullOrBlank()) {
+                vault.get(sourcePool)?.let { vault.put(customPool, it) }
+            }
+        }
+        // The initial state snapshot may predate the seeding; refresh the
+        // active profile when Hermes is the agent on screen.
+        if (_state.value.agentKind == AgentKind.HERMES) {
+            val refreshed = preferences.loadProvider(vault, AgentKind.HERMES)
+            _state.update { current ->
+                current.copy(
+                    provider = refreshed,
+                    activeApiKeyName = vault.list(ProviderKeys.canonicalForKind(refreshed.kind))
+                        .firstOrNull(ApiKeyInfo::isActive)?.name,
+                )
+            }
         }
     }
 
@@ -5665,16 +5672,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (!current.isRunning || current.activeSessionId != event.sessionId) return false
         if (!isApiKeyFailure(event.reason)) return false
         val request = activeRuntimeRequest ?: return false
-        // The unified provider pool this turn's key came from: Hermes turns
-        // resolve through the Hermes setup's provider, profile agents
-        // through their profile kind — both land in the same per-provider
+        // The unified provider pool this turn's key came from: every
+        // agent — Hermes included, since v20 — resolves through its
+        // profile kind, and all kinds land in the same per-provider
         // store (v19). Rotation only marks ids in memory for this prompt;
         // a rejected key is NEVER deleted or blacklisted in the vault.
-        val pool = if (current.agentKind == AgentKind.HERMES) {
-            ProviderKeys.canonicalForHermes(preferences.hermesProviderId)
-        } else {
-            ProviderKeys.canonicalForKind(request.provider.kind)
-        }
+        val pool = ProviderKeys.canonicalForKind(request.provider.kind)
         val credentials = vault.credentials(pool)
         val active = credentials.firstOrNull { it.isActive } ?: return false
         failedApiKeyIds += active.id
