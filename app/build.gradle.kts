@@ -73,6 +73,18 @@ android {
     ndkVersion = providers.gradleProperty("mhNdkVersion").orNull ?: "28.2.13676358"
 
     signingConfigs {
+        // One stable signing identity for every debug build, committed in the
+        // repo (keystore/hermes-debug.keystore). Without it, each CI runner
+        // generated a fresh throwaway debug key, so no build could ever update
+        // an installed copy (signature mismatch) and the in-app updater rightly
+        // refused every update. Conventional debug alias/passwords ("android"):
+        // this identifies the app's builds; it is not an account secret.
+        create("stable") {
+            storeFile = rootProject.file("keystore/hermes-debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
         if (hasUploadSigning) {
             create("upload") {
                 storeFile = rootProject.file(checkNotNull(uploadStorePath))
@@ -96,8 +108,8 @@ android {
         targetSdk = if (playBuild) 36 else 28
         // Keep literal defaults so F-Droid's static manifest parser can detect
         // the tagged release. Gradle properties may still override Play builds.
-        versionCode = 14
-        versionName = "1.0.13"
+        versionCode = 15
+        versionName = "1.0.14"
         providers.gradleProperty("appVersionCode").orNull?.toIntOrNull()?.let { versionCode = it }
         providers.gradleProperty("appVersionName").orNull?.let { versionName = it }
 
@@ -139,6 +151,7 @@ android {
 
     buildTypes {
         debug {
+            signingConfig = signingConfigs.getByName("stable")
             buildConfigField(
                 "String",
                 "TEST_OPENROUTER_API_KEY",

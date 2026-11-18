@@ -41,6 +41,10 @@ captures/
 # Keystore files (signing keys)
 *.jks
 *.keystore
+# Exception: the app's one stable debug signing identity is committed on
+# purpose so every build shares the same signature (see the "stable"
+# signingConfig in app/build.gradle.kts).
+!keystore/hermes-debug.keystore
 
 # External native build folder
 .externalNativeBuild
