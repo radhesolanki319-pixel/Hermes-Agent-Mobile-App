@@ -374,7 +374,35 @@ data class ProjectChat(
     val title: String = "New chat",
     val createdAtMillis: Long = System.currentTimeMillis(),
     val updatedAtMillis: Long = System.currentTimeMillis(),
+    /**
+     * The agent this chat belongs to (v21: chats are per agent — each agent
+     * has its own chat list inside a project). Pre-v21 index entries have no
+     * stored agent; they are assigned on load, see [assigningAgentToLegacyChats].
+     */
+    val agentKind: AgentKind = AgentKind.HERMES,
 )
+
+/** Short human name used in agent-facing text (environment brief, transcripts). */
+val AgentKind.shortName: String
+    get() = when (this) {
+        AgentKind.HERMES -> "Hermes"
+        AgentKind.CLAUDE_CODE -> "Claude Code"
+        AgentKind.ANTIGRAVITY -> "Antigravity"
+    }
+
+/**
+ * v21 migration: chats written before per-agent chats existed carry no
+ * stored agent. Those chats (identified by [legacyChatIds]) all belonged to
+ * the one shared conversation the user had with whichever agent was active,
+ * so they are assigned wholesale to [fallback] — the agent active for the
+ * project at upgrade time. Chats that already carry an agent are untouched.
+ */
+fun List<ProjectChat>.assigningAgentToLegacyChats(
+    legacyChatIds: Set<String>,
+    fallback: AgentKind,
+): List<ProjectChat> =
+    if (legacyChatIds.isEmpty()) this
+    else map { chat -> if (chat.id in legacyChatIds) chat.copy(agentKind = fallback) else chat }
 
 enum class DiffLineType { CONTEXT, ADDITION, DELETION, INFO }
 

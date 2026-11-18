@@ -2,7 +2,7 @@
 <resources>
     <string name="ws_agy_setup_title">Antigravity सेट अप करें</string>
     <string name="ws_agy_connect_google">अपना Google खाता कनेक्ट करें</string>
-    <string name="ws_agy_connect_desc">PocketDev अपने निजी Linux वातावरण में Google का आधिकारिक agy CLI चलाता है। प्रमाणीकरण Google संभालता है और सहेजा गया सत्र agy के पास रहता है।</string>
+    <string name="ws_agy_connect_desc">Hermes Agent अपने निजी Linux वातावरण में Google का आधिकारिक agy CLI चलाता है। प्रमाणीकरण Google संभालता है और सहेजा गया सत्र agy के पास रहता है।</string>
     <string name="ws_agy_starting_login">आधिकारिक Antigravity लॉगिन शुरू हो रहा है…</string>
     <string name="ws_agy_completing_signin">Google साइन-इन पूरा हो रहा है…</string>
     <string name="ws_agy_signin_opened">Google साइन-इन आपके ब्राउज़र में खुल गया है। स्वीकृति के बाद दिखाया गया एक-बार का कोड कॉपी करें।</string>
@@ -11,7 +11,7 @@
     <string name="ws_agy_complete_signin">साइन-इन पूरा करें</string>
     <string name="ws_agy_connected_as">%1$s के रूप में कनेक्ट है</string>
     <string name="ws_agy_google_connected">Google खाता कनेक्ट हो गया</string>
-    <string name="ws_agy_auto_approval_warning">Antigravity के लिए स्वचालित टूल स्वीकृति सक्षम है। यह बिना पुष्टि के प्रोजेक्ट फ़ाइलें संपादित कर सकता है और कमांड चला सकता है। बदलावों की समीक्षा PocketDev में की जा सकती है।</string>
+    <string name="ws_agy_auto_approval_warning">Antigravity के लिए स्वचालित टूल स्वीकृति सक्षम है। यह बिना पुष्टि के प्रोजेक्ट फ़ाइलें संपादित कर सकता है और कमांड चला सकता है। बदलावों की समीक्षा Hermes Agent में की जा सकती है।</string>
     <string name="ws_selected">चयनित</string>
     <string name="ws_stack_included">शामिल</string>
     <string name="ws_bundles_included_offline">सभी चयनित बंडल इस ऑफ़लाइन ऐप में शामिल हैं</string>

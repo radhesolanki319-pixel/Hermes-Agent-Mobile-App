@@ -2,7 +2,7 @@
 <resources>
     <string name="ws_agy_setup_title">设置 Antigravity</string>
     <string name="ws_agy_connect_google">连接您的 Google 账号</string>
-    <string name="ws_agy_connect_desc">PocketDev 在其私有 Linux 环境中运行 Google 官方的 agy CLI。身份验证由 Google 处理，已保存的会话由 agy 管理。</string>
+    <string name="ws_agy_connect_desc">Hermes Agent 在其私有 Linux 环境中运行 Google 官方的 agy CLI。身份验证由 Google 处理，已保存的会话由 agy 管理。</string>
     <string name="ws_agy_starting_login">正在启动 Antigravity 官方登录…</string>
     <string name="ws_agy_completing_signin">正在完成 Google 登录…</string>
     <string name="ws_agy_signin_opened">已在浏览器中打开 Google 登录。请复制批准后显示的一次性代码。</string>
@@ -11,7 +11,7 @@
     <string name="ws_agy_complete_signin">完成登录</string>
     <string name="ws_agy_connected_as">已连接为 %1$s</string>
     <string name="ws_agy_google_connected">Google 账号已连接</string>
-    <string name="ws_agy_auto_approval_warning">已为 Antigravity 启用工具自动批准。它可以在无需确认的情况下编辑项目文件并运行命令。所有更改仍可在 PocketDev 中审查。</string>
+    <string name="ws_agy_auto_approval_warning">已为 Antigravity 启用工具自动批准。它可以在无需确认的情况下编辑项目文件并运行命令。所有更改仍可在 Hermes Agent 中审查。</string>
     <string name="ws_selected">已选择</string>
     <string name="ws_stack_included">已包含</string>
     <string name="ws_bundles_included_offline">所有选定的软件包均已包含在此离线版应用中</string>

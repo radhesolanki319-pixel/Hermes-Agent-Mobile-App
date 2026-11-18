@@ -10,7 +10,7 @@
     <string name="rt_install_setup_complete">सेटअप पूरा हुआ</string>
     <string name="rt_install_ready">%1$s तैयार है</string>
     <string name="rt_install_version_ready">%1$s %2$s तैयार है</string>
-    <string name="rt_install_github_needs_online">GitHub साइन-इन के लिए PocketDev का ऑनलाइन APK आवश्यक है।</string>
+    <string name="rt_install_github_needs_online">GitHub साइन-इन के लिए Hermes Agent का ऑनलाइन APK आवश्यक है।</string>
     <string name="rt_install_downloading_github_cli">आधिकारिक GitHub CLI डाउनलोड हो रहा है</string>
     <string name="rt_install_downloading_version">%1$s %2$s डाउनलोड हो रहा है</string>
     <string name="rt_install_installing_version">%1$s %2$s इंस्टॉल हो रहा है</string>

@@ -18,7 +18,7 @@ import javax.crypto.spec.SecretKeySpec
 
 class WrongBackupPasswordException : IOException("Wrong backup password")
 class InvalidBackupException(message: String) : IOException(message)
-class NewerBackupException : IOException("This backup was made by a newer version of Mobile Harness")
+class NewerBackupException : IOException("This backup was made by a newer version of Hermes Agent")
 
 data class BackupHeader(val version: Int, val encrypted: Boolean, val salt: ByteArray?, val iterations: Int)
 
@@ -65,9 +65,9 @@ object BackupCrypto {
         try {
             data.readFully(magic)
         } catch (_: EOFException) {
-            throw InvalidBackupException("Not a Mobile Harness backup")
+            throw InvalidBackupException("Not a Hermes Agent backup")
         }
-        if (!magic.contentEquals(MAGIC)) throw InvalidBackupException("Not a Mobile Harness backup")
+        if (!magic.contentEquals(MAGIC)) throw InvalidBackupException("Not a Hermes Agent backup")
         val version = data.readUnsignedByte()
         if (version > FORMAT_VERSION) throw NewerBackupException()
         val flags = data.readUnsignedByte()

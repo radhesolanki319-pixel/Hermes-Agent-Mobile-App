@@ -2,7 +2,7 @@
 <resources>
     <string name="ws_agy_setup_title">Set up Antigravity</string>
     <string name="ws_agy_connect_google">Connect your Google account</string>
-    <string name="ws_agy_connect_desc">PocketDev runs Google\'s official agy CLI inside its private Linux environment. Google handles authentication and agy owns the saved session.</string>
+    <string name="ws_agy_connect_desc">Hermes Agent runs Google\'s official agy CLI inside its private Linux environment. Google handles authentication and agy owns the saved session.</string>
     <string name="ws_agy_starting_login">Starting the official Antigravity login…</string>
     <string name="ws_agy_completing_signin">Completing Google sign-in…</string>
     <string name="ws_agy_signin_opened">Google sign-in opened in your browser. Copy the one-time code shown after approval.</string>
@@ -11,7 +11,7 @@
     <string name="ws_agy_complete_signin">Complete sign-in</string>
     <string name="ws_agy_connected_as">Connected as %1$s</string>
     <string name="ws_agy_google_connected">Google account connected</string>
-    <string name="ws_agy_auto_approval_warning">Automatic tool approval is enabled for Antigravity. It can edit project files and run commands without confirmation. Changes remain reviewable in PocketDev.</string>
+    <string name="ws_agy_auto_approval_warning">Automatic tool approval is enabled for Antigravity. It can edit project files and run commands without confirmation. Changes remain reviewable in Hermes Agent.</string>
     <string name="ws_selected">Selected</string>
     <string name="ws_stack_included">included</string>
     <string name="ws_bundles_included_offline">All selected bundles are included in this offline app</string>

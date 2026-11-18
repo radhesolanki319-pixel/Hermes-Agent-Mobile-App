@@ -9,6 +9,7 @@ import com.jarves.mh.model.ProjectKind
 import com.jarves.mh.model.ProjectType
 import com.jarves.mh.model.AndroidTemplate
 import com.jarves.mh.model.ProjectChat
+import com.jarves.mh.model.assigningAgentToLegacyChats
 import com.jarves.mh.model.ProviderKind
 import com.jarves.mh.model.ProviderProfile
 import com.jarves.mh.model.projectSlug
@@ -523,6 +524,7 @@ class AppPreferences(private val context: Context) {
                 put("title", chat.title)
                 put("createdAtMillis", chat.createdAtMillis)
                 put("updatedAtMillis", chat.updatedAtMillis)
+                put("agent", chat.agentKind.stableId)
             })
         }
         File(projectDir, "index.json").writeText(arr.toString())
@@ -534,15 +536,29 @@ class AppPreferences(private val context: Context) {
         if (index.exists()) {
             return runCatching {
                 val arr = JSONArray(index.readText())
-                (0 until arr.length()).map { i ->
+                val legacyChatIds = mutableSetOf<String>()
+                val parsed = (0 until arr.length()).map { i ->
                     val obj = arr.getJSONObject(i)
+                    val storedAgent = obj.optString("agent")
+                    if (storedAgent.isBlank()) legacyChatIds += obj.getString("id")
                     ProjectChat(
                         id = obj.getString("id"),
                         title = obj.optString("title", "Chat"),
                         createdAtMillis = obj.optLong("createdAtMillis", System.currentTimeMillis()),
                         updatedAtMillis = obj.optLong("updatedAtMillis", System.currentTimeMillis()),
+                        agentKind = AgentKind.fromStored(storedAgent),
                     )
-                }.sortedByDescending { it.updatedAtMillis }
+                }
+                // v21 migration: pre-v21 chats have no stored agent — the whole
+                // list was one shared conversation with the agent active at
+                // upgrade time, so assign those chats to that agent and persist
+                // the assignment once.
+                val migrated = parsed.assigningAgentToLegacyChats(
+                    legacyChatIds,
+                    AgentKind.fromStored(agentKind),
+                )
+                if (legacyChatIds.isNotEmpty()) saveProjectChats(projectId, migrated)
+                migrated.sortedByDescending { it.updatedAtMillis }
             }.getOrDefault(emptyList())
         }
 
@@ -555,6 +571,7 @@ class AppPreferences(private val context: Context) {
             title = legacyMessages.firstOrNull { it.fromUser }?.text?.toChatTitle() ?: "Main chat",
             createdAtMillis = now,
             updatedAtMillis = now,
+            agentKind = AgentKind.fromStored(agentKind),
         )
         saveProjectChats(projectId, listOf(chat))
         if (legacyMessages.isNotEmpty()) saveMessages(projectId, chat.id, legacyMessages)

@@ -77,8 +77,8 @@
     <string name="an_health_storage_title">Ελεύθερος χώρος</string>
     <string name="an_health_storage_detail">%1$d MB διαθέσιμα για builds και εγκατάσταση APK.</string>
     <string name="an_health_install_title">Άδεια εγκατάστασης APK</string>
-    <string name="an_health_install_ok">Το PocketDev μπορεί να ζητήσει εγκατάσταση APK.</string>
-    <string name="an_health_install_missing">Επιτρέψτε στο PocketDev να εγκαθιστά άγνωστες εφαρμογές.</string>
+    <string name="an_health_install_ok">Το Hermes Agent μπορεί να ζητήσει εγκατάσταση APK.</string>
+    <string name="an_health_install_missing">Επιτρέψτε στο Hermes Agent να εγκαθιστά άγνωστες εφαρμογές.</string>
     <string name="an_health_apk_title">Debug APK</string>
     <string name="an_health_apk_missing">Δεν έχει δημιουργηθεί ακόμη debug APK.</string>
     <string name="an_health_apk_stale">Το τελευταίο APK είναι παλαιότερο από τον κώδικα του έργου.</string>

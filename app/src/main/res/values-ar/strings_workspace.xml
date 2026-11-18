@@ -2,7 +2,7 @@
 <resources>
     <string name="ws_agy_setup_title">إعداد Antigravity</string>
     <string name="ws_agy_connect_google">اربط حسابك على Google</string>
-    <string name="ws_agy_connect_desc">يشغّل PocketDev أداة agy CLI الرسمية من Google داخل بيئة Linux الخاصة به. تتولى Google المصادقة وتحتفظ agy بالجلسة المحفوظة.</string>
+    <string name="ws_agy_connect_desc">يشغّل Hermes Agent أداة agy CLI الرسمية من Google داخل بيئة Linux الخاصة به. تتولى Google المصادقة وتحتفظ agy بالجلسة المحفوظة.</string>
     <string name="ws_agy_starting_login">جارٍ بدء تسجيل الدخول الرسمي إلى Antigravity…</string>
     <string name="ws_agy_completing_signin">جارٍ إكمال تسجيل الدخول عبر Google…</string>
     <string name="ws_agy_signin_opened">فُتح تسجيل الدخول عبر Google في متصفحك. انسخ الرمز لمرة واحدة الذي يظهر بعد الموافقة.</string>
@@ -11,7 +11,7 @@
     <string name="ws_agy_complete_signin">إكمال تسجيل الدخول</string>
     <string name="ws_agy_connected_as">متصل باسم %1$s</string>
     <string name="ws_agy_google_connected">تم ربط حساب Google</string>
-    <string name="ws_agy_auto_approval_warning">الموافقة التلقائية على الأدوات مفعّلة لـ Antigravity. يمكنه تعديل ملفات المشروع وتشغيل الأوامر دون تأكيد. تظل التغييرات قابلة للمراجعة في PocketDev.</string>
+    <string name="ws_agy_auto_approval_warning">الموافقة التلقائية على الأدوات مفعّلة لـ Antigravity. يمكنه تعديل ملفات المشروع وتشغيل الأوامر دون تأكيد. تظل التغييرات قابلة للمراجعة في Hermes Agent.</string>
     <string name="ws_selected">محدد</string>
     <string name="ws_stack_included">مُضمَّن</string>
     <string name="ws_bundles_included_offline">جميع الحزم المحددة مضمّنة في هذا التطبيق غير المتصل</string>

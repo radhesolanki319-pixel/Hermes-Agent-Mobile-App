@@ -49,7 +49,9 @@ import androidx.compose.material.icons.filled.PrivacyTip
 import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.SmartToy
+import androidx.compose.foundation.Image
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.ui.draw.clip
 import androidx.compose.material.icons.filled.VisibilityOff
@@ -180,7 +182,8 @@ internal fun formatAntigravityModelTier(id: String): String = when {
 @Composable
 fun AgentScreen(
     state: AppUiState,
-    onSaveProvider: (ProviderProfile, String) -> Unit,
+    onSaveProvider: (AgentKind, ProviderProfile, String) -> Unit,
+    profileForAgent: (AgentKind) -> ProviderProfile,
     onDiscoverModels: suspend (ProviderProfile, String) -> ModelDiscoveryResult,
     onValidateProvider: suspend (ProviderProfile, String, List<DiscoveredModel>) -> ConnectionValidation,
     onPing: () -> Unit,
@@ -210,20 +213,27 @@ fun AgentScreen(
 ) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
-    var selectedKind by rememberSaveable(state.provider.kind) { mutableStateOf(state.provider.kind) }
+    // v21 fix: EVERY section of this screen keys off the VIEWED agent
+    // (the selected tab), never the agent active in chat — each tab
+    // always shows its own agent's complete screen. The form state
+    // below is the viewed agent's persisted profile, and saves carry
+    // the viewed agent explicitly (see MainViewModel.updateProvider).
+    var viewedAgent by rememberSaveable { mutableStateOf(state.agentKind) }
+    val viewedProfile = profileForAgent(viewedAgent)
+    var selectedKind by rememberSaveable(viewedAgent, viewedProfile.kind) { mutableStateOf(viewedProfile.kind) }
     val selectedProviderTitle = stringResource(selectedKind.titleRes())
     val selectedProviderVerifiedMessage = stringResource(
         R.string.agent_connection_verified,
         selectedProviderTitle,
     )
     val verifiedStatusLabel = stringResource(R.string.agent_status_verified)
-    var baseUrl by rememberSaveable(state.provider.baseUrl) { mutableStateOf(state.provider.baseUrl) }
-    var model by rememberSaveable(state.provider.model) { mutableStateOf(state.provider.model) }
-    var openRouterProviderOrder by rememberSaveable(state.provider.openRouterProviderOrder) {
-        mutableStateOf(state.provider.openRouterProviderOrder)
+    var baseUrl by rememberSaveable(viewedAgent, viewedProfile.baseUrl) { mutableStateOf(viewedProfile.baseUrl) }
+    var model by rememberSaveable(viewedAgent, viewedProfile.model) { mutableStateOf(viewedProfile.model) }
+    var openRouterProviderOrder by rememberSaveable(viewedAgent, viewedProfile.openRouterProviderOrder) {
+        mutableStateOf(viewedProfile.openRouterProviderOrder)
     }
-    var openRouterAllowFallbacks by rememberSaveable(state.provider.openRouterAllowFallbacks) {
-        mutableStateOf(state.provider.openRouterAllowFallbacks)
+    var openRouterAllowFallbacks by rememberSaveable(viewedAgent, viewedProfile.openRouterAllowFallbacks) {
+        mutableStateOf(viewedProfile.openRouterAllowFallbacks)
     }
     var apiKey by rememberSaveable(selectedKind) { mutableStateOf(getSavedApiKey(selectedKind)) }
     var savedKeys by remember(selectedKind, state.activeApiKeyName) {
@@ -247,7 +257,6 @@ fun AgentScreen(
     var showAntigravityModelSheet by rememberSaveable { mutableStateOf(false) }
     var antigravitySearch by rememberSaveable { mutableStateOf("") }
     var antigravityCode by rememberSaveable { mutableStateOf("") }
-    var viewedAgent by rememberSaveable { mutableStateOf(state.agentKind) }
 
     val orderedAgents = remember(state.primaryAgentKind) {
         listOf(state.primaryAgentKind) + AgentKind.entries.filterNot { it == state.primaryAgentKind }
@@ -362,7 +371,9 @@ fun AgentScreen(
     }
 
     // ── Live connection status calculations ──
-    val isAntigravity = state.agentKind == AgentKind.ANTIGRAVITY
+    // The hero/pill describe the VIEWED agent (the tab on screen); the
+    // Antigravity auth state behind them is a single global sign-in.
+    val isAntigravity = viewedAgent == AgentKind.ANTIGRAVITY
     val antigravityTesting = isAntigravity && state.apiPingStatus == ApiPingStatus.PINGING
     val antigravityHelloFailed = isAntigravity && state.apiPingStatus == ApiPingStatus.FAILED
     val pillLoading = antigravityTesting || (!isAntigravity && state.apiPingStatus == ApiPingStatus.PINGING)
@@ -890,20 +901,20 @@ fun AgentScreen(
                 modifier = Modifier.padding(top = 4.dp),
                 title = {
                     Row(verticalAlignment = Alignment.CenterVertically) {
+                        // App identity: the Hermes Agent launcher artwork
+                        // (same icon-dark family as the launcher icon),
+                        // not a generic robot glyph.
                         Surface(
                             shape = RoundedCornerShape(10.dp),
-                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
                             border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)),
                             modifier = Modifier.size(34.dp),
                         ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(
-                                    imageVector = Icons.Default.SmartToy,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(18.dp),
-                                )
-                            }
+                            Image(
+                                painter = painterResource(R.drawable.ic_launcher_foreground),
+                                contentDescription = null,
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize(),
+                            )
                         }
                         Spacer(Modifier.width(10.dp))
                         Column {
@@ -912,7 +923,7 @@ fun AgentScreen(
                                 if (isAntigravity) {
                                     "Antigravity · ${formatAntigravityModelName(state.antigravityModel)}"
                                 } else {
-                                    "${state.agentKind.localizedTitle()} · ${model.ifBlank { selectedKind.localizedTitle() }}"
+                                    "${viewedAgent.localizedTitle()} · ${model.ifBlank { selectedKind.localizedTitle() }}"
                                 },
                                 fontSize = 11.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1113,9 +1124,9 @@ fun AgentScreen(
 
             // ── 2. Primary Configuration Card (Antigravity OR Provider) ──
             item {
-                if (!viewedAgentInstalled || viewedAgent != state.agentKind) {
+                if (!viewedAgentInstalled) {
                     // Installation/selection guidance is shown directly below the tabs.
-                } else if (state.agentKind == AgentKind.ANTIGRAVITY) {
+                } else if (viewedAgent == AgentKind.ANTIGRAVITY) {
                     AgentAntigravityCard(
                         state = state,
                         code = antigravityCode,
@@ -1138,6 +1149,8 @@ fun AgentScreen(
                     AgentProviderCard(
                         onTest = onPing,
                         state = state,
+                        agent = viewedAgent,
+                        savedProfileKind = viewedProfile.kind,
                         selectedKind = selectedKind,
                         baseUrl = baseUrl,
                         model = model,
@@ -1239,7 +1252,7 @@ fun AgentScreen(
                                     openRouterAllowFallbacks = openRouterAllowFallbacks,
                                 )
                                 if (kind == ProviderKind.CLAUDE) {
-                                    onSaveProvider(profile, apiKey.trim())
+                                    onSaveProvider(viewedAgent, profile, apiKey.trim())
                                     status = context.getString(R.string.st_claude_token_saved_status)
                                     statusOk = true
                                     activeKeyId?.let {
@@ -1248,7 +1261,7 @@ fun AgentScreen(
                                     }
                                 } else when (val result = onValidateProvider(profile, apiKey.trim(), models)) {
                                     is ConnectionValidation.Success -> {
-                                        onSaveProvider(profile, apiKey.trim())
+                                        onSaveProvider(viewedAgent, profile, apiKey.trim())
                                         if (activeKeyId != null) {
                                             keyConnectionStatuses = keyConnectionStatuses +
                                                 (activeKeyId to KeyConnectionStatus(selectedProviderVerifiedMessage, true, label = verifiedStatusLabel))
@@ -1272,7 +1285,7 @@ fun AgentScreen(
                             }
                         },
                     )
-                    if (state.agentKind == AgentKind.HERMES) {
+                    if (viewedAgent == AgentKind.HERMES) {
                         AgentHermesOptionsCard(
                             state = state,
                             onSave = onSaveHermesOptions,
@@ -1665,6 +1678,8 @@ private fun AgentAntigravityCard(
 private fun AgentProviderCard(
     onTest: () -> Unit = {},
     state: AppUiState,
+    agent: AgentKind,
+    savedProfileKind: ProviderKind,
     selectedKind: ProviderKind,
     baseUrl: String,
     model: String,
@@ -1697,12 +1712,12 @@ private fun AgentProviderCard(
     onDiscover: () -> Unit,
     onValidate: () -> Unit,
 ) {
-    val visibleKinds = remember(state.agentKind) { providersForAgent(state.agentKind) }
+    val visibleKinds = remember(agent) { providersForAgent(agent) }
     var connectionExpanded by rememberSaveable(selectedKind) { mutableStateOf(false) }
     // Keep this state across provider changes so selecting Custom API can
     // immediately reveal its required setup instead of resetting on recomposition.
-    var endpointExpanded by rememberSaveable(state.agentKind) { mutableStateOf(false) }
-    var keysExpanded by rememberSaveable(state.agentKind, selectedKind) { mutableStateOf(false) }
+    var endpointExpanded by rememberSaveable(agent) { mutableStateOf(false) }
+    var keysExpanded by rememberSaveable(agent, selectedKind) { mutableStateOf(false) }
     var addKeyExpanded by rememberSaveable(savedKeys.isEmpty()) { mutableStateOf(savedKeys.isEmpty()) }
     val activeKey = savedKeys.firstOrNull { it.isActive }
     val activeKeyStatus = activeKey?.let { keyConnectionStatuses[it.id] }
@@ -2041,7 +2056,7 @@ private fun AgentProviderCard(
                 )
             }
             // Claude subscriptions can't be pinged over HTTP; this runs a one-word Claude Code prompt.
-            if (selectedKind == ProviderKind.CLAUDE && savedKeys.isNotEmpty() && state.provider.kind == ProviderKind.CLAUDE) {
+            if (selectedKind == ProviderKind.CLAUDE && savedKeys.isNotEmpty() && savedProfileKind == ProviderKind.CLAUDE) {
                 Spacer(Modifier.height(10.dp))
                 OutlinedButton(
                     onClick = onTest,

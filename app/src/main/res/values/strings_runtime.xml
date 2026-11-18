@@ -10,8 +10,8 @@
     <string name="rt_install_setup_complete">Setup complete</string>
     <string name="rt_install_ready">%1$s is ready</string>
     <string name="rt_install_version_ready">%1$s %2$s is ready</string>
-    <string name="rt_install_github_needs_online">GitHub sign-in needs the PocketDev online APK.</string>
-    <string name="rt_install_hermes_needs_online">Hermes Agent setup needs the PocketDev online APK.</string>
+    <string name="rt_install_github_needs_online">GitHub sign-in needs the Hermes Agent online APK.</string>
+    <string name="rt_install_hermes_needs_online">Hermes Agent setup needs the Hermes Agent online APK.</string>
     <string name="rt_install_hermes_failed">Hermes Agent installation failed</string>
     <string name="rt_install_downloading_github_cli">Downloading official GitHub CLI</string>
     <string name="rt_install_downloading_version">Downloading %1$s %2$s</string>

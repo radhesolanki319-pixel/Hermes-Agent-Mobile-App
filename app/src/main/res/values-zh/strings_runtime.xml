@@ -10,7 +10,7 @@
     <string name="rt_install_setup_complete">设置完成</string>
     <string name="rt_install_ready">%1$s 已就绪</string>
     <string name="rt_install_version_ready">%1$s %2$s 已就绪</string>
-    <string name="rt_install_github_needs_online">GitHub 登录需要 PocketDev 在线版 APK。</string>
+    <string name="rt_install_github_needs_online">GitHub 登录需要 Hermes Agent 在线版 APK。</string>
     <string name="rt_install_downloading_github_cli">正在下载官方 GitHub CLI</string>
     <string name="rt_install_downloading_version">正在下载 %1$s %2$s</string>
     <string name="rt_install_installing_version">正在安装 %1$s %2$s</string>

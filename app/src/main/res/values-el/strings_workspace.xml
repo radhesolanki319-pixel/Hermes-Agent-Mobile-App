@@ -2,7 +2,7 @@
 <resources>
     <string name="ws_agy_setup_title">Ρύθμιση του Antigravity</string>
     <string name="ws_agy_connect_google">Συνδέστε τον λογαριασμό σας Google</string>
-    <string name="ws_agy_connect_desc">Το PocketDev εκτελεί το επίσημο agy CLI της Google μέσα στο ιδιωτικό του περιβάλλον Linux. Η Google χειρίζεται τον έλεγχο ταυτότητας και το agy διατηρεί την αποθηκευμένη συνεδρία.</string>
+    <string name="ws_agy_connect_desc">Το Hermes Agent εκτελεί το επίσημο agy CLI της Google μέσα στο ιδιωτικό του περιβάλλον Linux. Η Google χειρίζεται τον έλεγχο ταυτότητας και το agy διατηρεί την αποθηκευμένη συνεδρία.</string>
     <string name="ws_agy_starting_login">Έναρξη της επίσημης σύνδεσης Antigravity…</string>
     <string name="ws_agy_completing_signin">Ολοκλήρωση σύνδεσης Google…</string>
     <string name="ws_agy_signin_opened">Η σύνδεση Google άνοιξε στο πρόγραμμα περιήγησης. Αντιγράψτε τον κωδικό μίας χρήσης που εμφανίζεται μετά την έγκριση.</string>
@@ -11,7 +11,7 @@
     <string name="ws_agy_complete_signin">Ολοκλήρωση σύνδεσης</string>
     <string name="ws_agy_connected_as">Συνδεθήκατε ως %1$s</string>
     <string name="ws_agy_google_connected">Ο λογαριασμός Google συνδέθηκε</string>
-    <string name="ws_agy_auto_approval_warning">Η αυτόματη έγκριση εργαλείων είναι ενεργή για το Antigravity. Μπορεί να επεξεργάζεται αρχεία του έργου και να εκτελεί εντολές χωρίς επιβεβαίωση. Οι αλλαγές παραμένουν διαθέσιμες για έλεγχο στο PocketDev.</string>
+    <string name="ws_agy_auto_approval_warning">Η αυτόματη έγκριση εργαλείων είναι ενεργή για το Antigravity. Μπορεί να επεξεργάζεται αρχεία του έργου και να εκτελεί εντολές χωρίς επιβεβαίωση. Οι αλλαγές παραμένουν διαθέσιμες για έλεγχο στο Hermes Agent.</string>
     <string name="ws_selected">Επιλεγμένο</string>
     <string name="ws_stack_included">περιλαμβάνεται</string>
     <string name="ws_bundles_included_offline">Όλα τα επιλεγμένα πακέτα περιλαμβάνονται σε αυτή την εφαρμογή εκτός σύνδεσης</string>

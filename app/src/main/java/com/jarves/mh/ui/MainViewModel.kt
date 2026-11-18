@@ -62,7 +62,9 @@ import com.jarves.mh.network.ModelDiscoveryResult
 import com.jarves.mh.network.ProviderApiClient
 import com.jarves.mh.network.GitHubRepository
 import com.jarves.mh.runtime.ClaudeRuntimeBridge
+import com.jarves.mh.runtime.AgentEnvironmentBrief
 import com.jarves.mh.runtime.AgentRegistry
+import com.jarves.mh.runtime.AgentTranscripts
 import com.jarves.mh.runtime.AgentUpdateInfo
 import com.jarves.mh.runtime.AntigravityAuthController
 import com.jarves.mh.runtime.AntigravityAuthState
@@ -654,6 +656,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 latestByChat.values.forEach { latest ->
                     preferences.saveMessages(latest.projectId, latest.chatId, latest.messages)
                 }
+                // v21: turn boundaries also refresh the guest-side agent
+                // transcripts, so sister agents reading the files see the
+                // latest state of each other's chats.
+                latestByChat.values.map { it.projectId }.distinct().forEach(::regenerateAgentTranscripts)
             }
         }
         viewModelScope.launch { antigravityRuntime.events.collect(::onRuntimeEvent) }
@@ -2715,6 +2721,30 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun updateProvider(profile: ProviderProfile, secret: String) = finishOnboarding(profile, secret)
 
+    /** The persisted provider profile for any agent — the Agent screen's tabs edit per-agent profiles. */
+    fun providerProfileFor(kind: AgentKind): ProviderProfile = preferences.loadProvider(vault, kind)
+
+    /**
+     * Saves a provider profile for a specific agent (Agent screen tab).
+     * Saving the ACTIVE agent keeps the full onboarding/state-refresh
+     * behaviour of [finishOnboarding]; saving another agent's tab only
+     * persists that agent's profile (keys live in the shared per-provider
+     * pool either way), so configuring one agent never disturbs the
+     * agent currently active in chat.
+     */
+    fun updateProvider(agent: AgentKind, profile: ProviderProfile, secret: String) {
+        if (agent == _state.value.agentKind) {
+            finishOnboarding(profile, secret)
+            return
+        }
+        val pool = ProviderKeys.canonicalForKind(profile.kind)
+        vault.put(pool, secret)
+        preferences.saveProvider(
+            profile.copy(hasSecret = secret.isNotBlank() || vault.contains(pool)),
+            agent,
+        )
+    }
+
     fun finishBackgroundSetup() {
         preferences.backgroundSetupComplete = true
         _state.update { it.copy(backgroundSetupComplete = true) }
@@ -2730,10 +2760,31 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val selectingInitialAgent = !preferences.runtimeSetupComplete
         preferences.agentKind = kind.stableId
         if (selectingInitialAgent) preferences.primaryAgentKind = kind.stableId
+        // v21: chats are per agent — switching agent inside an open project
+        // switches to that agent's own chat in the project (its history
+        // loads; the previous agent's chat is persisted first, untouched).
+        // The swap is resolved here, outside the state update, so the file
+        // writes happen exactly once.
+        val project = _state.value.activeProject
+        val chatSwap = if (project == null) null else {
+            persistMessages()
+            var chats = preferences.loadProjectChats(project.id)
+            val chat = chats.firstOrNull { it.agentKind == kind } ?: run {
+                val created = ProjectChat(title = str(R.string.vm_main_chat), agentKind = kind)
+                chats = listOf(created) + chats
+                preferences.saveProjectChats(project.id, chats)
+                created
+            }
+            val saved = preferences.loadMessages(project.id, chat.id)
+            val msgs = saved.ifEmpty {
+                listOf(ChatMessage(fromUser = false, text = "Hi! Tell me what you want to build or change."))
+            }
+            Triple(chats, chat.id, msgs)
+        }
         _state.update { current ->
             preferences.saveProvider(current.provider, current.agentKind)
             val provider = preferences.loadProvider(vault, kind)
-            current.copy(
+            val base = current.copy(
                 agentKind = kind,
                 primaryAgentKind = if (selectingInitialAgent) kind else current.primaryAgentKind,
                 provider = provider,
@@ -2742,6 +2793,27 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 apiPingStatus = ApiPingStatus.IDLE,
                 apiPingMessage = null,
             )
+            if (chatSwap == null) base else base.copy(
+                projectChats = chatSwap.first,
+                activeChatId = chatSwap.second,
+                messages = chatSwap.third,
+                genUiStates = genUiStatesFrom(chatSwap.third),
+                liveProcess = emptyList(),
+                liveThinking = false,
+                taskStartedAtMillis = null,
+                taskFinishedAtMillis = null,
+                pendingApproval = null,
+                pendingAttachments = emptyList(),
+            )
+        }
+        // The Changes view is served by the newly selected agent's bridge.
+        if (project != null) {
+            viewModelScope.launch {
+                val pending = activeRuntime().loadPendingChanges(project.id)
+                if (_state.value.activeProject?.id == project.id && _state.value.agentKind == kind) {
+                    _state.update { it.copy(changes = pending) }
+                }
+            }
         }
     }
 
@@ -3292,9 +3364,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
         if (current.isRunning || current.projectTerminalRunning || current.androidBuildRunning) {
-            val chats = preferences.loadProjectChats(project.id).ifEmpty {
-                listOf(ProjectChat(title = str(R.string.vm_main_chat)))
-            }
+            // Read-only view shows the current agent's own chats (v21).
+            val chats = preferences.loadProjectChats(project.id)
+                .filter { it.agentKind == current.agentKind }
+                .ifEmpty {
+                    listOf(ProjectChat(title = str(R.string.vm_main_chat), agentKind = current.agentKind))
+                }
             val chat = chats.first()
             _state.update {
                 it.copy(
@@ -3309,10 +3384,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         configureBridgeRoots(project.id, project.rootPath)
         val terminal = loadProjectTerminal(project)
         val suggestedRoot = if (project.rootPath.isBlank()) detectNestedProjectRoot(project) else null
-        val chats = preferences.loadProjectChats(project.id).ifEmpty {
-            listOf(ProjectChat(title = str(R.string.vm_main_chat))).also { preferences.saveProjectChats(project.id, it) }
+        var chats = preferences.loadProjectChats(project.id)
+        if (chats.isEmpty()) {
+            chats = listOf(ProjectChat(title = str(R.string.vm_main_chat), agentKind = current.agentKind))
+            preferences.saveProjectChats(project.id, chats)
         }
-        val activeChat = chats.first()
+        // v21: chats are per agent — the workspace opens on the current
+        // agent's own most recent chat. If this agent has no chat in the
+        // project yet, start one; the other agents' chats stay untouched.
+        val activeChat = chats.firstOrNull { it.agentKind == current.agentKind } ?: run {
+            val created = ProjectChat(title = str(R.string.vm_main_chat), agentKind = current.agentKind)
+            chats = listOf(created) + chats
+            preferences.saveProjectChats(project.id, chats)
+            created
+        }
         val saved = preferences.loadMessages(project.id, activeChat.id)
         val msgs = saved.ifEmpty { listOf(ChatMessage(fromUser = false, text = "Hi! Tell me what you want to build or change.")) }
         val androidBuild = loadAndroidBuildRecord(project.id)
@@ -3366,6 +3451,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val pending = activeRuntime().loadPendingChanges(project.id)
             if (_state.value.activeProject?.id == project.id) _state.update { it.copy(changes = pending) }
         }
+        // v21: make sure the guest-side agent transcripts exist for this
+        // project from the start, not only after the first turn boundary.
+        viewModelScope.launch(Dispatchers.IO) { regenerateAgentTranscripts(project.id) }
     }
 
     fun closeProject() {
@@ -3514,7 +3602,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         preferences.saveProjects(_state.value.projects)
         File(getApplication<Application>().filesDir, "workspaces/${project.id}").mkdirs()
-        val firstChat = ProjectChat(title = str(R.string.vm_new_chat))
+        val firstChat = ProjectChat(title = str(R.string.vm_new_chat), agentKind = _state.value.agentKind)
         preferences.saveProjectChats(project.id, listOf(firstChat))
         _state.update { it.copy(projectChats = listOf(firstChat), activeChatId = firstChat.id) }
         refreshProjectFiles()
@@ -3546,7 +3634,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 _state.update { it.copy(toastMessage = str(R.string.an_could_not_create_android_project)) }
                 return
             }
-        val firstChat = ProjectChat(title = str(R.string.vm_new_chat))
+        val firstChat = ProjectChat(title = str(R.string.vm_new_chat), agentKind = _state.value.agentKind)
         preferences.saveProjectChats(project.id, listOf(firstChat))
         _state.update { it.copy(projects = listOf(project) + it.projects) }
         preferences.saveProjects(_state.value.projects)
@@ -3569,7 +3657,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             slug = identity.slug,
             kind = ProjectKind.QUICK_PROJECT,
         )
-        val firstChat = ProjectChat(title = str(R.string.vm_new_chat))
+        val firstChat = ProjectChat(title = str(R.string.vm_new_chat), agentKind = _state.value.agentKind)
         File(getApplication<Application>().filesDir, "workspaces/${project.id}").mkdirs()
         preferences.saveProjectChats(project.id, listOf(firstChat))
         _state.update { it.copy(projects = listOf(project) + it.projects) }
@@ -3584,7 +3672,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val result = withContext(Dispatchers.IO) { runCatching { extractImportedProject(uri) } }
             result.onSuccess { imported ->
                 val project = imported.project
-                val firstChat = ProjectChat(title = str(R.string.vm_new_chat))
+                val firstChat = ProjectChat(title = str(R.string.vm_new_chat), agentKind = _state.value.agentKind)
                 preferences.saveProjectChats(project.id, listOf(firstChat))
                 _state.update { current ->
                     current.copy(
@@ -3806,7 +3894,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
             result.onSuccess { project ->
-                val chat = ProjectChat(title = str(R.string.vm_new_chat))
+                val chat = ProjectChat(title = str(R.string.vm_new_chat), agentKind = _state.value.agentKind)
                 preferences.saveProjectChats(project.id, listOf(chat))
                 _state.update { current -> current.copy(projects = listOf(project) + current.projects) }
                 preferences.saveProjects(_state.value.projects)
@@ -4272,7 +4360,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val project = _state.value.activeProject ?: return
         if (_state.value.isRunning) return
         persistMessages()
-        val chat = ProjectChat(title = str(R.string.vm_new_chat))
+        val chat = ProjectChat(title = str(R.string.vm_new_chat), agentKind = _state.value.agentKind)
         val chats = listOf(chat) + _state.value.projectChats
         preferences.saveProjectChats(project.id, chats)
         _state.update {
@@ -4296,6 +4384,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val project = current.activeProject ?: return
         if (current.isRunning || current.activeChatId == chatId) return
         val chat = current.projectChats.firstOrNull { it.id == chatId } ?: return
+        // v21: a chat can only be opened by the agent that owns it.
+        if (chat.agentKind != current.agentKind) return
         persistMessages()
         val saved = preferences.loadMessages(project.id, chat.id)
         val restored = saved.ifEmpty { listOf(ChatMessage(fromUser = false, text = "Hi! Tell me what you want to build or change.")) }
@@ -5094,6 +5184,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val history = state.value.messages // includes all messages up to now
         // HP4: the generative-ui capability block is appended here, once, so every agent
         // bridge receives the same contract through its own buildContextPrompt wrap.
+        // v21: the app-environment brief rides along with it (same injection
+        // point, exactly once per turn for every agent): who the agent is,
+        // what app/environment it runs in, that the whole guest filesystem
+        // is reachable, and where the sister agents' chat transcripts and
+        // the shared team-notes file live.
         val runtimePrompt = (if (attachments.isEmpty()) requestText else buildString {
             appendLine(requestText)
             appendLine()
@@ -5103,7 +5198,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
             appendLine("These files were explicitly attached by the user. Inspect them only as needed for the request.")
             appendLine("</attached_files>")
-        }) + "\n\n" + GenUiProtocol.CAPABILITY_PROMPT_BLOCK
+        }) + "\n\n" + AgentEnvironmentBrief.build(state.value.agentKind, project.name, project.slug) +
+            "\n\n" + GenUiProtocol.CAPABILITY_PROMPT_BLOCK
         failedApiKeyIds.clear()
         activeRuntimeRequest = RuntimeRetryRequest(
             runtime = activeRuntime(),
@@ -5765,6 +5861,43 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             current.copy(projects = updatedProjects, activeProject = active)
         }
         preferences.saveProjects(_state.value.projects)
+    }
+
+    /**
+     * v21: rewrites the guest-side cross-agent transcripts for [projectId]
+     * (filesDir/workspaces/.agent-chats/<slug>/<agent>.md — bind-mounted into
+     * the guest at /workspace/.agent-chats) from the stored chats, and creates
+     * team-notes.md if it does not exist yet (agents append to it themselves;
+     * it is never overwritten). Best-effort: a failure here must never break
+     * message persistence, so everything is swallowed into runCatching.
+     */
+    private fun regenerateAgentTranscripts(projectId: String) {
+        runCatching {
+            val project = preferences.loadProjects().firstOrNull { it.id == projectId } ?: return
+            val chats = preferences.loadProjectChats(projectId)
+            val dir = File(
+                getApplication<Application>().filesDir,
+                "workspaces/.agent-chats/${project.slug}",
+            ).apply { mkdirs() }
+            AgentKind.entries.forEach { agent ->
+                val sections = chats.filter { it.agentKind == agent }.map { chat ->
+                    AgentTranscripts.Section(
+                        title = chat.title,
+                        entries = preferences.loadMessages(projectId, chat.id).map { message ->
+                            AgentTranscripts.Entry(
+                                fromUser = message.fromUser,
+                                text = message.text,
+                                workTitles = message.workItems.map { it.title }.filter(String::isNotBlank),
+                            )
+                        },
+                    )
+                }
+                File(dir, "${agent.stableId}.md")
+                    .writeText(AgentTranscripts.renderTranscript(project.name, agent, sections))
+            }
+            val notes = File(dir, AgentTranscripts.TEAM_NOTES_FILE)
+            if (!notes.exists()) notes.writeText(AgentTranscripts.teamNotesTemplate(project.name))
+        }
     }
 
     private fun persistMessages(includeLiveProcess: Boolean = true) {

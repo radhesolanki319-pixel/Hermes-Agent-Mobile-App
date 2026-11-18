@@ -10,7 +10,7 @@
     <string name="rt_install_setup_complete">اكتمل الإعداد</string>
     <string name="rt_install_ready">%1$s جاهز</string>
     <string name="rt_install_version_ready">%1$s %2$s جاهز</string>
-    <string name="rt_install_github_needs_online">يتطلب تسجيل الدخول إلى GitHub إصدار PocketDev عبر الإنترنت (APK).</string>
+    <string name="rt_install_github_needs_online">يتطلب تسجيل الدخول إلى GitHub إصدار Hermes Agent عبر الإنترنت (APK).</string>
     <string name="rt_install_downloading_github_cli">جارٍ تنزيل GitHub CLI الرسمي</string>
     <string name="rt_install_downloading_version">جارٍ تنزيل %1$s %2$s</string>
     <string name="rt_install_installing_version">جارٍ تثبيت %1$s %2$s</string>

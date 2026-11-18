@@ -2561,9 +2561,10 @@ private fun RootScreenHost(
                 }
                 RootScreen.AGENT -> AgentScreen(
                     state = state,
-                    onSaveProvider = { profile, key ->
-                        viewModel.updateProvider(profile, key)
+                    onSaveProvider = { agent, profile, key ->
+                        viewModel.updateProvider(agent, profile, key)
                     },
+                    profileForAgent = viewModel::providerProfileFor,
                     onDiscoverModels = viewModel::discoverModels,
                     onValidateProvider = viewModel::validateProvider,
                     onPing = viewModel::pingApi,
@@ -4569,7 +4570,9 @@ private fun WorkspaceScreen(
     }
     if (showChats) {
         ChatSwitcherDialog(
-            chats = state.projectChats,
+            // v21: the chat list shows the active agent's own chats only —
+            // each agent has its own chats inside the project.
+            chats = state.projectChats.filter { it.agentKind == state.agentKind },
             activeChatId = state.activeChatId,
             switchingEnabled = !state.isRunning,
             onDismiss = { showChats = false },
@@ -6651,24 +6654,40 @@ private fun LiveClaudeProcess(
 }
 
 /**
- * Transcript hygiene (v17, rendering only — stored session events are
- * never touched): reasoning narration ("Think" rows) and turn-outcome
- * status items are not chat content and never render as loose rows.
- * Tool-action rows (Running <tool>, <tool> completed, files changed, …)
- * are the agent's work and stay. A turn's failure is not dropped with
- * its status row — [WorkBlockCard] renders it as the turn's
- * assistant-side bubble instead.
+ * Transcript hygiene (rendering only — stored session events are never
+ * touched; Changes/undo tracking and the cross-agent transcript files
+ * keep the full record):
+ *
+ * v17 dropped reasoning narration ("Think" rows) and turn-outcome
+ * status items. v21 (user directive: no Bash/code text in chat at all)
+ * drops EVERY activity row from the chat rendering, for every agent,
+ * stored and live alike:
+ *  - "Think" narration rows,
+ *  - raw tool/command rows — "Bash · <command>", terminal rows,
+ *    "Running <tool>", "<tool> completed", file-change rows, any row
+ *    whose text is a raw command, path or tool call,
+ *  - turn-outcome status rows ("Task stopped …", "Task interrupted").
+ *
+ * The chat therefore shows only user messages, assistant messages
+ * (including GenUI), failure bubbles, and — while a turn runs — the
+ * live thinking indicator (sparkle + dots, see
+ * [ClaudeActivityDisclosure]'s empty-state). A turn's failure is not
+ * lost with its status row: [WorkBlockCard] reads the failure item
+ * straight from the stored work items and renders it as the turn's
+ * assistant-side [TurnFailureBubble].
  */
 private fun isFailureActivityItem(item: ActivityItem, interruptedTitle: String): Boolean =
     item.title.startsWith("Task stopped") || item.title == "Task interrupted" || item.title == interruptedTitle
 
 private fun chatVisibleActivityItems(items: List<ActivityItem>, interruptedTitle: String): List<ActivityItem> =
-    items.filterNot { it.title == "Think" || isFailureActivityItem(it, interruptedTitle) }
+    emptyList()
 
 @Composable
 private fun WorkBlockCard(message: ChatMessage) {
     val interruptedTitle = stringResource(R.string.vm_task_interrupted)
     val failure = message.workItems.lastOrNull { isFailureActivityItem(it, interruptedTitle) }
+    // v21: always empty — a stored work block renders ONLY its failure
+    // bubble (below); its tool/command rows never reach the chat.
     val actionItems = chatVisibleActivityItems(message.workItems, interruptedTitle)
     Column {
         if (actionItems.isNotEmpty()) {
@@ -6725,16 +6744,15 @@ private fun ClaudeActivityDisclosure(
     isRunning: Boolean = false,
 ) {
     var expandedItems by rememberSaveable { mutableStateOf(emptyList<Int>()) }
-    // Narration and turn-outcome items never render (see
-    // chatVisibleActivityItems). Older saved chats may also contain
-    // hundreds of polling steps; rendering all of them inside one
-    // lazy-list item can monopolize the UI thread, so show the latest
-    // useful window.
+    // No activity rows render in chat at all (v21 — see
+    // chatVisibleActivityItems), so this list is always empty and only
+    // the empty-state below ever renders: while a turn runs, the
+    // sparkle + pulsing dots; a finished segment renders nothing.
     val visibleItems = chatVisibleActivityItems(items, stringResource(R.string.vm_task_interrupted)).takeLast(32)
     if (visibleItems.isEmpty()) {
-        // Nothing but narration so far. While the turn runs, the only
-        // affordance is the pulsing dots — no headline text (v17). A
-        // finished segment with no action rows renders nothing at all.
+        // While the turn runs, the only affordance is the sparkle and
+        // pulsing dots — no headline text, no tool rows (v17/v21). A
+        // finished segment renders nothing at all.
         if (isRunning) {
             Row(
                 Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 10.dp),

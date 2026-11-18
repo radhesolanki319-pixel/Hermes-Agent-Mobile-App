@@ -5,6 +5,7 @@ import android.net.ConnectivityManager
 import android.system.Os
 import com.jarves.mh.BuildConfig
 import com.jarves.mh.R
+import com.jarves.mh.data.AppPreferences
 import com.jarves.mh.ui.AppStrings
 import com.jarves.mh.ui.localizedLabel
 import com.jarves.mh.ui.localizedTitle
@@ -1711,6 +1712,12 @@ class RuntimeInstaller(private val context: Context) {
             add("${workspace.absolutePath}:$guestWorkspacePath")
             add("-b")
             add("${bridge.absolutePath}:/pocket-bridge")
+            // v21: the whole app is the agent's environment — mount every
+            // other project's workspace at its own /workspace/<slug> too
+            // (otherwise siblings show up as empty mount-point dirs), plus
+            // the cross-agent transcripts directory. Both best-effort.
+            addAll(siblingProjectBindArgs(workspace, guestWorkspacePath, rootfs))
+            addAll(agentChatsBindArgs(rootfs))
             add("-w")
             add(guestWorkspacePath)
             addAll(guestCommand)
@@ -1760,6 +1767,53 @@ class RuntimeInstaller(private val context: Context) {
             ptyColumns = ptyColumns,
         )
     }
+
+    /**
+     * Bind args mounting every other project's workspace at its own
+     * /workspace/<slug> guest path, so an agent working in one project can
+     * reach the files of all the others (v21 full-environment access). The
+     * host directory is resolved exactly like WorkspaceCheckpoints /
+     * the bridges resolve it (workspaces/<id>, with the project's rootPath
+     * confined inside it). Best-effort: any failure yields no extra binds
+     * and never breaks a launch.
+     */
+    private fun siblingProjectBindArgs(
+        currentWorkspace: File,
+        currentGuestPath: String,
+        rootfs: File,
+    ): List<String> = runCatching {
+        val slugPath = Regex("^/workspace/[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$")
+        val workspacesDir = File(context.filesDir, "workspaces")
+        val currentCanonical = currentWorkspace.canonicalFile
+        AppPreferences(context).loadProjects().flatMap { project ->
+            val guestPath = "/workspace/${project.slug}"
+            if (guestPath == currentGuestPath || !slugPath.matches(guestPath)) {
+                return@flatMap emptyList()
+            }
+            val base = File(workspacesDir, project.id).canonicalFile
+            val host = if (project.rootPath.isBlank()) base
+                else File(base, project.rootPath).canonicalFile
+            if (!host.toPath().startsWith(base.toPath()) || host == currentCanonical) {
+                return@flatMap emptyList()
+            }
+            host.mkdirs()
+            File(rootfs, guestPath.removePrefix("/")).mkdirs()
+            listOf("-b", "${host.absolutePath}:$guestPath")
+        }
+    }.getOrDefault(emptyList())
+
+    /**
+     * Bind args mounting the cross-agent transcripts directory
+     * (filesDir/workspaces/.agent-chats) at /workspace/.agent-chats, so
+     * every agent session can read sister agents' chat transcripts and
+     * append to the shared team-notes.md. Best-effort, like the sibling
+     * project binds.
+     */
+    private fun agentChatsBindArgs(rootfs: File): List<String> = runCatching {
+        val host = File(context.filesDir, "workspaces/.agent-chats").apply { mkdirs() }
+        File(rootfs, "workspace/.agent-chats").mkdirs()
+        listOf("-b", "${host.absolutePath}:${AgentTranscripts.GUEST_ROOT}")
+    }.getOrDefault(emptyList())
 
     fun ensureSettingsAndHooks() {
         val hook = File(rootfs, "opt/pocket/permission-hook.sh")

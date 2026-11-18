@@ -10,7 +10,7 @@
     <string name="rt_install_setup_complete">Η εγκατάσταση ολοκληρώθηκε</string>
     <string name="rt_install_ready">Το %1$s είναι έτοιμο</string>
     <string name="rt_install_version_ready">Το %1$s %2$s είναι έτοιμο</string>
-    <string name="rt_install_github_needs_online">Η σύνδεση στο GitHub απαιτεί το online APK του PocketDev.</string>
+    <string name="rt_install_github_needs_online">Η σύνδεση στο GitHub απαιτεί το online APK του Hermes Agent.</string>
     <string name="rt_install_downloading_github_cli">Λήψη του επίσημου GitHub CLI</string>
     <string name="rt_install_downloading_version">Λήψη %1$s %2$s</string>
     <string name="rt_install_installing_version">Εγκατάσταση %1$s %2$s</string>
