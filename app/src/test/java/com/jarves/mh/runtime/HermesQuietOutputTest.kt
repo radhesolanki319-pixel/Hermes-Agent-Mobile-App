@@ -185,6 +185,83 @@ class HermesQuietOutputTest {
         )
     }
 
+    // -- Reasoning leak (v22) -------------------------------------------------
+    // The user's real capture shape: a plain "hi" answered with the model's
+    // reasoning framed in Hermes CLI's reasoning box (paragraphs repeated,
+    // as streamed + post-turn display both render it) before the answer.
+    // Only the answer may reach the stored message.
+
+    @Test
+    fun framedReasoningBoxIsDroppedAnswerKept() {
+        val outcome = outcomeOf(
+            tirith,
+            "┌─ Reasoning ─────────────────────────────┐",
+            "The user just said hi. This is a simple greeting.",
+            "I should respond warmly and briefly.",
+            "",
+            "The user just said hi. This is a simple greeting.",
+            "I should respond warmly and briefly.",
+            "└─────────────────────────────────────────┘",
+            "Hi there! How can I help you today?",
+            "",
+            "session_id: 20261118_213100_ab12cd",
+        )
+        assertEquals("Hi there! How can I help you today?", outcome.responseText)
+        assertEquals("20261118_213100_ab12cd", outcome.sessionId)
+    }
+
+    @Test
+    fun ansiWrappedReasoningBoxIsDropped() {
+        val dim = "\u001B[2m"
+        val rst = "\u001B[0m"
+        val outcome = outcomeOf(
+            "$dim┌─ Reasoning ───┐$rst",
+            dim + "Thinking out loud." + rst,
+            "$dim└───┘$rst",
+            "The answer.",
+            "",
+            "session_id: 20261118_213200_ab12cd",
+        )
+        assertEquals("The answer.", outcome.responseText)
+    }
+
+    @Test
+    fun thinkTagBlockIsDroppedAcrossLines() {
+        val outcome = outcomeOf(
+            "<think>",
+            "Let me think about this greeting.",
+            "</think>",
+            "Hello! Nice to meet you.",
+            "",
+            "session_id: 20261118_213300_ab12cd",
+        )
+        assertEquals("Hello! Nice to meet you.", outcome.responseText)
+    }
+
+    @Test
+    fun inlineThinkSegmentIsRemovedButAnswerTextKept() {
+        val outcome = outcomeOf(
+            "<think>hmm</think>The answer stands.",
+            "",
+            "session_id: 20261118_213400_ab12cd",
+        )
+        assertEquals("The answer stands.", outcome.responseText)
+    }
+
+    @Test
+    fun reasoningBoxBetweenAnswerPartsKeepsBothParts() {
+        val outcome = outcomeOf(
+            "First part.",
+            "┌─ Reasoning ───┐",
+            "middle thoughts",
+            "└───┘",
+            "Second part.",
+            "",
+            "session_id: 20261118_213500_ab12cd",
+        )
+        assertEquals("First part.\nSecond part.", outcome.responseText)
+    }
+
     @Test
     fun utf8HelpersRespectByteBudgets() {
         assertEquals(6, utf8ByteCount("héllo"))

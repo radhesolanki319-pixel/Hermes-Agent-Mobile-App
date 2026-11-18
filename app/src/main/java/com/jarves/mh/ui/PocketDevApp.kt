@@ -2545,11 +2545,8 @@ private fun RootScreenHost(
                         onCleanAndroid = viewModel::cleanAndroidProject,
                         onInstallAndroidTools = { viewModel.installDevStack(DevStack.ANDROID) },
                         onOpenProject = viewModel::openProject,
-                        onCreateProject = viewModel::createProject,
-                        onCreateAndroidProject = viewModel::createAndroidProject,
                         onCreateQuickProject = viewModel::createQuickProject,
-                        onRenameProject = viewModel::renameProject,
-                        onDeleteProject = viewModel::deleteProject,
+                        onDeleteActiveProject = viewModel::deleteActiveProject,
                         onSelectAgent = viewModel::selectAgent,
                     )
                 } else {
@@ -2586,9 +2583,6 @@ private fun RootScreenHost(
                     getSavedHermesHostKey = viewModel::getSavedHermesHostKey,
                     onSaveHermesHost = viewModel::saveHermesHost,
                     onTestHermesHost = viewModel::testHermesHost,
-                    onSaveHermesOptions = viewModel::saveHermesOptions,
-                    onReadHermesFile = viewModel::readHermesFile,
-                    onWriteHermesFile = viewModel::writeHermesFile,
                 )
                 RootScreen.SETTINGS -> SettingsScreen(
                     state = state,
@@ -2639,12 +2633,6 @@ private fun RootScreenHost(
                             viewModel.checkForAppUpdateFromSettings()
                         }
                     },
-                    getSavedProviderKey = viewModel::getSavedProviderKey,
-                    getSavedHermesHostKey = viewModel::getSavedHermesHostKey,
-                    onSaveHermesHostKey = viewModel::updateHermesHostKey,
-                    getAgentProfile = viewModel::providerProfileFor,
-                    onSaveProviderKey = viewModel::updateProviderApiKey,
-                    onOpenAgentSettings = { screenName = RootScreen.AGENT.name },
                     onImportZip = viewModel::importZipProject,
                     onCloneGit = viewModel::clonePublicGitRepository,
                     onStartGitHubLogin = viewModel::startGitHubLogin,
@@ -3758,211 +3746,6 @@ private fun GitHubImportDialog(
 }
 
 @Composable
-private fun CreateProjectDialog(
-    onDismiss: () -> Unit,
-    onCreate: (String) -> Unit,
-    onCreateAndroid: (String, AndroidTemplate) -> Unit,
-) {
-    var name by rememberSaveable { mutableStateOf("") }
-    var androidTemplate by rememberSaveable { mutableStateOf<AndroidTemplate?>(null) }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.an_create_project)) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(name, { name = it }, label = { Text(stringResource(R.string.ws_project_name)) }, singleLine = true)
-                Text(stringResource(R.string.project_type), fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    AssistChip(
-                        onClick = { androidTemplate = null },
-                        label = { Text(stringResource(R.string.project_type_general)) },
-                        leadingIcon = { if (androidTemplate == null) Icon(Icons.Default.Check, null, Modifier.size(16.dp)) },
-                    )
-                    AssistChip(
-                        onClick = { androidTemplate = AndroidTemplate.COMPOSE },
-                        label = { Text(stringResource(R.string.project_type_compose)) },
-                        leadingIcon = { if (androidTemplate == AndroidTemplate.COMPOSE) Icon(Icons.Default.Check, null, Modifier.size(16.dp)) },
-                    )
-                    AssistChip(
-                        onClick = { androidTemplate = AndroidTemplate.XML },
-                        label = { Text(stringResource(R.string.project_type_xml)) },
-                        leadingIcon = { if (androidTemplate == AndroidTemplate.XML) Icon(Icons.Default.Check, null, Modifier.size(16.dp)) },
-                    )
-                }
-                Text(
-                    stringResource(
-                        when (androidTemplate) {
-                            AndroidTemplate.COMPOSE -> R.string.project_type_compose_desc
-                            AndroidTemplate.XML -> R.string.project_type_xml_desc
-                            null -> R.string.project_type_general_desc
-                        },
-                    ),
-                    fontSize = 11.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                if (androidTemplate != null) {
-                    Text(
-                        stringResource(R.string.an_template_info, 28, 36),
-                        fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                if (name.isNotBlank()) {
-                    Text(
-                        stringResource(R.string.ws_terminal_folder, "/workspace/${projectSlug(name)}"),
-                        fontFamily = FontFamily.Monospace,
-                        fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(
-                onClick = {
-                    androidTemplate?.let { onCreateAndroid(name, it) } ?: onCreate(name)
-                },
-                enabled = name.isNotBlank(),
-            ) { Text(stringResource(R.string.ws_create)) }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) } },
-    )
-}
-
-/**
- * Project switcher for the chat-first UI: opened from the chat header (title
- * tap or the overflow menu). Lists existing projects (most recently used
- * first) and offers Quick project / New project. Switching goes through the
- * same openProject path the old Projects screen used.
- */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun ProjectSwitcherSheet(
-    state: AppUiState,
-    onDismiss: () -> Unit,
-    onOpenProject: (Project) -> Unit,
-    onCreateProject: (String) -> Unit,
-    onCreateAndroidProject: (String, AndroidTemplate) -> Unit,
-    onCreateQuickProject: () -> Unit,
-    onRenameProject: (String, String) -> Unit,
-    onDeleteProject: (String) -> Unit,
-) {
-    var showCreate by rememberSaveable { mutableStateOf(false) }
-    if (showCreate) {
-        CreateProjectDialog(
-            onDismiss = { showCreate = false },
-            onCreate = { name ->
-                showCreate = false
-                onDismiss()
-                onCreateProject(name)
-            },
-            onCreateAndroid = { name, template ->
-                showCreate = false
-                onDismiss()
-                onCreateAndroidProject(name, template)
-            },
-        )
-    }
-    ModalBottomSheet(onDismissRequest = onDismiss) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 18.dp, vertical = 8.dp),
-        ) {
-            Text(
-                stringResource(R.string.tab_projects),
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold,
-            )
-            Spacer(Modifier.height(12.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Button(
-                    onClick = {
-                        onDismiss()
-                        onCreateQuickProject()
-                    },
-                    modifier = Modifier.weight(1f).height(48.dp),
-                    shape = RoundedCornerShape(14.dp),
-                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Chat,
-                        contentDescription = null,
-                        modifier = Modifier.size(17.dp),
-                    )
-                    Spacer(Modifier.width(6.dp))
-                    Text(
-                        text = stringResource(R.string.projects_quick_project),
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = 13.sp,
-                        maxLines = 1,
-                        softWrap = false,
-                    )
-                }
-                OutlinedButton(
-                    onClick = { showCreate = true },
-                    modifier = Modifier.weight(1f).height(48.dp),
-                    shape = RoundedCornerShape(14.dp),
-                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Add,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp),
-                    )
-                    Spacer(Modifier.width(6.dp))
-                    Text(
-                        text = stringResource(R.string.projects_new_project),
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = 13.sp,
-                        maxLines = 1,
-                        softWrap = false,
-                    )
-                }
-            }
-            Spacer(Modifier.height(14.dp))
-            val sortedProjects = state.projects.sortedByDescending { it.updatedAtMillis }
-            if (sortedProjects.isEmpty()) {
-                Text(
-                    stringResource(R.string.projects_empty_title),
-                    fontWeight = FontWeight.SemiBold,
-                )
-                Text(
-                    stringResource(R.string.projects_empty_desc),
-                    fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            } else {
-                LazyColumn(
-                    modifier = Modifier.fillMaxWidth().heightIn(max = 430.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    items(sortedProjects, key = { it.id }) { project ->
-                        ProjectCard(
-                            project = project,
-                            taskRunning = state.isRunning && state.activeProject?.id == project.id,
-                            terminalRunning = state.projectTerminalRunning && state.activeProject?.id == project.id,
-                            buildRunning = state.androidBuildRunning && state.activeProject?.id == project.id,
-                            onOpen = {
-                                onDismiss()
-                                onOpenProject(project)
-                            },
-                            onRename = { onRenameProject(project.id, it) },
-                            onDelete = { onDeleteProject(project.id) },
-                        )
-                    }
-                }
-            }
-            Spacer(Modifier.height(18.dp))
-        }
-    }
-}
-
-@Composable
 private fun AppUpdateDialog(
     state: AppUiState,
     onInstallUpdate: () -> Unit,
@@ -4115,102 +3898,6 @@ private fun ApiStatusChip(state: AppUiState, onSettings: () -> Unit, onPing: () 
                 }
             }
         }
-    }
-}
-
-@Composable
-private fun ProjectCard(
-    project: Project,
-    taskRunning: Boolean,
-    terminalRunning: Boolean,
-    buildRunning: Boolean,
-    onOpen: () -> Unit,
-    onRename: (String) -> Unit,
-    onDelete: () -> Unit,
-) {
-    var menuOpen by rememberSaveable(project.id) { mutableStateOf(false) }
-    var showRename by rememberSaveable(project.id) { mutableStateOf(false) }
-    var showDelete by rememberSaveable(project.id) { mutableStateOf(false) }
-    var renameText by rememberSaveable(project.id) { mutableStateOf(project.name) }
-    Card(Modifier.fillMaxWidth().clickable(onClick = onOpen), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
-        Row(Modifier.padding(start = 16.dp, top = 12.dp, bottom = 12.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            Surface(shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
-                Icon(
-                    if (project.type == ProjectType.ANDROID) Icons.Default.Android else Icons.Default.Folder,
-                    null,
-                    Modifier.padding(13.dp),
-                    tint = if (project.type == ProjectType.ANDROID) PocketGreen else PocketOrange,
-                )
-            }
-            Spacer(Modifier.width(13.dp))
-            Column(Modifier.weight(1f)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        project.name,
-                        modifier = Modifier.weight(1f, fill = false),
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    if (taskRunning || terminalRunning || buildRunning) {
-                        Spacer(Modifier.width(8.dp))
-                        CircularProgressIndicator(Modifier.size(13.dp), strokeWidth = 2.dp)
-                        Spacer(Modifier.width(5.dp))
-                        Text(
-                            when {
-                                taskRunning -> stringResource(R.string.ws_task_running)
-                                buildRunning -> stringResource(R.string.an_android_build)
-                                else -> stringResource(R.string.ws_terminal_running)
-                            },
-                            color = MaterialTheme.colorScheme.primary,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.SemiBold,
-                        )
-                    }
-                }
-                Text(
-                    if (project.kind == ProjectKind.QUICK_PROJECT) stringResource(R.string.projects_quick_project) else project.localizedDescription(),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    fontSize = 12.sp,
-                    maxLines = 1,
-                )
-                Text("/workspace/${project.slug}", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
-                Text("${project.language} · ${project.localizedUpdatedAt()}", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
-            }
-            Box {
-                IconButton(onClick = { menuOpen = true }) { Icon(Icons.Default.MoreVert, stringResource(R.string.ws_project_options)) }
-                DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                    DropdownMenuItem(
-                        text = { Text(stringResource(R.string.ws_rename_project)) },
-                        leadingIcon = { Icon(Icons.Default.Edit, null) },
-                        onClick = { menuOpen = false; renameText = project.name; showRename = true },
-                    )
-                    DropdownMenuItem(
-                        text = { Text(stringResource(R.string.ws_delete_project)) },
-                        leadingIcon = { Icon(Icons.Default.Delete, null, tint = MaterialTheme.colorScheme.error) },
-                        onClick = { menuOpen = false; showDelete = true },
-                    )
-                }
-            }
-        }
-    }
-    if (showRename) {
-        AlertDialog(
-            onDismissRequest = { showRename = false },
-            title = { Text(stringResource(R.string.ws_rename_project)) },
-            text = { OutlinedTextField(renameText, { renameText = it }, label = { Text(stringResource(R.string.ws_project_name)) }, singleLine = true) },
-            confirmButton = { TextButton(onClick = { onRename(renameText); showRename = false }, enabled = renameText.isNotBlank()) { Text(stringResource(R.string.action_save)) } },
-            dismissButton = { TextButton(onClick = { showRename = false }) { Text(stringResource(R.string.action_cancel)) } },
-        )
-    }
-    if (showDelete) {
-        AlertDialog(
-            onDismissRequest = { showDelete = false },
-            title = { Text(stringResource(R.string.ws_delete_project_title)) },
-            text = { Text(stringResource(R.string.ws_delete_project_desc)) },
-            confirmButton = { TextButton(onClick = { onDelete(); showDelete = false }) { Text(stringResource(R.string.action_delete), color = MaterialTheme.colorScheme.error) } },
-            dismissButton = { TextButton(onClick = { showDelete = false }) { Text(stringResource(R.string.action_cancel)) } },
-        )
     }
 }
 
@@ -4367,11 +4054,8 @@ private fun WorkspaceScreen(
     onCleanAndroid: () -> Unit,
     onInstallAndroidTools: () -> Unit,
     onOpenProject: (Project) -> Unit,
-    onCreateProject: (String) -> Unit,
-    onCreateAndroidProject: (String, AndroidTemplate) -> Unit,
     onCreateQuickProject: () -> Unit,
-    onRenameProject: (String, String) -> Unit,
-    onDeleteProject: (String) -> Unit,
+    onDeleteActiveProject: () -> Unit,
     onSelectAgent: (AgentKind) -> Unit,
 ) {
     val context = LocalContext.current
@@ -4479,8 +4163,8 @@ private fun WorkspaceScreen(
     // sections live in this top-bar overflow menu instead.
     var sectionMenuOpen by remember { mutableStateOf(false) }
     var showChats by rememberSaveable { mutableStateOf(false) }
-    var showProjects by rememberSaveable { mutableStateOf(false) }
     var showAgentSwitcher by rememberSaveable { mutableStateOf(false) }
+    var showDeleteCurrentProject by rememberSaveable { mutableStateOf(false) }
     // Chat-first: the workspace is the home screen, so Back never leaves the
     // project. From a workspace section it returns to Chat; on Chat itself the
     // system default applies (leaves the app) unless work is running — running
@@ -4556,18 +4240,6 @@ private fun WorkspaceScreen(
         return
     }
 
-    if (showProjects) {
-        ProjectSwitcherSheet(
-            state = state,
-            onDismiss = { showProjects = false },
-            onOpenProject = onOpenProject,
-            onCreateProject = onCreateProject,
-            onCreateAndroidProject = onCreateAndroidProject,
-            onCreateQuickProject = onCreateQuickProject,
-            onRenameProject = onRenameProject,
-            onDeleteProject = onDeleteProject,
-        )
-    }
     if (showChats) {
         ChatSwitcherDialog(
             // v21: the chat list shows the active agent's own chats only —
@@ -4598,6 +4270,26 @@ private fun WorkspaceScreen(
             onDismiss = { showAgentSwitcher = false },
         )
     }
+    if (showDeleteCurrentProject) {
+        // The same confirmation the project switcher sheet's card menu
+        // used (v22: the sheet is gone, the menu item lives in the chat
+        // overflow menu). Deleting lands on another project or a fresh
+        // quick project — see MainViewModel.deleteActiveProject.
+        AlertDialog(
+            onDismissRequest = { showDeleteCurrentProject = false },
+            title = { Text(stringResource(R.string.ws_delete_project_title)) },
+            text = { Text(stringResource(R.string.ws_delete_project_desc)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showDeleteCurrentProject = false
+                        onDeleteActiveProject()
+                    },
+                ) { Text(stringResource(R.string.action_delete), color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = { TextButton(onClick = { showDeleteCurrentProject = false }) { Text(stringResource(R.string.action_cancel)) } },
+        )
+    }
     state.pendingTerminalCommand?.let { command ->
         AlertDialog(
             onDismissRequest = onTerminalCancel,
@@ -4624,12 +4316,11 @@ private fun WorkspaceScreen(
         topBar = {
             TopAppBar(
                 title = {
-                    // Tapping the title opens the project switcher (chat-first:
-                    // there is no Projects home screen or back arrow anymore).
+                    // Chat-first: there is no Projects home screen or back
+                    // arrow; projects are switched from the overflow menu.
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable { showProjects = true }
                             .padding(vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
@@ -4652,9 +4343,7 @@ private fun WorkspaceScreen(
                         // Active agent, always visible in the header. Tapping
                         // the chip opens the agent switcher; the switch goes
                         // through the same selectAgent path as the Agent tab
-                        // and keeps this chat and its history untouched. The
-                        // chip's own clickable consumes the tap, so it does
-                        // not also open the project switcher.
+                        // and keeps this chat and its history untouched.
                         Surface(
                             shape = RoundedCornerShape(50),
                             color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
@@ -4681,12 +4370,6 @@ private fun WorkspaceScreen(
                                 )
                             }
                         }
-                        Icon(
-                            Icons.Default.KeyboardArrowDown,
-                            contentDescription = stringResource(R.string.tab_projects),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(20.dp),
-                        )
                     }
                 },
                 actions = {
@@ -4706,14 +4389,55 @@ private fun WorkspaceScreen(
                                 Icon(Icons.Default.MoreVert, stringResource(R.string.more_options))
                             }
                             DropdownMenu(expanded = sectionMenuOpen, onDismissRequest = { sectionMenuOpen = false }) {
+                                // Projects live directly in this menu (v22 — the
+                                // switcher sheet is gone): plain items, most
+                                // recently used first, the current project
+                                // checked. Switching uses the same openProject
+                                // path the sheet used.
+                                state.projects.sortedByDescending { it.updatedAtMillis }.forEach { project ->
+                                    DropdownMenuItem(
+                                        text = {
+                                            Text(
+                                                project.name,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                            )
+                                        },
+                                        leadingIcon = { Icon(Icons.Default.Folder, null) },
+                                        trailingIcon = if (project.id == state.activeProject?.id) {
+                                            { Icon(Icons.Default.Check, null) }
+                                        } else {
+                                            null
+                                        },
+                                        onClick = {
+                                            sectionMenuOpen = false
+                                            onOpenProject(project)
+                                        },
+                                    )
+                                }
                                 DropdownMenuItem(
-                                    text = { Text(stringResource(R.string.tab_projects)) },
-                                    leadingIcon = { Icon(Icons.Default.Folder, null) },
+                                    text = { Text(stringResource(R.string.projects_new_project)) },
+                                    leadingIcon = { Icon(Icons.Default.Add, null) },
                                     onClick = {
                                         sectionMenuOpen = false
-                                        showProjects = true
+                                        onCreateQuickProject()
                                     },
                                 )
+                                HorizontalDivider()
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            stringResource(R.string.ws_delete_project),
+                                            color = MaterialTheme.colorScheme.error,
+                                        )
+                                    },
+                                    leadingIcon = { Icon(Icons.Default.Delete, null, tint = MaterialTheme.colorScheme.error) },
+                                    onClick = {
+                                        sectionMenuOpen = false
+                                        showDeleteCurrentProject = true
+                                    },
+                                )
+                                HorizontalDivider()
                                 // The sections the bottom tab bar used to offer on this
                                 // screen (Changes was never reachable there either).
                                 listOf(WorkspaceTab.FILES, WorkspaceTab.TERMINAL, WorkspaceTab.PREVIEW).forEach { tab ->

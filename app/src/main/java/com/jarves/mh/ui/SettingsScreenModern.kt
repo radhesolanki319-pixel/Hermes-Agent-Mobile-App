@@ -30,11 +30,9 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.Backup
-import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.DeleteSweep
-import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.LightMode
@@ -94,8 +92,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.jarves.mh.BuildConfig
 import com.jarves.mh.data.ApiKeyInfo
-import com.jarves.mh.data.ApiKeysPlan
-import com.jarves.mh.data.SimpleKeyFieldKind
 import com.jarves.mh.model.AgentKind
 import com.jarves.mh.model.DevStack
 import com.jarves.mh.model.ProviderKind
@@ -114,7 +110,7 @@ import com.jarves.mh.ui.theme.AppThemeMode
 import com.jarves.mh.ui.theme.PocketOrange
 import kotlinx.coroutines.launch
 
-private enum class SettingsSection { API_KEYS, PROJECT_IMPORT, APPEARANCE, LANGUAGE, TOOLS, RUNTIME, DIAGNOSTICS, BACKUP, UPDATE_CHANNEL }
+private enum class SettingsSection { PROJECT_IMPORT, APPEARANCE, LANGUAGE, TOOLS, RUNTIME, DIAGNOSTICS, BACKUP, UPDATE_CHANNEL }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -150,12 +146,6 @@ fun SettingsScreen(
     onStopInactiveProcesses: () -> Unit = {},
     onClearRuntimeCache: () -> Unit = {},
     onCheckForAppUpdate: () -> Unit = {},
-    getSavedProviderKey: (String) -> String = { "" },
-    getSavedHermesHostKey: () -> String = { "" },
-    onSaveHermesHostKey: (String) -> Unit = {},
-    getAgentProfile: (AgentKind) -> ProviderProfile = { ProviderProfile(ProviderKind.ANTHROPIC) },
-    onSaveProviderKey: (String, String) -> Unit = { _, _ -> },
-    onOpenAgentSettings: () -> Unit = {},
     onImportZip: (Uri) -> Unit = {},
     onCloneGit: (String) -> Unit = {},
     onStartGitHubLogin: () -> Unit = {},
@@ -245,26 +235,6 @@ fun SettingsScreen(
             contentPadding = PaddingValues(horizontal = 18.dp, vertical = 10.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-
-            item {
-                SettingsAccordion(
-                    title = stringResource(R.string.api_keys_title),
-                    subtitle = stringResource(R.string.api_keys_subtitle),
-                    icon = Icons.Default.Key,
-                    expanded = expanded == SettingsSection.API_KEYS,
-                    onClick = { toggle(SettingsSection.API_KEYS) },
-                ) {
-                    ApiKeysSimpleContent(
-                        state = state,
-                        getSavedProviderKey = getSavedProviderKey,
-                        getSavedHermesHostKey = getSavedHermesHostKey,
-                        getAgentProfile = getAgentProfile,
-                        onSaveProviderKey = onSaveProviderKey,
-                        onSaveHermesHostKey = onSaveHermesHostKey,
-                        onOpenAgentSettings = onOpenAgentSettings,
-                    )
-                }
-            }
 
             item {
                 SettingsAccordion(
@@ -810,195 +780,6 @@ private fun SettingsAccordion(
                 }
             }
         }
-    }
-}
-
-/**
- * The simple "API Keys" surface: one plain-language field per provider —
- * no provider jargon, no env-var names. Since v19 there is ONE key store
- * per provider, shared by every agent (see [ApiKeysPlan]): each field
- * reads and writes that provider's single pool, so a key entered here is
- * the key the Agent screen shows and the key every agent set to that
- * provider uses. When Hermes and Claude Code are set to the same
- * provider, there is ONE field for it — never a duplicate per agent.
- * The surface is provider-neutral (v17): fields are labelled with
- * whichever providers are currently chosen — the user's stored choice is
- * final and nothing here steers it. The full setup stays one tap away
- * under "Advanced" (it lives on the Agent screen). The Hermes host key
- * is not a provider key and keeps its own field.
- */
-@Composable
-private fun ApiKeysSimpleContent(
-    state: AppUiState,
-    getSavedProviderKey: (String) -> String,
-    getSavedHermesHostKey: () -> String,
-    getAgentProfile: (AgentKind) -> ProviderProfile,
-    onSaveProviderKey: (String, String) -> Unit,
-    onSaveHermesHostKey: (String) -> Unit,
-    onOpenAgentSettings: () -> Unit,
-) {
-    val hermesProfile = remember(state.agentKind) { getAgentProfile(AgentKind.HERMES) }
-    val claudeProfile = remember(state.agentKind) { getAgentProfile(AgentKind.CLAUDE_CODE) }
-    val antigravityProfile = remember(state.agentKind) { getAgentProfile(AgentKind.ANTIGRAVITY) }
-    val fields = remember(hermesProfile, state.hermesHostRemote, claudeProfile, antigravityProfile) {
-        ApiKeysPlan.fields(hermesProfile, state.hermesHostRemote, claudeProfile, antigravityProfile)
-    }
-
-    fields.forEach { field ->
-        when (field.kind) {
-            SimpleKeyFieldKind.PROVIDER -> {
-                SimpleKeyFieldEditor(
-                    heading = field.providerName,
-                    label = if (field.claudeKind == ProviderKind.CLAUDE && !field.isHermesProvider) {
-                        stringResource(R.string.provider_claude_token)
-                    } else {
-                        stringResource(R.string.api_keys_provider_label, field.providerName)
-                    },
-                    hint = when {
-                        field.agents.size > 1 -> stringResource(
-                            R.string.api_keys_shared_hint,
-                            field.providerName,
-                        )
-                        field.isHermesProvider -> stringResource(
-                            R.string.api_keys_hermes_provider_hint,
-                            field.providerName,
-                        )
-                        else -> stringResource(
-                            R.string.api_keys_agent_provider_hint,
-                            field.agents.first().localizedTitle(),
-                            field.providerName,
-                        )
-                    },
-                    initialValue = getSavedProviderKey(field.canonicalId),
-                    fieldKey = field.canonicalId,
-                    onSave = { secret -> onSaveProviderKey(field.canonicalId, secret) },
-                )
-            }
-            SimpleKeyFieldKind.HERMES_HOST -> {
-                SimpleKeyFieldEditor(
-                    heading = stringResource(R.string.hermes_host_title),
-                    label = stringResource(R.string.api_keys_host_label),
-                    hint = stringResource(R.string.api_keys_host_hint),
-                    initialValue = getSavedHermesHostKey(),
-                    fieldKey = field.vaultId,
-                    onSave = onSaveHermesHostKey,
-                )
-            }
-        }
-    }
-
-    Spacer(Modifier.height(4.dp))
-    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-    Text(
-        stringResource(R.string.api_keys_advanced_title),
-        fontSize = 12.sp,
-        fontWeight = FontWeight.SemiBold,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-    )
-    ApiKeysAdvancedRow(
-        title = stringResource(R.string.api_keys_advanced_hermes),
-        desc = stringResource(R.string.api_keys_advanced_hermes_desc),
-        onClick = onOpenAgentSettings,
-    )
-    ApiKeysAdvancedRow(
-        title = stringResource(R.string.api_keys_advanced_profiles),
-        desc = stringResource(R.string.api_keys_advanced_profiles_desc),
-        onClick = onOpenAgentSettings,
-    )
-}
-
-/** One masked key field with saved status, Save and Remove — the whole simple surface in one shape. */
-@Composable
-private fun SimpleKeyFieldEditor(
-    heading: String,
-    label: String,
-    hint: String,
-    initialValue: String,
-    fieldKey: String,
-    onSave: (String) -> Unit,
-) {
-    var text by rememberSaveable(fieldKey) { mutableStateOf(initialValue) }
-    var visible by rememberSaveable(fieldKey) { mutableStateOf(false) }
-    var saved by rememberSaveable(fieldKey) { mutableStateOf(initialValue.isNotBlank()) }
-
-    Text(heading, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
-    OutlinedTextField(
-        value = text,
-        onValueChange = { text = it },
-        label = { Text(label) },
-        supportingText = { Text(hint) },
-        singleLine = true,
-        visualTransformation = if (visible) VisualTransformation.None else PasswordVisualTransformation(),
-        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-        trailingIcon = {
-            IconButton(onClick = { visible = !visible }) {
-                Icon(
-                    if (visible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                    contentDescription = null,
-                )
-            }
-        },
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(12.dp),
-    )
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        if (saved) {
-            Icon(Icons.Default.Check, null, Modifier.size(14.dp), tint = MaterialTheme.colorScheme.primary)
-            Spacer(Modifier.width(5.dp))
-        }
-        Text(
-            stringResource(if (saved) R.string.api_keys_status_saved else R.string.api_keys_status_none),
-            fontSize = 12.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Spacer(Modifier.weight(1f))
-        if (saved) {
-            TextButton(
-                onClick = {
-                    onSave("")
-                    text = ""
-                    saved = false
-                },
-            ) {
-                Text(stringResource(R.string.action_remove), color = MaterialTheme.colorScheme.error)
-            }
-        }
-        Button(
-            onClick = {
-                onSave(text.trim())
-                saved = text.isNotBlank()
-            },
-            shape = RoundedCornerShape(12.dp),
-        ) {
-            Text(stringResource(R.string.action_save))
-        }
-    }
-}
-
-/** A tappable link row from the simple surface into the full (advanced) setup. */
-@Composable
-private fun ApiKeysAdvancedRow(
-    title: String,
-    desc: String,
-    onClick: () -> Unit,
-) {
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(Modifier.weight(1f)) {
-            Text(title, fontWeight = FontWeight.Medium, fontSize = 14.sp)
-            Text(desc, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-        Icon(
-            Icons.AutoMirrored.Filled.OpenInNew,
-            contentDescription = null,
-            modifier = Modifier.size(17.dp),
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
     }
 }
 

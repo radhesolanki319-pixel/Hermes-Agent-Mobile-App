@@ -28,6 +28,8 @@ class HermesConfigFilesTest {
     fun freshConfigCarriesFullPowerSections() {
         val config = HermesConfigFiles.freshConfig(anthropicRoute, "claude-sonnet-4")
         assertTrue(config.contains("model:\n  provider: 'anthropic'\n  default: 'claude-sonnet-4'\n  base_url: 'https://api.anthropic.com'\n"))
+        // The fixed output-token cap (v22, see MODEL_MAX_TOKENS).
+        assertTrue(config.contains("  max_tokens: 8192\n"))
         // Safety settings carried over from the Phase 1 generated config.
         assertTrue(config.contains("database:\n  journal_mode: \"delete\"\n"))
         assertTrue(config.contains("terminal:\n  backend: \"local\"\n"))
@@ -104,7 +106,6 @@ class HermesConfigFilesTest {
         val merged = HermesConfigFiles.mergedConfig(existing, anthropicRoute, "claude-sonnet-4")
         // Foreign content survives verbatim.
         assertTrue(merged.contains("# My hand-tuned Hermes config\n"))
-        assertTrue(merged.contains("  max_tokens: 4096\n"))
         assertTrue(merged.contains("display:\n  skin: ares\n"))
         assertTrue(merged.contains("# trailing comment section\n"))
         assertTrue(merged.contains("gateway:\n  multiplex_profiles: true\n"))
@@ -113,6 +114,12 @@ class HermesConfigFilesTest {
         assertTrue(merged.contains("  default: 'claude-sonnet-4'\n"))
         assertTrue(merged.contains("  base_url: 'https://api.anthropic.com'\n"))
         assertFalse(merged.contains("openrouter"))
+        // model.max_tokens is app-owned too (v22): the fixed 8192 cap
+        // replaces the hand-written 4096 — without a cap Hermes asks for
+        // the model's full output limit and OpenRouter answers 402 on a
+        // low balance.
+        assertTrue(merged.contains("  max_tokens: 8192\n"))
+        assertFalse(merged.contains("max_tokens: 4096"))
     }
 
     @Test

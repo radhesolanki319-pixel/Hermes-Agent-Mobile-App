@@ -27,9 +27,10 @@ import com.jarves.mh.model.ProviderProfile
  *    launch route + model the bridge writes into `config.yaml`/`.env`.
  *  - [HermesProfileSeeding]: the one-time carry-over that seeds the
  *    first Hermes profile from a pre-v20 stored Hermes setup.
- *  - [HermesConfigOptions]: the Hermes options surface (memory,
- *    curator, toolsets, approvals…) — not part of the provider/key
- *    system, unchanged.
+ *  - [HermesConfigOptions]: Hermes's config behaviour (memory,
+ *    curator, toolsets, approvals…) as FIXED full-power constants —
+ *    since v22 there is no options UI; [HermesConfigOptions.FULL_POWER]
+ *    is the only value a launch ever uses.
  *  - [HermesRuntimeSettings]: everything one launch needs.
  *
  * The provider KEY itself lives in the unified provider store (see
@@ -275,14 +276,18 @@ object HermesProfileSeeding {
 }
 
 /**
- * The config.yaml options the app exposes as working controls. Every field
- * maps to a real hermes-agent 0.19.0 config key (see the per-field notes) and
- * is applied with set semantics by [HermesConfigFiles] on every launch — the
- * app settings are the source of truth for these keys, exactly as if the
- * user had set them with `hermes setup` / `hermes tools`.
+ * Hermes's config.yaml behaviour as a value object. Every field maps to a
+ * real hermes-agent 0.19.0 config key (see the per-field notes) and is
+ * applied with set semantics by [HermesConfigFiles] on every launch.
  *
- * [FULL_POWER] reproduces the app's established full-powers unlock posture
- * as the initial values; nothing here silently weakens it.
+ * Since v22 the app exposes NO controls for these: at the user's order
+ * the options card left the Agent screen and the launch path always
+ * passes [FULL_POWER] — the app's established full-powers unlock
+ * posture, now simply the fixed behaviour. (Before v22 the values came
+ * from stored preferences the options UI wrote; those `hermes_opt_*`
+ * keys are retired and any stored values are inert.) The class shape
+ * stays so the config writer and its tests keep a typed value to work
+ * with.
  */
 data class HermesConfigOptions(
     /** `memory.memory_enabled` — persistent memory across sessions. */
@@ -317,8 +322,9 @@ data class HermesConfigOptions(
         /**
          * The `cli` toolsets `hermes tools` can toggle (0.19.0's
          * CONFIGURABLE_TOOLSETS minus the discord-platform-restricted pair,
-         * plus `kanban`), offered by the options UI. The `hermes-cli` base
-         * bundle is always written and is not part of this list.
+         * plus `kanban`) — the validity set [sanitized] filters against.
+         * The `hermes-cli` base bundle is always written and is not part
+         * of this list.
          */
         val CLI_TOOLSET_CHOICES = listOf(
             "web", "browser", "terminal", "file", "code_execution", "vision",

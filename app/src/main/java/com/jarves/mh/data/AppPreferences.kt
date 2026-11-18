@@ -15,7 +15,6 @@ import com.jarves.mh.model.ProviderProfile
 import com.jarves.mh.model.projectSlug
 import com.jarves.mh.model.providersForAgent
 import com.jarves.mh.genui.GenUiStateCodec
-import com.jarves.mh.runtime.HermesConfigOptions
 import com.jarves.mh.runtime.LegacyHermesSetup
 import org.json.JSONArray
 import org.json.JSONObject
@@ -172,14 +171,16 @@ class AppPreferences(private val context: Context) {
     private fun hermesRemoteConversationKey(projectId: String, chatId: String): String =
         "hermes_remote_conversation_${projectId}_$chatId"
 
-    // --- Hermes (profile system since v20; options below) ---
+    // --- Hermes (profile system since v20) ---
     // Provider/model/base-URL for Hermes live in its ProviderProfile
     // (saveProvider/loadProvider with AgentKind.HERMES), exactly like the
     // other agents; the API key lives in the unified provider store
     // (ApiKeyVault pool named by the provider's canonical id — see
-    // ProviderKeys). The option keys map one-to-one onto
-    // HermesConfigOptions and are written into the guest's config.yaml
-    // on every launch. Defaults are the full-power posture.
+    // ProviderKeys). Hermes's config options are NOT stored here any
+    // more: since v22 they are the fixed full-power constants
+    // (HermesConfigOptions.FULL_POWER) baked into the launch path. The
+    // retired `hermes_opt_*` keys an older build may have written are
+    // left on disk untouched and are never read again.
 
     /**
      * The pre-v20 Hermes setup exactly as stored, or null when no setup
@@ -202,86 +203,6 @@ class AppPreferences(private val context: Context) {
     /** Whether a per-agent profile has ever been saved for [agent]. */
     fun hasAgentProfile(agent: AgentKind): Boolean =
         preferences.contains("${providerPrefix(agent)}kind")
-
-    var hermesOptMemoryEnabled: Boolean
-        get() = preferences.getBoolean("hermes_opt_memory_enabled", true)
-        set(value) { preferences.edit().putBoolean("hermes_opt_memory_enabled", value).apply() }
-
-    var hermesOptMemoryUserProfile: Boolean
-        get() = preferences.getBoolean("hermes_opt_memory_user_profile", true)
-        set(value) { preferences.edit().putBoolean("hermes_opt_memory_user_profile", value).apply() }
-
-    var hermesOptMemoryWriteApproval: Boolean
-        get() = preferences.getBoolean("hermes_opt_memory_write_approval", false)
-        set(value) { preferences.edit().putBoolean("hermes_opt_memory_write_approval", value).apply() }
-
-    var hermesOptSkillsWriteApproval: Boolean
-        get() = preferences.getBoolean("hermes_opt_skills_write_approval", false)
-        set(value) { preferences.edit().putBoolean("hermes_opt_skills_write_approval", value).apply() }
-
-    var hermesOptCuratorEnabled: Boolean
-        get() = preferences.getBoolean("hermes_opt_curator_enabled", true)
-        set(value) { preferences.edit().putBoolean("hermes_opt_curator_enabled", value).apply() }
-
-    var hermesOptCodingContext: String
-        get() = preferences.getString("hermes_opt_coding_context", "auto") ?: "auto"
-        set(value) { preferences.edit().putString("hermes_opt_coding_context", value).apply() }
-
-    var hermesOptToolSearch: String
-        get() = preferences.getString("hermes_opt_tool_search", "off") ?: "off"
-        set(value) { preferences.edit().putString("hermes_opt_tool_search", value).apply() }
-
-    var hermesOptDelegationMaxChildren: Int
-        get() = preferences.getInt("hermes_opt_delegation_max_children", 10)
-        set(value) { preferences.edit().putInt("hermes_opt_delegation_max_children", value).apply() }
-
-    var hermesOptApprovalsMode: String
-        get() = preferences.getString("hermes_opt_approvals_mode", "off") ?: "off"
-        set(value) { preferences.edit().putString("hermes_opt_approvals_mode", value).apply() }
-
-    var hermesOptApprovalsCronMode: String
-        get() = preferences.getString("hermes_opt_approvals_cron_mode", "approve") ?: "approve"
-        set(value) { preferences.edit().putString("hermes_opt_approvals_cron_mode", value).apply() }
-
-    /** Extra platform_toolsets.cli entries, stored in the canonical choice order. */
-    var hermesOptCliToolsets: List<String>
-        get() = preferences.getStringSet("hermes_opt_cli_toolsets", null)
-            ?.let { stored -> HermesConfigOptions.CLI_TOOLSET_CHOICES.filter { it in stored } }
-            ?: HermesConfigOptions.FULL_POWER.cliToolsets
-        set(value) { preferences.edit().putStringSet("hermes_opt_cli_toolsets", value.toSet()).apply() }
-
-    /** The stored Hermes options as one object (sanitized against Hermes's value sets). */
-    fun hermesConfigOptions(): HermesConfigOptions =
-        HermesConfigOptions(
-            memoryEnabled = hermesOptMemoryEnabled,
-            memoryUserProfile = hermesOptMemoryUserProfile,
-            memoryWriteApproval = hermesOptMemoryWriteApproval,
-            skillsWriteApproval = hermesOptSkillsWriteApproval,
-            curatorEnabled = hermesOptCuratorEnabled,
-            codingContext = hermesOptCodingContext,
-            toolSearch = hermesOptToolSearch,
-            delegationMaxChildren = hermesOptDelegationMaxChildren,
-            approvalsMode = hermesOptApprovalsMode,
-            approvalsCronMode = hermesOptApprovalsCronMode,
-            cliToolsets = hermesOptCliToolsets,
-        ).sanitized()
-
-    fun saveHermesConfigOptions(options: HermesConfigOptions) {
-        val clean = options.sanitized()
-        preferences.edit().apply {
-            putBoolean("hermes_opt_memory_enabled", clean.memoryEnabled)
-            putBoolean("hermes_opt_memory_user_profile", clean.memoryUserProfile)
-            putBoolean("hermes_opt_memory_write_approval", clean.memoryWriteApproval)
-            putBoolean("hermes_opt_skills_write_approval", clean.skillsWriteApproval)
-            putBoolean("hermes_opt_curator_enabled", clean.curatorEnabled)
-            putString("hermes_opt_coding_context", clean.codingContext)
-            putString("hermes_opt_tool_search", clean.toolSearch)
-            putInt("hermes_opt_delegation_max_children", clean.delegationMaxChildren)
-            putString("hermes_opt_approvals_mode", clean.approvalsMode)
-            putString("hermes_opt_approvals_cron_mode", clean.approvalsCronMode)
-            putStringSet("hermes_opt_cli_toolsets", clean.cliToolsets.toSet())
-        }.apply()
-    }
 
     /**
      * Debug-only manifest URL override. Empty in release builds; populated via

@@ -63,17 +63,18 @@ internal fun hermesToolDisplayName(name: String): String = when (name.lowercase(
  * Inside that shape it:
  *
  *  - always updates the provider/model fields the app owns
- *    (`model.provider`, `model.default`, `model.base_url` and the
- *    `providers.<name>` block of a custom endpoint), because the app is
- *    where the user picks the provider;
+ *    (`model.provider`, `model.default`, `model.base_url`,
+ *    `model.max_tokens` and the `providers.<name>` block of a custom
+ *    endpoint), because the app is where the user picks the provider;
  *  - adds the app's unlock/safety keys (see [STATIC_SECTIONS]) only where
  *    they are absent — a value already present belongs to Hermes or the
  *    user and is preserved verbatim, like every other line of the file;
- *  - applies the user's Hermes options (see [HermesConfigOptions]) with
- *    set semantics — memory, skills/curator gates, coding posture,
- *    tool_search, delegation cap and the approval policy are the app
- *    settings' keys, so the settings screen is their source of truth
- *    exactly as `hermes setup` / `hermes tools` would be on a desktop;
+ *  - applies the fixed full-power Hermes options (see
+ *    [HermesConfigOptions.FULL_POWER]) with set semantics — memory,
+ *    skills/curator gates, coding posture, tool_search, delegation cap
+ *    and the approval policy are constants baked into the launch path
+ *    (the options UI was removed in v22 at the user's order: the
+ *    full-power posture is simply how Hermes always runs here);
  *  - rewrites the `platform_toolsets` cli/acp lists it owns as a union
  *    with whatever is already there (see [ensurePlatformToolsets]), and
  *    ensures a top-level key that does not fit the section shape:
@@ -106,10 +107,10 @@ internal object HermesConfigFiles {
      * stop-time verification (#49), checkpoints (#36), private-URL
      * access (#46), PII redaction (#47), session housekeeping (#50),
      * streaming STT (#52), voice auto-TTS (#53) and the tool-loop hard
-     * stop (#54). Keys the user controls in the Hermes settings screen
-     * (memory gates, write approvals, curator on/off, coding posture,
-     * the approval policy, the delegation cap) are NOT here — they are
-     * applied from [HermesConfigOptions] by [applyOptions]. Three keys
+     * stop (#54). The fixed full-power keys (memory gates, write
+     * approvals, curator on/off, coding posture, the approval policy,
+     * the delegation cap) are NOT here — they are applied from
+     * [HermesConfigOptions.FULL_POWER] by [applyOptions]. Three keys
      * older builds wrote are gone because hermes-agent 0.19.0 does not
      * have them (verified against the PyPI sdist): `approvals.
      * single_query_mode`, `delegation.oneshot_max_children` (the real
@@ -198,9 +199,9 @@ internal object HermesConfigFiles {
 
     /**
      * The cli platform's toolset list is the `hermes-cli` base bundle
-     * plus the extras the user selected in the Hermes options (see
-     * [HermesConfigOptions.cliToolsets]; the full-power defaults are
-     * the default-off toolsets Hermes allows on this platform).
+     * plus the fixed full-power extras (see
+     * [HermesConfigOptions.FULL_POWER.cliToolsets] — the default-off
+     * toolsets Hermes allows on this platform).
      * `discord`/`discord_admin` are absent on purpose: Hermes
      * restricts them to discord-platform sessions and filters them out
      * of cli resolution even when named — their unlock is a Discord
@@ -337,12 +338,13 @@ internal object HermesConfigFiles {
     }
 
     /**
-     * Applies the user's Hermes options to an existing config with set
-     * semantics: these keys belong to the app settings (their source of
-     * truth), so a value already in the file — from an older build, a
-     * guest-terminal edit, or Hermes itself — is replaced, and a missing
-     * section is appended whole in canonical order. Flow-style sections
-     * are left untouched, the same limit as every other rewrite here.
+     * Applies the fixed full-power Hermes options to an existing config
+     * with set semantics: these keys are the launch path's constants
+     * (HermesConfigOptions.FULL_POWER), so a value already in the file —
+     * from an older build, a guest-terminal edit, or Hermes itself — is
+     * replaced, and a missing section is appended whole in canonical
+     * order. Flow-style sections are left untouched, the same limit as
+     * every other rewrite here.
      */
     private fun applyOptions(lines: MutableList<String>, options: HermesConfigOptions) {
         setSectionKeys(
@@ -400,6 +402,22 @@ internal object HermesConfigFiles {
         }
     }
 
+    /**
+     * Fixed cap on the output tokens Hermes asks the provider for
+     * (`model.max_tokens` in config.yaml — verified against the pinned
+     * hermes-agent 0.19.0: `agent/agent_init.py` reads it into
+     * `agent.max_tokens` when no caller passes one, and every request
+     * builder sends `agent.max_tokens`). Without it, Hermes falls back
+     * to the model's own output limit (128,000 for the Claude 5-class
+     * models), and OpenRouter's affordability check rejects the request
+     * outright on a low balance — "HTTP 402: … You requested up to
+     * 128000 tokens, but can only afford 3886" — even for a one-word
+     * reply. 8192 is ample for chat answers and tool-call turns while
+     * staying affordable. App-owned with set semantics, like the rest
+     * of the model section (v22).
+     */
+    private const val MODEL_MAX_TOKENS = 8192
+
     private fun modelSectionLines(route: HermesRoute, model: String): List<String> = buildList {
         add("model:")
         add("  provider: ${quote(route.provider)}")
@@ -407,6 +425,7 @@ internal object HermesConfigFiles {
         if (!route.custom && route.baseUrl.isNotBlank()) {
             add("  base_url: ${quote(route.baseUrl)}")
         }
+        add("  max_tokens: $MODEL_MAX_TOKENS")
     }
 
     /**
@@ -435,7 +454,7 @@ internal object HermesConfigFiles {
             else -> {
                 var current = setChildLine(lines, section, indent = 2, key = "provider", "  provider: ${quote(route.provider)}")
                 current = setChildLine(lines, current, indent = 2, key = "default", "  default: ${quote(model)}")
-                if (!route.custom && route.baseUrl.isNotBlank()) {
+                current = if (!route.custom && route.baseUrl.isNotBlank()) {
                     setChildLine(lines, current, indent = 2, key = "base_url", "  base_url: ${quote(route.baseUrl)}")
                 } else {
                     // App-owned field: a stale endpoint from a previous
@@ -443,6 +462,7 @@ internal object HermesConfigFiles {
                     // would send the new provider's key to the old URL).
                     removeChildLine(lines, current, indent = 2, key = "base_url")
                 }
+                setChildLine(lines, current, indent = 2, key = "max_tokens", "  max_tokens: $MODEL_MAX_TOKENS")
             }
         }
     }

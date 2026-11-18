@@ -407,7 +407,6 @@ data class AppUiState(
     val antigravityEffort: String = "high",
     val hermesHostRemote: Boolean = false,
     val hermesHostUrl: String = "",
-    val hermesOptions: HermesConfigOptions = HermesConfigOptions.FULL_POWER,
     val antigravityModels: List<String> = emptyList(),
     val antigravityModelsLoading: Boolean = false,
     val androidBuildRunning: Boolean = false,
@@ -468,13 +467,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             // agents: route + model from the profile (HermesProfileRoute
             // translates through the Hermes catalog), key from the
             // unified provider store under the profile provider's
-            // canonical id.
+            // canonical id. The config options are the fixed full-power
+            // constants (v22): the options UI was removed at the user's
+            // order, and the full-power posture is simply how Hermes
+            // always runs here.
             val profile = preferences.loadProvider(vault, AgentKind.HERMES)
             HermesRuntimeSettings(
                 route = HermesProfileRoute.routeFor(profile),
                 model = HermesProfileRoute.modelFor(profile),
                 secret = vault.get(ProviderKeys.canonicalForKind(profile.kind)).orEmpty(),
-                options = preferences.hermesConfigOptions(),
+                options = HermesConfigOptions.FULL_POWER,
             )
         },
         conversationId = { projectId ->
@@ -567,7 +569,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             antigravityEffort = preferences.antigravityEffort,
             hermesHostRemote = preferences.hermesHostRemote,
             hermesHostUrl = preferences.hermesHostUrl,
-            hermesOptions = preferences.hermesConfigOptions(),
             themeMode = runCatching { com.jarves.mh.ui.theme.AppThemeMode.valueOf(preferences.themeMode.uppercase()) }
                 .getOrDefault(com.jarves.mh.ui.theme.AppThemeMode.DARK),
             languageCode = preferences.languageCode,
@@ -2119,61 +2120,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    // --- Simple "API Keys" screen (Settings) ---------------------------------
-    // Key-only writes onto the unified provider store (v19): one pool per
-    // provider, shared by every agent and every surface, so a key entered
-    // anywhere is the same key everywhere. A blank value clears the saved
-    // key, mirroring the Hermes cards' save behaviour.
-
-    /** The stored provider profile for any agent (the simple screen derives its fields from these). */
+    /** The stored provider profile for any agent (the Agent screen's per-agent form reads these). */
     fun providerProfileFor(agent: AgentKind): ProviderProfile = preferences.loadProvider(vault, agent)
-
-    /** The saved key for a provider in the unified store, by canonical id. */
-    fun getSavedProviderKey(canonicalId: String): String = vault.get(canonicalId).orEmpty()
-
-    /** Saves only a provider's key in the unified store; every agent set to that provider picks it up. */
-    fun updateProviderApiKey(canonicalId: String, secret: String) {
-        if (secret.isBlank()) vault.remove(canonicalId) else vault.put(canonicalId, secret)
-        ProviderKind.entries.firstOrNull { ProviderKeys.canonicalForKind(it) == canonicalId }
-            ?.let { refreshActiveApiKey(it) }
-    }
-
-    /** Saves only the Hermes host gateway key (HERMES_GATEWAY pool); host mode/URL are untouched. */
-    fun updateHermesHostKey(secret: String) {
-        if (secret.isBlank()) vault.remove(HERMES_GATEWAY_VAULT_ID) else vault.put(HERMES_GATEWAY_VAULT_ID, secret)
-    }
-
-    /** Persists the Hermes config options; they are written into config.yaml on the next launch. */
-    fun saveHermesOptions(options: HermesConfigOptions) {
-        preferences.saveHermesConfigOptions(options)
-        _state.update { it.copy(hermesOptions = preferences.hermesConfigOptions()) }
-    }
-
-    /**
-     * Reads one of Hermes's own files (`config.yaml` / `.env`) from the
-     * guest's HERMES_HOME for the raw editor. Null when the runtime is not
-     * installed or the file does not exist yet (both are created by the
-     * first Hermes launch).
-     */
-    suspend fun readHermesFile(fileName: String): String? = withContext(Dispatchers.IO) {
-        if (fileName !in HERMES_EDITABLE_FILES) return@withContext null
-        runCatching {
-            val rootfs = RuntimeInstaller(getApplication()).installedRuntime().rootfs
-            File(rootfs, "${HermesRuntimeBridge.HERMES_HOME_GUEST_PATH.removePrefix("/")}/$fileName")
-                .takeIf(File::isFile)?.readText()
-        }.getOrNull()
-    }
-
-    /** Writes a raw-editor file back into the guest's HERMES_HOME. False when the runtime is absent. */
-    suspend fun writeHermesFile(fileName: String, text: String): Boolean = withContext(Dispatchers.IO) {
-        if (fileName !in HERMES_EDITABLE_FILES) return@withContext false
-        runCatching {
-            val rootfs = RuntimeInstaller(getApplication()).installedRuntime().rootfs
-            val home = File(rootfs, HermesRuntimeBridge.HERMES_HOME_GUEST_PATH.removePrefix("/")).apply { mkdirs() }
-            File(home, fileName).writeText(text)
-            true
-        }.getOrDefault(false)
-    }
 
     fun getSavedApiKey(kind: ProviderKind): String =
         vault.get(ProviderKeys.canonicalForKind(kind)).orEmpty()
@@ -4233,6 +4181,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         preferences.saveProjects(_state.value.projects)
     }
 
+    /**
+     * Deletes the currently open project (the chat overflow menu's
+     * "Delete current project", v22): lands on the most recently used
+     * remaining project — or a fresh quick project when none is left —
+     * and only then deletes the old one, because [deleteProject] refuses
+     * the active project. No-op while work is running, like the other
+     * project operations.
+     */
+    fun deleteActiveProject() {
+        val active = _state.value.activeProject ?: return
+        if (_state.value.isRunning || _state.value.projectTerminalRunning || _state.value.androidBuildRunning) return
+        val next = _state.value.projects
+            .filterNot { it.id == active.id }
+            .maxByOrNull { it.updatedAtMillis }
+        if (next != null) openProject(next) else createQuickProject()
+        deleteProject(active.id)
+    }
+
     fun deleteProject(projectId: String) {
         val project = _state.value.projects.firstOrNull { it.id == projectId } ?: return
         if (_state.value.activeProject?.id == projectId || _state.value.isRunning || _state.value.projectTerminalRunning || _state.value.androidBuildRunning) return
@@ -5971,8 +5937,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     companion object {
-        /** The only guest files the Hermes raw editor may touch. */
-        private val HERMES_EDITABLE_FILES = setOf("config.yaml", ".env")
         /** A long-running agent can poll a managed command hundreds of times. Keep the chat
          * responsive by retaining the latest useful steps instead of composing an unbounded list. */
         private const val MAX_VISIBLE_WORK_ITEMS = 32

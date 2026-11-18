@@ -176,17 +176,17 @@ class ClaudeRuntimeBridge(
                 add("--verbose")
                 add("--model")
                 add(launch.environment["ANTHROPIC_MODEL"] ?: provider.model)
-                // v21 full-environment access: bridge turns run with
-                // permissions skipped, like Antigravity already does. There
-                // is no interactive approval channel for local Claude turns
-                // (the file-based watcher auto-approves the covered tools
-                // anyway), and under the old allow-list any other tool —
-                // web search/fetch, sub-agents, MCP tools — was denied
-                // outright in print mode. The settings/hook machinery stays
-                // for interactive terminal sessions. No --max-turns cap
-                // either: a turn runs until the task is done or the user
-                // stops it, like the other two agents.
-                add("--dangerously-skip-permissions")
+                // Permissions: the pre-v21 behaviour — the file-based
+                // watcher below auto-approves tool requests, exactly as
+                // it did when Claude turns worked. Do NOT add
+                // --dangerously-skip-permissions here: Claude Code
+                // hard-refuses that flag under root/sudo ("cannot be
+                // used with root/sudo privileges for security reasons")
+                // and the PRoot guest always runs as root, so the flag
+                // breaks every turn (v21 regression, reverted in v22).
+                // No --max-turns cap either (v21, kept): a turn runs
+                // until the task is done or the user stops it, like the
+                // other two agents.
             }
             Log.d("ClaudeBridge", "Launching command: $command")
             val process = installer.process(

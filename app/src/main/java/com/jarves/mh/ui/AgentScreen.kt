@@ -15,8 +15,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.ColumnScope
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -56,9 +54,7 @@ import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.ui.draw.clip
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.Warning
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -92,7 +88,6 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -114,8 +109,6 @@ import com.jarves.mh.network.ConnectionValidation
 import com.jarves.mh.network.DiscoveredModel
 import com.jarves.mh.network.ModelDiscoveryResult
 import com.jarves.mh.runtime.AntigravityAuthStatus
-import com.jarves.mh.runtime.HermesConfigOptions
-import com.jarves.mh.runtime.HermesEnvText
 import com.jarves.mh.ui.theme.PocketBlue
 import com.jarves.mh.ui.theme.PocketOrange
 import kotlinx.coroutines.launch
@@ -207,9 +200,6 @@ fun AgentScreen(
     onTestHermesHost: suspend (String, String) -> ConnectionValidation = { _, _ ->
         ConnectionValidation.Failure("Hermes host test is unavailable")
     },
-    onSaveHermesOptions: (HermesConfigOptions) -> Unit = {},
-    onReadHermesFile: suspend (String) -> String? = { null },
-    onWriteHermesFile: suspend (String, String) -> Boolean = { _, _ -> false },
 ) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -1285,16 +1275,6 @@ fun AgentScreen(
                             }
                         },
                     )
-                    if (viewedAgent == AgentKind.HERMES) {
-                        AgentHermesOptionsCard(
-                            state = state,
-                            onSave = onSaveHermesOptions,
-                        )
-                        AgentHermesRawFilesCard(
-                            onRead = onReadHermesFile,
-                            onWrite = onWriteHermesFile,
-                        )
-                    }
                     }
                 }
             }
@@ -2324,353 +2304,6 @@ private fun HermesHostModeRow(
             Text(subtitle, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2)
         }
         AgentSelectionDot(selected)
-    }
-}
-
-/** Shared shell for the Hermes settings cards, in the host card's style. */
-@Composable
-private fun HermesSettingsCard(
-    title: String,
-    desc: String,
-    content: @Composable ColumnScope.() -> Unit,
-) {
-    Surface(
-        color = MaterialTheme.colorScheme.surface,
-        shape = RoundedCornerShape(20.dp),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)),
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Column(Modifier.padding(horizontal = 16.dp, vertical = 18.dp)) {
-            Text(title, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.height(6.dp))
-            Text(
-                desc,
-                fontSize = 12.sp,
-                lineHeight = 17.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(Modifier.height(12.dp))
-            content()
-        }
-    }
-}
-
-/** The saved/status line used by the Hermes settings cards. */
-@Composable
-private fun HermesStatusRow(status: String?, statusOk: Boolean) {
-    if (status == null) return
-    Spacer(Modifier.height(10.dp))
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Icon(
-            if (statusOk) Icons.Default.Info else Icons.Default.Warning,
-            null,
-            tint = if (statusOk) PocketOrange else MaterialTheme.colorScheme.error,
-            modifier = Modifier.size(14.dp),
-        )
-        Spacer(Modifier.width(7.dp))
-        Text(
-            status,
-            fontSize = 11.sp,
-            lineHeight = 15.sp,
-            color = if (statusOk) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.error,
-            modifier = Modifier.weight(1f),
-        )
-    }
-}
-
-@Composable
-private fun HermesSwitchRow(
-    label: String,
-    checked: Boolean,
-    onCheckedChange: (Boolean) -> Unit,
-) {
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .padding(vertical = 2.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(label, fontSize = 13.sp, modifier = Modifier.weight(1f))
-        Switch(checked = checked, onCheckedChange = onCheckedChange)
-    }
-}
-
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-private fun HermesChipRow(
-    label: String,
-    choices: List<String>,
-    selected: String,
-    onSelect: (String) -> Unit,
-) {
-    Text(label, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-    Spacer(Modifier.height(6.dp))
-    FlowRow(
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        choices.forEach { choice ->
-            FilterChip(
-                selected = choice == selected,
-                onClick = { onSelect(choice) },
-                label = { Text(choice) },
-            )
-        }
-    }
-    Spacer(Modifier.height(12.dp))
-}
-
-/**
- * Hermes's config.yaml options as working controls. Every control writes
- * the same launch-time config merge the bridge performs, so a change here
- * changes the config Hermes actually loads on the next message.
- */
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-private fun AgentHermesOptionsCard(
-    state: AppUiState,
-    onSave: (HermesConfigOptions) -> Unit,
-) {
-    val initial = state.hermesOptions
-    var memoryEnabled by rememberSaveable(initial.memoryEnabled) { mutableStateOf(initial.memoryEnabled) }
-    var memoryUserProfile by rememberSaveable(initial.memoryUserProfile) { mutableStateOf(initial.memoryUserProfile) }
-    var memoryWriteApproval by rememberSaveable(initial.memoryWriteApproval) { mutableStateOf(initial.memoryWriteApproval) }
-    var skillsWriteApproval by rememberSaveable(initial.skillsWriteApproval) { mutableStateOf(initial.skillsWriteApproval) }
-    var curatorEnabled by rememberSaveable(initial.curatorEnabled) { mutableStateOf(initial.curatorEnabled) }
-    var codingContext by rememberSaveable(initial.codingContext) { mutableStateOf(initial.codingContext) }
-    var toolSearch by rememberSaveable(initial.toolSearch) { mutableStateOf(initial.toolSearch) }
-    var approvalsMode by rememberSaveable(initial.approvalsMode) { mutableStateOf(initial.approvalsMode) }
-    var approvalsCronMode by rememberSaveable(initial.approvalsCronMode) { mutableStateOf(initial.approvalsCronMode) }
-    var maxChildren by rememberSaveable(initial.delegationMaxChildren) { mutableStateOf(initial.delegationMaxChildren.toString()) }
-    var toolsets by remember(initial.cliToolsets) { mutableStateOf(initial.cliToolsets.toSet()) }
-    var status by remember { mutableStateOf<String?>(null) }
-    var statusOk by remember { mutableStateOf(false) }
-    val savedMessage = stringResource(R.string.hermes_options_saved)
-
-    HermesSettingsCard(
-        title = stringResource(R.string.hermes_options_title),
-        desc = stringResource(R.string.hermes_options_desc),
-    ) {
-        HermesSwitchRow(stringResource(R.string.hermes_options_memory), memoryEnabled) { memoryEnabled = it; status = null }
-        HermesSwitchRow(stringResource(R.string.hermes_options_memory_profile), memoryUserProfile) { memoryUserProfile = it; status = null }
-        HermesSwitchRow(stringResource(R.string.hermes_options_memory_approval), memoryWriteApproval) { memoryWriteApproval = it; status = null }
-        HermesSwitchRow(stringResource(R.string.hermes_options_skills_approval), skillsWriteApproval) { skillsWriteApproval = it; status = null }
-        HermesSwitchRow(stringResource(R.string.hermes_options_curator), curatorEnabled) { curatorEnabled = it; status = null }
-        Spacer(Modifier.height(12.dp))
-        HermesChipRow(
-            stringResource(R.string.hermes_options_coding_context),
-            HermesConfigOptions.CODING_CONTEXTS,
-            codingContext,
-        ) { codingContext = it; status = null }
-        HermesChipRow(
-            stringResource(R.string.hermes_options_tool_search),
-            HermesConfigOptions.TOOL_SEARCH_MODES,
-            toolSearch,
-        ) { toolSearch = it; status = null }
-        HermesChipRow(
-            stringResource(R.string.hermes_options_approvals),
-            HermesConfigOptions.APPROVAL_MODES,
-            approvalsMode,
-        ) { approvalsMode = it; status = null }
-        HermesChipRow(
-            stringResource(R.string.hermes_options_cron_approvals),
-            HermesConfigOptions.CRON_MODES,
-            approvalsCronMode,
-        ) { approvalsCronMode = it; status = null }
-        OutlinedTextField(
-            value = maxChildren,
-            onValueChange = { maxChildren = it.filter(Char::isDigit).take(3); status = null },
-            label = { Text(stringResource(R.string.hermes_options_delegation)) },
-            supportingText = { Text(stringResource(R.string.hermes_options_delegation_hint)) },
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(12.dp),
-        )
-        Spacer(Modifier.height(12.dp))
-        Text(stringResource(R.string.hermes_options_toolsets), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-        Spacer(Modifier.height(4.dp))
-        Text(
-            stringResource(R.string.hermes_options_toolsets_hint),
-            fontSize = 11.sp,
-            lineHeight = 15.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Spacer(Modifier.height(6.dp))
-        FlowRow(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            FilterChip(
-                selected = true,
-                enabled = false,
-                onClick = {},
-                label = { Text("hermes-cli") },
-            )
-            HermesConfigOptions.CLI_TOOLSET_CHOICES.forEach { choice ->
-                FilterChip(
-                    selected = choice in toolsets,
-                    onClick = {
-                        toolsets = if (choice in toolsets) toolsets - choice else toolsets + choice
-                        status = null
-                    },
-                    label = { Text(choice) },
-                )
-            }
-        }
-        HermesStatusRow(status, statusOk)
-        Spacer(Modifier.height(14.dp))
-        Button(
-            onClick = {
-                onSave(
-                    HermesConfigOptions(
-                        memoryEnabled = memoryEnabled,
-                        memoryUserProfile = memoryUserProfile,
-                        memoryWriteApproval = memoryWriteApproval,
-                        skillsWriteApproval = skillsWriteApproval,
-                        curatorEnabled = curatorEnabled,
-                        codingContext = codingContext,
-                        toolSearch = toolSearch,
-                        delegationMaxChildren = maxChildren.toIntOrNull()?.coerceAtLeast(1)
-                            ?: HermesConfigOptions.FULL_POWER.delegationMaxChildren,
-                        approvalsMode = approvalsMode,
-                        approvalsCronMode = approvalsCronMode,
-                        cliToolsets = HermesConfigOptions.CLI_TOOLSET_CHOICES.filter { it in toolsets },
-                    ),
-                )
-                status = savedMessage
-                statusOk = true
-            },
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(12.dp),
-        ) {
-            Text(stringResource(R.string.hermes_options_save))
-        }
-    }
-}
-
-/**
- * Raw editor for Hermes's own config.yaml and .env in the guest — the long
- * tail of Hermes settings that has no dedicated control. .env opens masked;
- * its values are only revealed (and editable) after an explicit Show.
- */
-@Composable
-private fun AgentHermesRawFilesCard(
-    onRead: suspend (String) -> String?,
-    onWrite: suspend (String, String) -> Boolean,
-) {
-    val scope = rememberCoroutineScope()
-    var editingFile by remember { mutableStateOf<String?>(null) }
-    var rawText by remember { mutableStateOf("") }
-    var editorText by remember { mutableStateOf("") }
-    var showValues by remember { mutableStateOf(false) }
-    var loading by remember { mutableStateOf(false) }
-    var status by remember { mutableStateOf<String?>(null) }
-    var statusOk by remember { mutableStateOf(false) }
-    val missingMessage = stringResource(R.string.hermes_files_missing)
-    val savedMessage = stringResource(R.string.hermes_files_saved)
-    val failedMessage = stringResource(R.string.hermes_files_save_failed)
-
-    fun openFile(name: String) {
-        scope.launch {
-            loading = true
-            val content = onRead(name)
-            loading = false
-            if (content == null) {
-                status = missingMessage
-                statusOk = false
-            } else {
-                rawText = content
-                showValues = name != ".env"
-                editorText = if (name == ".env") HermesEnvText.mask(content) else content
-                status = null
-                editingFile = name
-            }
-        }
-    }
-
-    HermesSettingsCard(
-        title = stringResource(R.string.hermes_files_title),
-        desc = stringResource(R.string.hermes_files_desc),
-    ) {
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            OutlinedButton(
-                onClick = { openFile("config.yaml") },
-                enabled = !loading,
-                modifier = Modifier.weight(1f),
-                shape = RoundedCornerShape(12.dp),
-            ) {
-                Text(stringResource(R.string.hermes_files_config))
-            }
-            OutlinedButton(
-                onClick = { openFile(".env") },
-                enabled = !loading,
-                modifier = Modifier.weight(1f),
-                shape = RoundedCornerShape(12.dp),
-            ) {
-                Text(stringResource(R.string.hermes_files_env))
-            }
-        }
-        HermesStatusRow(status, statusOk)
-    }
-
-    val name = editingFile
-    if (name != null) {
-        val isEnv = name == ".env"
-        AlertDialog(
-            onDismissRequest = { editingFile = null },
-            title = { Text(name) },
-            text = {
-                Column {
-                    if (isEnv && !showValues) {
-                        Text(
-                            stringResource(R.string.hermes_files_env_masked_note),
-                            fontSize = 11.sp,
-                            lineHeight = 15.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        Spacer(Modifier.height(8.dp))
-                    }
-                    OutlinedTextField(
-                        value = editorText,
-                        onValueChange = { if (!isEnv || showValues) editorText = it },
-                        readOnly = isEnv && !showValues,
-                        textStyle = TextStyle(fontFamily = FontFamily.Monospace, fontSize = 11.sp, lineHeight = 15.sp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(320.dp),
-                        shape = RoundedCornerShape(12.dp),
-                    )
-                }
-            },
-            confirmButton = {
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    if (isEnv && !showValues) {
-                        TextButton(onClick = { showValues = true; editorText = rawText }) {
-                            Text(stringResource(R.string.hermes_files_show))
-                        }
-                    }
-                    TextButton(
-                        onClick = {
-                            scope.launch {
-                                val ok = onWrite(name, editorText)
-                                editingFile = null
-                                status = if (ok) savedMessage else failedMessage
-                                statusOk = ok
-                            }
-                        },
-                        enabled = !isEnv || showValues,
-                    ) {
-                        Text(stringResource(R.string.hermes_files_save))
-                    }
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { editingFile = null }) {
-                    Text(stringResource(R.string.hermes_files_cancel))
-                }
-            },
-        )
     }
 }
 

@@ -40,6 +40,17 @@ package com.jarves.mh.runtime
  * are pulled out wherever they land, and the remaining lines, in order,
  * are the response. This type is pure (stdlib only) so the classification
  * is unit-tested against the captured real outputs.
+ *
+ * One leak the contract above does not promise but the field produced
+ * (v22): the model's reasoning can ride inside the response text framed
+ * as Hermes CLI's own reasoning box — a `┌─ Reasoning ─…─┐` header, the
+ * reasoning lines, and a `└─…─┘` footer (the frame `cli.py` draws around
+ * thinking, in `_stream_reasoning_delta` / the post-turn display) — or,
+ * equivalently, wrapped in `<think>`-style tags. The user saw the box,
+ * reasoning paragraphs and all, as the chat reply to a plain greeting.
+ * Reasoning is not answer text: the Collector drops the framed box and
+ * any tag-wrapped thinking segment before classification, so only the
+ * final answer is ever stored as the assistant message.
  */
 internal object HermesQuietOutput {
 
@@ -64,8 +75,49 @@ internal object HermesQuietOutput {
         private var sawTraceback = false
         private var inUsageBlock = false
         private var lastContentLine: String? = null
+        private var inReasoningBox = false
+        private var inThinkBlock = false
 
-        fun accept(line: String) {
+        /**
+         * The line with any reasoning segment removed, or null when the
+         * line is reasoning (or inside reasoning) and must be dropped:
+         * the framed `┌─ Reasoning ─…─┐` box (frame lines are matched
+         * after stripping ANSI escapes — the CLI wraps them in dim
+         * codes) and `<think>`-style tag blocks, including blocks that
+         * span lines or share a line with answer text.
+         */
+        private fun visibleLine(rawLine: String): String? {
+            val plain = ANSI_ESCAPE.replace(rawLine, "").trim()
+            if (inReasoningBox) {
+                if (REASONING_BOX_CLOSE.matches(plain)) inReasoningBox = false
+                return null
+            }
+            if (REASONING_BOX_OPEN.matches(plain)) {
+                inReasoningBox = true
+                return null
+            }
+            var rest = rawLine
+            if (inThinkBlock) {
+                val close = THINK_CLOSE.find(rest) ?: return null
+                rest = rest.substring(close.range.last + 1)
+                inThinkBlock = false
+            }
+            while (true) {
+                val open = THINK_OPEN.find(rest) ?: break
+                val after = rest.substring(open.range.last + 1)
+                val close = THINK_CLOSE.find(after)
+                if (close == null) {
+                    rest = rest.substring(0, open.range.first)
+                    inThinkBlock = true
+                    break
+                }
+                rest = rest.substring(0, open.range.first) + after.substring(close.range.last + 1)
+            }
+            return rest
+        }
+
+        fun accept(rawLine: String) {
+            val line = visibleLine(rawLine) ?: return
             val trimmed = line.trim()
             if (inUsageBlock) {
                 // Argparse usage dump: continuation lines are indented (or
@@ -123,6 +175,15 @@ internal object HermesQuietOutput {
             ?: outcome.errorText
             ?: outcome.responseText.takeIf(String::isNotBlank)
             ?: "Hermes Agent stopped with exit code $exitCode"
+
+    private val ANSI_ESCAPE = Regex("\u001B\\[[0-9;]*[A-Za-z]")
+    /** `┌─ Reasoning ───┐` — the frame header cli.py draws around thinking. */
+    private val REASONING_BOX_OPEN = Regex("^┌─ Reasoning ─*┐$")
+    /** `└───┘` — the frame footer. */
+    private val REASONING_BOX_CLOSE = Regex("^└─*┘$")
+    /** The tag set Hermes itself suppresses during streaming (cli.py). */
+    private val THINK_OPEN = Regex("<(REASONING_SCRATCHPAD|think|thinking|reasoning|thought)>", RegexOption.IGNORE_CASE)
+    private val THINK_CLOSE = Regex("</(REASONING_SCRATCHPAD|think|thinking|reasoning|thought)>", RegexOption.IGNORE_CASE)
 
     private val SESSION_ID_LINE = Regex("^session_id:\\s*(\\S+)\\s*$")
     private val ERROR_LINE = Regex("^Error:\\s*(.+)$")
