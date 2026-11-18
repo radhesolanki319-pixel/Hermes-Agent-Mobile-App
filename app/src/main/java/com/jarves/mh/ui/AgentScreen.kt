@@ -205,7 +205,7 @@ fun AgentScreen(
     onTestHermesHost: suspend (String, String) -> ConnectionValidation = { _, _ ->
         ConnectionValidation.Failure("Hermes host test is unavailable")
     },
-    getSavedHermesApiKey: () -> String = { "" },
+    getSavedHermesApiKey: (String) -> String = { "" },
     onSaveHermesSetup: (String, String, String, String) -> Unit = { _, _, _, _ -> },
     onSaveHermesOptions: (HermesConfigOptions) -> Unit = {},
     onReadHermesFile: suspend (String) -> String? = { null },
@@ -2260,13 +2260,16 @@ private fun HermesStatusRow(status: String?, statusOk: Boolean) {
 @Composable
 private fun AgentHermesSetupCard(
     state: AppUiState,
-    getSavedKey: () -> String,
+    getSavedKey: (String) -> String,
     onSave: (String, String, String, String) -> Unit,
 ) {
     var providerId by rememberSaveable(state.hermesProviderId) { mutableStateOf(state.hermesProviderId) }
     var model by rememberSaveable(state.hermesModel) { mutableStateOf(state.hermesModel) }
     var baseUrl by rememberSaveable(state.hermesCustomBaseUrl) { mutableStateOf(state.hermesCustomBaseUrl) }
-    var key by rememberSaveable { mutableStateOf(getSavedKey()) }
+    // One key per provider (unified store, v19): switching the provider
+    // reloads THAT provider's saved key instead of carrying one key
+    // across providers.
+    var key by rememberSaveable(providerId) { mutableStateOf(getSavedKey(providerId)) }
     var keyVisible by rememberSaveable { mutableStateOf(false) }
     var showPicker by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf<String?>(null) }

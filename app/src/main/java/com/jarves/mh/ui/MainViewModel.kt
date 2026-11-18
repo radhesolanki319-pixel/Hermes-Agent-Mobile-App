@@ -27,6 +27,9 @@ import com.jarves.mh.R
 import com.jarves.mh.data.ApiKeyVault
 import com.jarves.mh.data.ApiKeyInfo
 import com.jarves.mh.data.AppPreferences
+import com.jarves.mh.data.ProviderKeyMigration
+import com.jarves.mh.data.ProviderKeyMigrator
+import com.jarves.mh.data.ProviderKeys
 import com.jarves.mh.genui.GenUiActionBridge
 import com.jarves.mh.genui.GenUiActionDef
 import com.jarves.mh.genui.GenUiActionTypes
@@ -66,7 +69,6 @@ import com.jarves.mh.runtime.AntigravityAuthState
 import com.jarves.mh.runtime.AntigravityAuthStatus
 import com.jarves.mh.runtime.AntigravityRuntimeBridge
 import com.jarves.mh.runtime.HERMES_GATEWAY_VAULT_ID
-import com.jarves.mh.runtime.HERMES_SETUP_VAULT_ID
 import com.jarves.mh.runtime.HermesConfigOptions
 import com.jarves.mh.runtime.HermesGatewayUrls
 import com.jarves.mh.runtime.HermesHostConfig
@@ -443,7 +445,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val vault = ApiKeyVault(application)
     private val preferences = AppPreferences(application)
-    private val claudeRuntime = ClaudeRuntimeBridge(application) { profile -> vault.get(profile.kind.name) }
+    private val claudeRuntime = ClaudeRuntimeBridge(application) { profile ->
+        vault.get(ProviderKeys.canonicalForKind(profile.kind))
+    }
     private val installer = RuntimeInstaller(application)
     private val antigravityRuntime = AntigravityRuntimeBridge(
         application,
@@ -465,7 +469,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     model = preferences.hermesModel,
                     customBaseUrl = preferences.hermesCustomBaseUrl,
                 ),
-                secret = vault.get(HERMES_SETUP_VAULT_ID).orEmpty(),
+                secret = vault.get(ProviderKeys.canonicalForHermes(preferences.hermesProviderId)).orEmpty(),
                 options = preferences.hermesConfigOptions(),
             )
         },
@@ -547,8 +551,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             agentKind = initialAgentKind,
             primaryAgentKind = initialPrimaryAgentKind,
             provider = preferences.loadProvider(vault, initialAgentKind),
-            activeApiKeyName = vault.list(preferences.loadProvider(vault, initialAgentKind).kind.name)
-                .firstOrNull(ApiKeyInfo::isActive)?.name,
+            activeApiKeyName = vault.list(
+                ProviderKeys.canonicalForKind(preferences.loadProvider(vault, initialAgentKind).kind),
+            ).firstOrNull(ApiKeyInfo::isActive)?.name,
             antigravityAuth = AntigravityAuthState(
                 status = if (preferences.antigravitySignedIn) AntigravityAuthStatus.SIGNED_IN else AntigravityAuthStatus.SIGNED_OUT,
                 message = preferences.antigravityAccountEmail.takeIf(String::isNotBlank)?.let { str(R.string.vm_connected_as, it) },
@@ -693,7 +698,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 model = TEST_OPENROUTER_MODEL,
                 hasSecret = true,
             )
-            vault.put(ProviderKind.CUSTOM.name, BuildConfig.TEST_OPENROUTER_API_KEY)
+            vault.put(ProviderKeys.canonicalForKind(ProviderKind.CUSTOM), BuildConfig.TEST_OPENROUTER_API_KEY)
             preferences.saveProvider(testProvider, _state.value.agentKind)
             preferences.testProviderDefaultsVersion = TEST_PROVIDER_DEFAULTS_VERSION
             _state.update { it.copy(provider = testProvider) }
@@ -2109,18 +2114,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun getSavedHermesApiKey(): String = vault.get(HERMES_SETUP_VAULT_ID).orEmpty()
+    /** The saved key for a Hermes provider, from the unified provider store. */
+    fun getSavedHermesApiKey(providerId: String): String =
+        vault.get(ProviderKeys.canonicalForHermes(providerId)).orEmpty()
 
     /**
      * Persists the Hermes-native setup (Hermes's own provider/model/base
-     * URL); the API key goes to the encrypted vault under its Hermes pool
-     * id. A blank key clears the saved one, mirroring the host card.
+     * URL); the API key goes to the unified provider store under the
+     * selected provider's canonical id — the same key every other agent
+     * set to that provider uses. A blank key clears that provider's
+     * saved key, mirroring the host card.
      */
     fun saveHermesSetup(providerId: String, model: String, baseUrl: String, key: String) {
         preferences.hermesProviderId = providerId
         preferences.hermesModel = model.trim()
         preferences.hermesCustomBaseUrl = baseUrl.trim()
-        if (key.isBlank()) vault.remove(HERMES_SETUP_VAULT_ID) else vault.put(HERMES_SETUP_VAULT_ID, key)
+        val pool = ProviderKeys.canonicalForHermes(providerId)
+        if (key.isBlank()) vault.remove(pool) else vault.put(pool, key)
         _state.update {
             it.copy(
                 hermesProviderId = providerId,
@@ -2131,27 +2141,27 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     // --- Simple "API Keys" screen (Settings) ---------------------------------
-    // Key-only writes onto the SAME vault pools the advanced surfaces use, so
-    // a key entered on either surface is the same key. A blank value clears
-    // the saved key, mirroring the Hermes cards' save behaviour.
+    // Key-only writes onto the unified provider store (v19): one pool per
+    // provider, shared by every agent and every surface, so a key entered
+    // anywhere is the same key everywhere. A blank value clears the saved
+    // key, mirroring the Hermes cards' save behaviour.
 
-    /** The stored provider profile for any agent (the simple screen shows each agent's active key). */
+    /** The stored provider profile for any agent (the simple screen derives its fields from these). */
     fun providerProfileFor(agent: AgentKind): ProviderProfile = preferences.loadProvider(vault, agent)
 
-    /** Saves only the Hermes setup key (HERMES_SETUP pool); provider/model/base URL are untouched. */
-    fun updateHermesApiKey(secret: String) {
-        if (secret.isBlank()) vault.remove(HERMES_SETUP_VAULT_ID) else vault.put(HERMES_SETUP_VAULT_ID, secret)
+    /** The saved key for a provider in the unified store, by canonical id. */
+    fun getSavedProviderKey(canonicalId: String): String = vault.get(canonicalId).orEmpty()
+
+    /** Saves only a provider's key in the unified store; every agent set to that provider picks it up. */
+    fun updateProviderApiKey(canonicalId: String, secret: String) {
+        if (secret.isBlank()) vault.remove(canonicalId) else vault.put(canonicalId, secret)
+        ProviderKind.entries.firstOrNull { ProviderKeys.canonicalForKind(it) == canonicalId }
+            ?.let { refreshActiveApiKey(it) }
     }
 
     /** Saves only the Hermes host gateway key (HERMES_GATEWAY pool); host mode/URL are untouched. */
     fun updateHermesHostKey(secret: String) {
         if (secret.isBlank()) vault.remove(HERMES_GATEWAY_VAULT_ID) else vault.put(HERMES_GATEWAY_VAULT_ID, secret)
-    }
-
-    /** Saves only a profile agent's active key, into the pool named by its provider kind. */
-    fun updateAgentApiKey(kind: ProviderKind, secret: String) {
-        if (secret.isBlank()) vault.remove(kind.name) else vault.put(kind.name, secret)
-        refreshActiveApiKey(kind)
     }
 
     /** Persists the Fusion/Auto model choice into the same `hermes_model` the advanced setup edits. */
@@ -2192,32 +2202,37 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }.getOrDefault(false)
     }
 
-    fun getSavedApiKey(kind: ProviderKind): String = vault.get(kind.name).orEmpty()
+    fun getSavedApiKey(kind: ProviderKind): String =
+        vault.get(ProviderKeys.canonicalForKind(kind)).orEmpty()
 
-    fun getSavedApiKeys(kind: ProviderKind): List<ApiKeyInfo> = vault.list(kind.name)
+    fun getSavedApiKeys(kind: ProviderKind): List<ApiKeyInfo> =
+        vault.list(ProviderKeys.canonicalForKind(kind))
 
     fun addApiKey(kind: ProviderKind, name: String, secret: String): List<ApiKeyInfo> {
-        vault.add(kind.name, name, secret)
-        val keys = vault.list(kind.name)
+        val pool = ProviderKeys.canonicalForKind(kind)
+        vault.add(pool, name, secret)
+        val keys = vault.list(pool)
         refreshActiveApiKey(kind)
         return keys
     }
 
     fun activateApiKey(kind: ProviderKind, keyId: String): List<ApiKeyInfo> {
-        vault.activate(kind.name, keyId)
+        val pool = ProviderKeys.canonicalForKind(kind)
+        vault.activate(pool, keyId)
         refreshActiveApiKey(kind)
-        return vault.list(kind.name)
+        return vault.list(pool)
     }
 
     fun removeApiKey(kind: ProviderKind, keyId: String): List<ApiKeyInfo> {
-        vault.remove(kind.name, keyId)
+        val pool = ProviderKeys.canonicalForKind(kind)
+        vault.remove(pool, keyId)
         refreshActiveApiKey(kind)
-        return vault.list(kind.name)
+        return vault.list(pool)
     }
 
     private fun refreshActiveApiKey(kind: ProviderKind) {
         if (_state.value.provider.kind != kind) return
-        val keys = vault.list(kind.name)
+        val keys = vault.list(ProviderKeys.canonicalForKind(kind))
         _state.update { current ->
             current.copy(
                 activeApiKeyName = keys.firstOrNull(ApiKeyInfo::isActive)?.name,
@@ -2234,9 +2249,48 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     init {
+        migrateProviderKeysIfNeeded()
         viewModelScope.launch { RuntimeSetupController.snapshot.collect(::onSetupSnapshot) }
         viewModelScope.launch { claudeRuntime.events.collect(::onRuntimeEvent) }
         viewModelScope.launch { bootstrap() }
+    }
+
+    /**
+     * One-time v19 unification: copies every key from the old per-agent
+     * silos (the Hermes setup pool and the per-[ProviderKind] pools) into
+     * the unified per-provider store (see [ProviderKeyMigration] for the
+     * priority rule). Runs synchronously during construction, before any
+     * bridge can resolve a key; the old pools are left untouched.
+     *
+     * The retired upstream seed credential is removed BEFORE its pool can
+     * be copied — otherwise migration would resurrect it as the unified
+     * Custom key. (Bootstrap's own removal block then sees the flag set
+     * and skips; the state refresh below covers its UI fix-up.)
+     */
+    private fun migrateProviderKeysIfNeeded() {
+        if (preferences.providerKeysUnified) return
+        if (!preferences.legacySeededCredentialRemoved) {
+            vault.remove(ProviderKind.CUSTOM.name)
+            preferences.legacySeededCredentialRemoved = true
+        }
+        ProviderKeyMigrator.migrate(
+            vault,
+            ProviderKeyMigration.plan(
+                hermesProviderId = preferences.hermesProviderId,
+                selectedKind = _state.value.provider.kind,
+            ),
+        )
+        preferences.providerKeysUnified = true
+        // The initial state snapshot was built before migration ran;
+        // refresh the two values it read from the vault.
+        val provider = preferences.loadProvider(vault, _state.value.agentKind)
+        _state.update { current ->
+            current.copy(
+                provider = provider,
+                activeApiKeyName = vault.list(ProviderKeys.canonicalForKind(provider.kind))
+                    .firstOrNull(ApiKeyInfo::isActive)?.name,
+            )
+        }
     }
 
     private suspend fun bootstrap() {
@@ -2610,9 +2664,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun finishOnboarding(profile: ProviderProfile, secret: String) {
-        vault.put(profile.kind.name, secret)
+        val pool = ProviderKeys.canonicalForKind(profile.kind)
+        vault.put(pool, secret)
         val saved = profile.copy(
-            hasSecret = secret.isNotBlank() || vault.contains(profile.kind.name),
+            hasSecret = secret.isNotBlank() || vault.contains(pool),
         )
         preferences.saveProvider(saved, _state.value.agentKind)
         preferences.onboardingComplete = true
@@ -2675,7 +2730,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 agentKind = kind,
                 primaryAgentKind = if (selectingInitialAgent) kind else current.primaryAgentKind,
                 provider = provider,
-                activeApiKeyName = vault.list(provider.kind.name).firstOrNull(ApiKeyInfo::isActive)?.name,
+                activeApiKeyName = vault.list(ProviderKeys.canonicalForKind(provider.kind)).firstOrNull(ApiKeyInfo::isActive)?.name,
                 // Ping results belong to the previous agent; never leak them across.
                 apiPingStatus = ApiPingStatus.IDLE,
                 apiPingMessage = null,
@@ -3085,7 +3140,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     suspend fun discoverModels(profile: ProviderProfile, secret: String): ModelDiscoveryResult {
-        val key = secret.ifBlank { vault.get(profile.kind.name).orEmpty() }
+        val key = secret.ifBlank { vault.get(ProviderKeys.canonicalForKind(profile.kind)).orEmpty() }
         return providerApi.discoverModels(profile.baseUrl, key, profile.kind.protocol)
     }
 
@@ -3094,7 +3149,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         secret: String,
         models: List<com.jarves.mh.network.DiscoveredModel>,
     ): ConnectionValidation {
-        val key = secret.ifBlank { vault.get(profile.kind.name).orEmpty() }
+        val key = secret.ifBlank { vault.get(ProviderKeys.canonicalForKind(profile.kind)).orEmpty() }
         return providerApi.validate(
             profile.baseUrl,
             profile.model,
@@ -3130,7 +3185,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (_state.value.apiPingStatus == ApiPingStatus.PINGING) return
         _state.update { it.copy(apiPingStatus = ApiPingStatus.PINGING, apiPingMessage = str(R.string.vm_ping_sending)) }
         viewModelScope.launch {
-            val key = vault.get(profile.kind.name).orEmpty()
+            val key = vault.get(ProviderKeys.canonicalForKind(profile.kind)).orEmpty()
             val result = providerApi.validate(
                 profile.baseUrl,
                 profile.model,
@@ -5610,11 +5665,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (!current.isRunning || current.activeSessionId != event.sessionId) return false
         if (!isApiKeyFailure(event.reason)) return false
         val request = activeRuntimeRequest ?: return false
-        val credentials = vault.credentials(request.provider.kind.name)
+        // The unified provider pool this turn's key came from: Hermes turns
+        // resolve through the Hermes setup's provider, profile agents
+        // through their profile kind — both land in the same per-provider
+        // store (v19). Rotation only marks ids in memory for this prompt;
+        // a rejected key is NEVER deleted or blacklisted in the vault.
+        val pool = if (current.agentKind == AgentKind.HERMES) {
+            ProviderKeys.canonicalForHermes(preferences.hermesProviderId)
+        } else {
+            ProviderKeys.canonicalForKind(request.provider.kind)
+        }
+        val credentials = vault.credentials(pool)
         val active = credentials.firstOrNull { it.isActive } ?: return false
         failedApiKeyIds += active.id
         val next = credentials.firstOrNull { it.id !in failedApiKeyIds } ?: return false
-        if (!vault.activate(request.provider.kind.name, next.id)) return false
+        if (!vault.activate(pool, next.id)) return false
         _state.update {
             it.copy(
                 activeSessionId = null,

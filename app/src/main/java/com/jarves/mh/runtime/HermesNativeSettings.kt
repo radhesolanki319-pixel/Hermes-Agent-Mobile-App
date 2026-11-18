@@ -26,12 +26,19 @@ package com.jarves.mh.runtime
  *    itself kept in `.env` (never inline in config.yaml).
  *
  * The values are persisted by AppPreferences (ids/options) and ApiKeyVault
- * (the API key under [HERMES_SETUP_VAULT_ID]) and materialised into the
- * guest's `/root/.hermes/config.yaml` + `.env` on every launch by
- * [HermesConfigFiles] — the same files `hermes setup` would write.
+ * (the API key in the unified provider store — the pool named by the
+ * selected provider's canonical id, see `data/ProviderKeys`) and
+ * materialised into the guest's `/root/.hermes/config.yaml` + `.env` on
+ * every launch by [HermesConfigFiles] — the same files `hermes setup`
+ * would write.
  */
 
-/** ApiKeyVault pool id holding the API key for the Hermes-native setup. */
+/**
+ * LEGACY ApiKeyVault pool id that held the Hermes-native setup's single
+ * API key before v19. Since the v19 unification the setup's key lives in
+ * the per-provider unified store; this pool is only ever READ by the
+ * one-time migration (ProviderKeyMigration) and is otherwise untouched.
+ */
 const val HERMES_SETUP_VAULT_ID = "HERMES_SETUP"
 
 /**

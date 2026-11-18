@@ -286,10 +286,9 @@ import com.jarves.mh.ui.theme.AppLanguage
 import com.jarves.mh.ui.theme.AppThemeMode
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.Terminal
-import androidx.compose.material3.ExtendedFloatingActionButton
 
 private enum class RootScreen(@StringRes val labelRes: Int, val icon: ImageVector) {
-    PROJECTS(R.string.tab_projects, Icons.Default.Folder),
+    CHAT(R.string.tab_chat, Icons.Default.Chat),
     AGENT(R.string.tab_agent, Icons.Default.SmartToy),
     SETTINGS(R.string.tab_settings, Icons.Default.Settings),
 }
@@ -305,12 +304,28 @@ private enum class WorkspaceTab(@StringRes val labelRes: Int, val icon: ImageVec
 fun PocketDevApp(viewModel: MainViewModel = viewModel()) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
-    val projectsListState = rememberSaveable(saver = LazyListState.Saver) { LazyListState() }
     LaunchedEffect(state.toastMessage) {
         state.toastMessage?.let { message ->
             Toast.makeText(context, message, Toast.LENGTH_LONG).show()
             viewModel.consumeToast()
         }
+    }
+    // Chat-first: the app opens straight into chat — the most recently used
+    // project's workspace, or a fresh quick project when none exists yet. An
+    // existing install keeps its projects and history; nothing is recreated.
+    LaunchedEffect(state.startupStage, state.activeProject?.id, state.readOnlyProject?.id) {
+        if (state.startupStage == StartupStage.READY &&
+            state.activeProject == null && state.readOnlyProject == null
+        ) {
+            val recent = state.projects.maxByOrNull { it.updatedAtMillis }
+            if (recent != null) viewModel.openProject(recent) else viewModel.createQuickProject()
+        }
+    }
+    // The self-update install dialog is hosted here so it can appear over any
+    // screen (it used to live on the removed Projects home screen).
+    var showUpdateDialog by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(state.appUpdate?.versionCode) {
+        if (state.appUpdate != null) showUpdateDialog = true
     }
     BackupRestartEffect()
     when {
@@ -407,74 +422,14 @@ fun PocketDevApp(viewModel: MainViewModel = viewModel()) {
             onSwitchChat = viewModel::switchReadOnlyChat,
             onContinueHere = viewModel::activateReadOnlyProject,
         )
-        state.activeProject != null && state.workspaceVisible -> WorkspaceScreen(
+        else -> RootScreenHost(state, viewModel, onShowAppUpdate = { showUpdateDialog = true })
+    }
+    if (showUpdateDialog && state.appUpdate != null) {
+        AppUpdateDialog(
             state = state,
-            onBack = viewModel::closeProject,
-            onSend = viewModel::sendPrompt,
-            onStop = viewModel::stopTask,
-            onSteerFollowUp = viewModel::steerQueuedFollowUp,
-            onRemoveFollowUp = viewModel::removeQueuedFollowUp,
-            onApproval = viewModel::answerApproval,
-            onGenUiAction = viewModel::handleGenUiAction,
-            onRefreshFiles = viewModel::refreshProjectFiles,
-            onLoadProjectDirectory = viewModel::loadProjectDirectory,
-            onCreateWorkspaceEntry = viewModel::createWorkspaceEntry,
-            onRenameWorkspaceEntry = viewModel::renameWorkspaceEntry,
-            onDeleteWorkspaceEntry = viewModel::deleteWorkspaceEntry,
-            onUploadToWorkspace = viewModel::uploadToWorkspace,
-            onShareWorkspaceFile = viewModel::shareWorkspaceFile,
-            onSaveWorkspaceFileCopy = viewModel::saveWorkspaceFileCopy,
-            onOpenFile = viewModel::openFile,
-            onCloseFile = viewModel::closeFile,
-            onBeginFileEdit = viewModel::beginFileEdit,
-            onUpdateFileDraft = viewModel::updateFileDraft,
-            onCancelFileEdit = viewModel::cancelFileEdit,
-            onSaveFile = viewModel::saveOpenedFile,
-            onReloadFile = viewModel::reloadOpenedFile,
-            onDismissFileConflict = viewModel::dismissFileConflict,
-            onUndoChanges = viewModel::undoLastChanges,
-            onKeepChanges = viewModel::keepLastChanges,
-            onUndoFileChange = viewModel::undoFileChange,
-            onKeepFileChange = viewModel::keepFileChange,
-            onCreateChat = viewModel::createChat,
-            onSwitchChat = viewModel::switchChat,
-            onTerminalRun = viewModel::requestProjectTerminalCommand,
-            onTerminalInput = viewModel::sendProjectTerminalInput,
-            onTerminalInterrupt = viewModel::interruptProjectTerminalCommand,
-            onTerminalPrepare = viewModel::prepareProjectTerminalCommand,
-            onTerminalDraftConsumed = viewModel::consumeProjectTerminalDraft,
-            onTerminalOpened = viewModel::openProjectTerminal,
-            onTerminalStop = viewModel::stopProjectTerminalCommand,
-            onTerminalClear = viewModel::clearProjectTerminal,
-            onTerminalConfirm = viewModel::confirmProjectTerminalCommand,
-            onTerminalCancel = viewModel::cancelProjectTerminalCommand,
-            onUseSuggestedProjectRoot = viewModel::useSuggestedProjectRoot,
-            onExportProject = viewModel::exportActiveProject,
-            onAddAttachments = viewModel::addChatAttachments,
-            onRemoveAttachment = viewModel::removePendingAttachment,
-            onOpenAttachment = viewModel::openChatAttachment,
-            onBuildAndRunAndroid = viewModel::buildAndRunAndroidApp,
-            onAndroidAction = viewModel::performAndroidAction,
-            onRefreshAndroidDashboard = viewModel::refreshAndroidDashboard,
-            onShareAndroidApk = viewModel::shareAndroidApk,
-            onSaveAndroidApk = viewModel::saveAndroidApk,
-            onOpenAndroidAppDetails = viewModel::openInstalledAndroidAppDetails,
-            onUninstallAndroidApp = viewModel::uninstallAndroidApp,
-            onOpenAndroidIssue = viewModel::openAndroidIssue,
-            onAndroidHealthFix = viewModel::performAndroidHealthFix,
-            onRefreshAndroidHealth = viewModel::refreshAndroidHealth,
-            onStartAndroidLogcat = viewModel::startAndroidLogcat,
-            onStopAndroidLogcat = viewModel::stopAndroidLogcat,
-            onToggleAndroidLogcatPause = viewModel::toggleAndroidLogcatPause,
-            onClearAndroidLogcat = viewModel::clearAndroidLogcat,
-            onAndroidLogcatQuery = viewModel::setAndroidLogcatQuery,
-            onAndroidLogcatLevel = viewModel::setAndroidLogcatLevel,
-            onOpenAndroidLogLine = viewModel::openAndroidLogLine,
-            onCancelAndroidBuild = viewModel::cancelAndroidBuild,
-            onCleanAndroid = viewModel::cleanAndroidProject,
-            onInstallAndroidTools = { viewModel.installDevStack(DevStack.ANDROID) },
+            onInstallUpdate = viewModel::installAppUpdate,
+            onDismiss = { showUpdateDialog = false },
         )
-        else -> RootScreenHost(state, viewModel, projectsListState)
     }
 }
 
@@ -2476,10 +2431,12 @@ private fun formatMegabytes(bytes: Long): String = "%.1f MB".format(bytes / 1_04
 private fun RootScreenHost(
     state: AppUiState,
     viewModel: MainViewModel,
-    projectsListState: LazyListState = rememberSaveable(saver = LazyListState.Saver) { LazyListState() },
+    onShowAppUpdate: () -> Unit,
 ) {
-    var screen by rememberSaveable { mutableStateOf(RootScreen.PROJECTS) }
-    var showQuickTerminal by rememberSaveable { mutableStateOf(false) }
+    // Stored as a name so a tab value saved by an older build (e.g. the removed
+    // PROJECTS tab) falls back to Chat instead of failing to restore.
+    var screenName by rememberSaveable { mutableStateOf(RootScreen.CHAT.name) }
+    val screen = RootScreen.entries.firstOrNull { it.name == screenName } ?: RootScreen.CHAT
     var openBackup by rememberSaveable { mutableStateOf(false) }
 
     if (state.showWhatsNew) {
@@ -2488,15 +2445,11 @@ private fun RootScreenHost(
             onOpenBackup = {
                 viewModel.dismissWhatsNew()
                 openBackup = true
-                screen = RootScreen.SETTINGS
+                screenName = RootScreen.SETTINGS.name
             },
         )
     }
     val keyboardVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
-    val terminalLines by viewModel.terminalLines.collectAsStateWithLifecycle()
-    val isTerminalRunning by viewModel.isTerminalRunning.collectAsStateWithLifecycle()
-    val terminalLiveOutput by viewModel.terminalLiveOutput.collectAsStateWithLifecycle()
-    val terminalCurrentCommand by viewModel.terminalCurrentCommand.collectAsStateWithLifecycle()
 
     Scaffold(
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
@@ -2505,7 +2458,7 @@ private fun RootScreenHost(
                 RootScreen.entries.forEach { tab ->
                     NavigationBarItem(
                         selected = screen == tab,
-                        onClick = { screen = tab },
+                        onClick = { screenName = tab.name },
                         icon = {
                             BadgedBox(
                                 badge = { if (tab == RootScreen.SETTINGS && !state.backupFeatureSeen) Badge() },
@@ -2521,41 +2474,89 @@ private fun RootScreenHost(
                 }
             }
         },
-        floatingActionButton = {
-            if (screen == RootScreen.PROJECTS && !keyboardVisible && !showQuickTerminal) {
-                ExtendedFloatingActionButton(
-                    onClick = { showQuickTerminal = true },
-                    icon = { Icon(Icons.Default.Terminal, contentDescription = null) },
-                    text = { Text(stringResource(R.string.projects_terminal), fontWeight = FontWeight.SemiBold) },
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    contentColor = MaterialTheme.colorScheme.onPrimary,
-                )
-            }
-        },
     ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding)) {
             when (screen) {
-                RootScreen.PROJECTS -> ProjectsScreen(
-                    state = state,
-                    listState = projectsListState,
-                    onOpen = viewModel::openProject,
-                    onCreate = viewModel::createProject,
-                    onCreateAndroid = viewModel::createAndroidProject,
-                    onCreateQuickProject = viewModel::createQuickProject,
-                    onImportZip = viewModel::importZipProject,
-                    onCloneGit = viewModel::clonePublicGitRepository,
-                    onStartGitHubLogin = viewModel::startGitHubLogin,
-                    onGenerateNewGitHubCode = viewModel::generateNewGitHubCode,
-                    onRefreshGitHub = viewModel::refreshGitHubRepositories,
-                    onDisconnectGitHub = viewModel::disconnectGitHub,
-                    onCloneGitHub = viewModel::cloneGitHubRepository,
-                    onRenameProject = viewModel::renameProject,
-                    onDeleteProject = viewModel::deleteProject,
-                    onSettings = { screen = RootScreen.SETTINGS },
-                    onPing = viewModel::pingApi,
-                    onToggleTheme = viewModel::toggleTheme,
-                    onInstallUpdate = viewModel::installAppUpdate,
-                )
+                RootScreen.CHAT -> if (state.activeProject != null) {
+                    WorkspaceScreen(
+                        state = state,
+                        onSend = viewModel::sendPrompt,
+                        onStop = viewModel::stopTask,
+                        onSteerFollowUp = viewModel::steerQueuedFollowUp,
+                        onRemoveFollowUp = viewModel::removeQueuedFollowUp,
+                        onApproval = viewModel::answerApproval,
+                        onGenUiAction = viewModel::handleGenUiAction,
+                        onRefreshFiles = viewModel::refreshProjectFiles,
+                        onLoadProjectDirectory = viewModel::loadProjectDirectory,
+                        onCreateWorkspaceEntry = viewModel::createWorkspaceEntry,
+                        onRenameWorkspaceEntry = viewModel::renameWorkspaceEntry,
+                        onDeleteWorkspaceEntry = viewModel::deleteWorkspaceEntry,
+                        onUploadToWorkspace = viewModel::uploadToWorkspace,
+                        onShareWorkspaceFile = viewModel::shareWorkspaceFile,
+                        onSaveWorkspaceFileCopy = viewModel::saveWorkspaceFileCopy,
+                        onOpenFile = viewModel::openFile,
+                        onCloseFile = viewModel::closeFile,
+                        onBeginFileEdit = viewModel::beginFileEdit,
+                        onUpdateFileDraft = viewModel::updateFileDraft,
+                        onCancelFileEdit = viewModel::cancelFileEdit,
+                        onSaveFile = viewModel::saveOpenedFile,
+                        onReloadFile = viewModel::reloadOpenedFile,
+                        onDismissFileConflict = viewModel::dismissFileConflict,
+                        onUndoChanges = viewModel::undoLastChanges,
+                        onKeepChanges = viewModel::keepLastChanges,
+                        onUndoFileChange = viewModel::undoFileChange,
+                        onKeepFileChange = viewModel::keepFileChange,
+                        onCreateChat = viewModel::createChat,
+                        onSwitchChat = viewModel::switchChat,
+                        onTerminalRun = viewModel::requestProjectTerminalCommand,
+                        onTerminalInput = viewModel::sendProjectTerminalInput,
+                        onTerminalInterrupt = viewModel::interruptProjectTerminalCommand,
+                        onTerminalPrepare = viewModel::prepareProjectTerminalCommand,
+                        onTerminalDraftConsumed = viewModel::consumeProjectTerminalDraft,
+                        onTerminalOpened = viewModel::openProjectTerminal,
+                        onTerminalStop = viewModel::stopProjectTerminalCommand,
+                        onTerminalClear = viewModel::clearProjectTerminal,
+                        onTerminalConfirm = viewModel::confirmProjectTerminalCommand,
+                        onTerminalCancel = viewModel::cancelProjectTerminalCommand,
+                        onUseSuggestedProjectRoot = viewModel::useSuggestedProjectRoot,
+                        onExportProject = viewModel::exportActiveProject,
+                        onAddAttachments = viewModel::addChatAttachments,
+                        onRemoveAttachment = viewModel::removePendingAttachment,
+                        onOpenAttachment = viewModel::openChatAttachment,
+                        onBuildAndRunAndroid = viewModel::buildAndRunAndroidApp,
+                        onAndroidAction = viewModel::performAndroidAction,
+                        onRefreshAndroidDashboard = viewModel::refreshAndroidDashboard,
+                        onShareAndroidApk = viewModel::shareAndroidApk,
+                        onSaveAndroidApk = viewModel::saveAndroidApk,
+                        onOpenAndroidAppDetails = viewModel::openInstalledAndroidAppDetails,
+                        onUninstallAndroidApp = viewModel::uninstallAndroidApp,
+                        onOpenAndroidIssue = viewModel::openAndroidIssue,
+                        onAndroidHealthFix = viewModel::performAndroidHealthFix,
+                        onRefreshAndroidHealth = viewModel::refreshAndroidHealth,
+                        onStartAndroidLogcat = viewModel::startAndroidLogcat,
+                        onStopAndroidLogcat = viewModel::stopAndroidLogcat,
+                        onToggleAndroidLogcatPause = viewModel::toggleAndroidLogcatPause,
+                        onClearAndroidLogcat = viewModel::clearAndroidLogcat,
+                        onAndroidLogcatQuery = viewModel::setAndroidLogcatQuery,
+                        onAndroidLogcatLevel = viewModel::setAndroidLogcatLevel,
+                        onOpenAndroidLogLine = viewModel::openAndroidLogLine,
+                        onCancelAndroidBuild = viewModel::cancelAndroidBuild,
+                        onCleanAndroid = viewModel::cleanAndroidProject,
+                        onInstallAndroidTools = { viewModel.installDevStack(DevStack.ANDROID) },
+                        onOpenProject = viewModel::openProject,
+                        onCreateProject = viewModel::createProject,
+                        onCreateAndroidProject = viewModel::createAndroidProject,
+                        onCreateQuickProject = viewModel::createQuickProject,
+                        onRenameProject = viewModel::renameProject,
+                        onDeleteProject = viewModel::deleteProject,
+                    )
+                } else {
+                    // Transient: PocketDevApp auto-opens the most recent project
+                    // (or creates a quick one) as soon as startup is READY.
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator()
+                    }
+                }
                 RootScreen.AGENT -> AgentScreen(
                     state = state,
                     onSaveProvider = { profile, key ->
@@ -2628,122 +2629,30 @@ private fun RootScreenHost(
                     onStopInactiveProcesses = viewModel::stopInactiveDeveloperProcesses,
                     onClearRuntimeCache = viewModel::clearDeveloperRuntimeCache,
                     onCheckForAppUpdate = {
-                        // The install dialog is hosted on the Projects screen: when an
-                        // update is already known, go there so it opens; otherwise run a
+                        // The install dialog is hosted by PocketDevApp: when an
+                        // update is already known, show it; otherwise run a
                         // manual (unthrottled) check.
                         if (state.appUpdate != null) {
-                            screen = RootScreen.PROJECTS
+                            onShowAppUpdate()
                         } else {
                             viewModel.checkForAppUpdateFromSettings()
                         }
                     },
-                    getSavedHermesApiKey = viewModel::getSavedHermesApiKey,
-                    onSaveHermesApiKey = viewModel::updateHermesApiKey,
+                    getSavedProviderKey = viewModel::getSavedProviderKey,
                     getSavedHermesHostKey = viewModel::getSavedHermesHostKey,
                     onSaveHermesHostKey = viewModel::updateHermesHostKey,
                     getAgentProfile = viewModel::providerProfileFor,
-                    onSaveAgentApiKey = viewModel::updateAgentApiKey,
+                    onSaveProviderKey = viewModel::updateProviderApiKey,
                     onSaveHermesModel = viewModel::updateHermesModel,
-                    onOpenAgentSettings = { screen = RootScreen.AGENT },
+                    onOpenAgentSettings = { screenName = RootScreen.AGENT.name },
+                    onImportZip = viewModel::importZipProject,
+                    onCloneGit = viewModel::clonePublicGitRepository,
+                    onStartGitHubLogin = viewModel::startGitHubLogin,
+                    onGenerateNewGitHubCode = viewModel::generateNewGitHubCode,
+                    onRefreshGitHub = viewModel::refreshGitHubRepositories,
+                    onDisconnectGitHub = viewModel::disconnectGitHub,
+                    onCloneGitHub = viewModel::cloneGitHubRepository,
                 )
-            }
-        }
-    }
-    if (showQuickTerminal) {
-        QuickTerminalSheet(
-            onDismiss = { showQuickTerminal = false },
-        ) {
-            TerminalScreen(
-                lines = terminalLines,
-                isRunning = isTerminalRunning,
-                onRun = viewModel::runTerminalCommand,
-                onInput = viewModel::sendTerminalInput,
-                onInterrupt = viewModel::interruptTerminalCommand,
-                onClear = viewModel::clearTerminal,
-                onToggleTheme = viewModel::toggleTheme,
-                themeMode = state.themeMode,
-                liveOutput = terminalLiveOutput,
-                currentCommand = terminalCurrentCommand,
-                showThemeAction = false,
-                showQuickCommands = true,
-                compactHeader = true,
-            )
-        }
-    }
-}
-
-@Composable
-private fun QuickTerminalSheet(
-    onDismiss: () -> Unit,
-    content: @Composable () -> Unit,
-) {
-    var sheetFraction by rememberSaveable { mutableFloatStateOf(0.60f) }
-    BackHandler(onBack = onDismiss)
-    BoxWithConstraints(Modifier.fillMaxSize()) {
-        val density = LocalDensity.current
-        val maxHeightPx = with(density) { maxHeight.toPx() }
-        val keyboardVisible = WindowInsets.ime.getBottom(density) > 0
-        LaunchedEffect(keyboardVisible) {
-            if (keyboardVisible) sheetFraction = 0.85f
-        }
-        val dragState = rememberDraggableState { dragAmount ->
-            sheetFraction = (sheetFraction - dragAmount / maxHeightPx)
-                .coerceIn(0.40f, 0.85f)
-        }
-        Box(Modifier.fillMaxSize()) {
-            // Dimmed backdrop — tap to dismiss.
-            Box(
-                Modifier
-                    .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.45f))
-                    .clickable(
-                        indication = null,
-                        interactionSource = remember { MutableInteractionSource() },
-                        onClick = onDismiss,
-                    ),
-            )
-            // This container consumes the keyboard inset outside the sheet rather
-            // than turning it into empty padding inside the terminal.
-            Box(Modifier.fillMaxSize().imePadding()) {
-                Surface(
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .fillMaxWidth()
-                        .fillMaxHeight(sheetFraction)
-                        .draggable(
-                            state = dragState,
-                            orientation = Orientation.Vertical,
-                            startDragImmediately = false,
-                        ),
-                    shape = RoundedCornerShape(topStart = 26.dp, topEnd = 26.dp),
-                    // Plain theme surface without tonal elevation: the app theme doesn't define
-                    // surfaceContainer* (falls back to M3 lavender) and tonal elevation tints
-                    // every nested Surface orange.
-                    color = MaterialTheme.colorScheme.surface,
-                    tonalElevation = 0.dp,
-                    shadowElevation = 28.dp,
-                ) {
-                    Column(Modifier.fillMaxSize().navigationBarsPadding()) {
-                        Box(
-                            Modifier
-                                .fillMaxWidth()
-                                .height(24.dp),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Box(
-                                Modifier
-                                    .width(36.dp)
-                                    .height(4.dp)
-                                    .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f), CircleShape),
-                            )
-                        }
-                        HorizontalDivider(
-                            thickness = 0.5.dp,
-                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
-                        )
-                        Box(Modifier.weight(1f).fillMaxWidth()) { content() }
-                    }
-                }
             }
         }
     }
@@ -3567,15 +3476,14 @@ private fun ClaudeSubscriptionCredentialsStep(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+/**
+ * The "Bring an existing project" import surface (ZIP file, Git repository,
+ * GitHub). It used to sit on the Projects home screen; since v18 it lives in
+ * Settings (GitHub / Import project) and is wired to the same import logic.
+ */
 @Composable
-private fun ProjectsScreen(
+fun ProjectImportSection(
     state: AppUiState,
-    listState: LazyListState = rememberSaveable(saver = LazyListState.Saver) { LazyListState() },
-    onOpen: (Project) -> Unit,
-    onCreate: (String) -> Unit,
-    onCreateAndroid: (String, AndroidTemplate) -> Unit,
-    onCreateQuickProject: () -> Unit,
     onImportZip: (Uri) -> Unit,
     onCloneGit: (String) -> Unit,
     onStartGitHubLogin: () -> Unit,
@@ -3583,276 +3491,282 @@ private fun ProjectsScreen(
     onRefreshGitHub: () -> Unit,
     onDisconnectGitHub: () -> Unit,
     onCloneGitHub: (GitHubRepository) -> Unit,
-    onRenameProject: (String, String) -> Unit,
-    onDeleteProject: (String) -> Unit,
-    onSettings: () -> Unit,
-    onPing: () -> Unit,
-    onToggleTheme: () -> Unit,
-    onInstallUpdate: () -> Unit,
 ) {
-    var showCreate by rememberSaveable { mutableStateOf(false) }
-    var showUpdateDialog by rememberSaveable { mutableStateOf(false) }
     var showGitDialog by rememberSaveable { mutableStateOf(false) }
     var showGitHubDialog by rememberSaveable { mutableStateOf(false) }
     var importExpanded by rememberSaveable { mutableStateOf(false) }
-    var gitUrl by rememberSaveable { mutableStateOf("") }
-    var repositorySearch by rememberSaveable { mutableStateOf("") }
-    var name by rememberSaveable { mutableStateOf("") }
-    var androidTemplate by rememberSaveable { mutableStateOf<AndroidTemplate?>(null) }
-    val projects = state.projects
-    val context = LocalContext.current
-    val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
-        onInstallUpdate()
-    }
     val importZipLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) onImportZip(uri)
     }
-    LaunchedEffect(state.appUpdate?.versionCode) {
-        if (state.appUpdate != null) showUpdateDialog = true
-    }
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                modifier = Modifier.padding(top = 8.dp),
-                title = { Row(verticalAlignment = Alignment.CenterVertically) { BrandMark(compact = true); Spacer(Modifier.width(9.dp)); Text("Hermes Agent", fontWeight = FontWeight.Bold) } },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
-            )
-        },
-    ) { padding ->
-        LazyColumn(
-            state = listState,
-            modifier = Modifier.fillMaxSize().padding(padding),
-            contentPadding = PaddingValues(18.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            item {
-                Text(stringResource(R.string.projects_hero_title), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-                Text(stringResource(R.string.projects_hero_desc), color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Spacer(Modifier.height(16.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Button(
-                        onClick = onCreateQuickProject,
-                        modifier = Modifier.weight(1f).height(48.dp),
-                        shape = RoundedCornerShape(14.dp),
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Chat,
-                            contentDescription = null,
-                            modifier = Modifier.size(17.dp),
-                        )
-                        Spacer(Modifier.width(6.dp))
-                        Text(
-                            text = stringResource(R.string.projects_quick_project),
-                            fontWeight = FontWeight.SemiBold,
-                            fontSize = 13.sp,
-                            maxLines = 1,
-                            softWrap = false,
-                        )
-                    }
-                    OutlinedButton(
-                        onClick = { showCreate = true },
-                        modifier = Modifier.weight(1f).height(48.dp),
-                        shape = RoundedCornerShape(14.dp),
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Add,
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp),
-                        )
-                        Spacer(Modifier.width(6.dp))
-                        Text(
-                            text = stringResource(R.string.projects_new_project),
-                            fontWeight = FontWeight.SemiBold,
-                            fontSize = 13.sp,
-                            maxLines = 1,
-                            softWrap = false,
-                        )
-                    }
+    val isImportExpanded = importExpanded || state.projectImporting || state.gitCloneRunning
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(18.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.28f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.7f)),
+    ) {
+        Column {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { importExpanded = !importExpanded }
+                    .padding(horizontal = 14.dp, vertical = 13.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(stringResource(R.string.projects_bring_existing), fontSize = 13.5.sp, fontWeight = FontWeight.Bold)
+                    Text(
+                        stringResource(if (isImportExpanded) R.string.projects_import_expanded else R.string.projects_import_sources),
+                        fontSize = 10.5.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
-                Spacer(Modifier.height(10.dp))
-                val isImportExpanded = importExpanded || state.projectImporting || state.gitCloneRunning
-                Surface(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(18.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.28f),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.7f)),
+                Icon(
+                    imageVector = if (isImportExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                    contentDescription = if (isImportExpanded) stringResource(R.string.ws_collapse) else stringResource(R.string.ws_expand),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(20.dp),
+                )
+            }
+            AnimatedVisibility(visible = isImportExpanded) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 14.dp, end = 14.dp, bottom = 14.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    Column {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { importExpanded = !importExpanded }
-                                .padding(horizontal = 14.dp, vertical = 13.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+                        ImportSourceButton(
+                            icon = Icons.Default.Download,
+                            title = stringResource(if (state.projectImporting) R.string.projects_importing else R.string.projects_zip_file),
+                            enabled = !state.projectImporting && !state.gitCloneRunning,
+                            modifier = Modifier.weight(1f),
+                            onClick = { importZipLauncher.launch("*/*") },
+                            loading = state.projectImporting,
+                        )
+                        ImportSourceButton(
+                            icon = Icons.Default.Code,
+                            title = stringResource(if (state.gitCloneRunning) R.string.projects_cloning else R.string.projects_git_url),
+                            enabled = !state.projectImporting && !state.gitCloneRunning,
+                            modifier = Modifier.weight(1f),
+                            onClick = { showGitDialog = true },
+                            loading = state.gitCloneRunning,
+                        )
+                    }
+                    Surface(
+                        modifier = Modifier.fillMaxWidth().clickable(enabled = !state.gitCloneRunning) {
+                            showGitHubDialog = true
+                            if (state.githubAuthStatus == GitHubAuthStatus.CONNECTED && state.githubRepositories.isEmpty()) onRefreshGitHub()
+                        },
+                        color = MaterialTheme.colorScheme.surface,
+                        shape = RoundedCornerShape(13.dp),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                    ) {
+                        Row(Modifier.padding(horizontal = 12.dp, vertical = 11.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Code, null, tint = PocketOrange, modifier = Modifier.size(19.dp))
+                            Spacer(Modifier.width(10.dp))
                             Column(Modifier.weight(1f)) {
-                                Text(stringResource(R.string.projects_bring_existing), fontSize = 13.5.sp, fontWeight = FontWeight.Bold)
                                 Text(
-                                    stringResource(if (isImportExpanded) R.string.projects_import_expanded else R.string.projects_import_sources),
-                                    fontSize = 10.5.sp,
+                                    state.githubLogin?.let { stringResource(R.string.projects_github_account, it) } ?: stringResource(R.string.projects_connect_github),
+                                    fontSize = 12.5.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                )
+                                Text(
+                                    stringResource(if (state.githubLogin != null) R.string.projects_browse_repositories else R.string.projects_sign_in_repositories),
+                                    fontSize = 10.sp,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
                             }
-                            Icon(
-                                imageVector = if (isImportExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
-                                contentDescription = if (isImportExpanded) stringResource(R.string.ws_collapse) else stringResource(R.string.ws_expand),
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(20.dp),
-                            )
-                        }
-                        AnimatedVisibility(visible = isImportExpanded) {
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(start = 14.dp, end = 14.dp, bottom = 14.dp),
-                                verticalArrangement = Arrangement.spacedBy(10.dp),
-                            ) {
-                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(9.dp)) {
-                                    ImportSourceButton(
-                                        icon = Icons.Default.Download,
-                                        title = stringResource(if (state.projectImporting) R.string.projects_importing else R.string.projects_zip_file),
-                                        enabled = !state.projectImporting && !state.gitCloneRunning,
-                                        modifier = Modifier.weight(1f),
-                                        onClick = { importZipLauncher.launch("*/*") },
-                                        loading = state.projectImporting,
-                                    )
-                                    ImportSourceButton(
-                                        icon = Icons.Default.Code,
-                                        title = stringResource(if (state.gitCloneRunning) R.string.projects_cloning else R.string.projects_git_url),
-                                        enabled = !state.projectImporting && !state.gitCloneRunning,
-                                        modifier = Modifier.weight(1f),
-                                        onClick = { showGitDialog = true },
-                                        loading = state.gitCloneRunning,
-                                    )
-                                }
-                                Surface(
-                                    modifier = Modifier.fillMaxWidth().clickable(enabled = !state.gitCloneRunning) {
-                                        showGitHubDialog = true
-                                        if (state.githubAuthStatus == GitHubAuthStatus.CONNECTED && state.githubRepositories.isEmpty()) onRefreshGitHub()
-                                    },
-                                    color = MaterialTheme.colorScheme.surface,
-                                    shape = RoundedCornerShape(13.dp),
-                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                                ) {
-                                    Row(Modifier.padding(horizontal = 12.dp, vertical = 11.dp), verticalAlignment = Alignment.CenterVertically) {
-                                        Icon(Icons.Default.Code, null, tint = PocketOrange, modifier = Modifier.size(19.dp))
-                                        Spacer(Modifier.width(10.dp))
-                                        Column(Modifier.weight(1f)) {
-                                            Text(
-                                                state.githubLogin?.let { stringResource(R.string.projects_github_account, it) } ?: stringResource(R.string.projects_connect_github),
-                                                fontSize = 12.5.sp,
-                                                fontWeight = FontWeight.SemiBold,
-                                            )
-                                            Text(
-                                                stringResource(if (state.githubLogin != null) R.string.projects_browse_repositories else R.string.projects_sign_in_repositories),
-                                                fontSize = 10.sp,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            )
-                                        }
-                                        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    }
-                                }
-                                (state.projectImportMessage ?: state.gitCloneMessage)?.let { message ->
-                                    Text(message, fontSize = 10.5.sp, color = MaterialTheme.colorScheme.primary)
-                                }
-                            }
+                            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
-                }
-            }
-            state.appUpdate?.let { update ->
-                item {
-                    Surface(
-                        modifier = Modifier.fillMaxWidth().clickable { showUpdateDialog = true },
-                        shape = RoundedCornerShape(20.dp),
-                        color = PocketOrange.copy(alpha = 0.11f),
-                        border = BorderStroke(1.dp, PocketOrange.copy(alpha = 0.45f)),
-                    ) {
-                        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Surface(shape = CircleShape, color = PocketOrange.copy(alpha = 0.18f), modifier = Modifier.size(46.dp)) {
-                                Box(contentAlignment = Alignment.Center) { Icon(Icons.Default.Download, null, tint = PocketOrange) }
-                            }
-                            Spacer(Modifier.width(12.dp))
-                            Column(Modifier.weight(1f)) {
-                                Text("Hermes Agent ${update.versionName}", fontWeight = FontWeight.Bold)
-                                Text(stringResource(R.string.ws_update_ready), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            }
-                            Text(stringResource(R.string.ws_update), color = PocketOrange, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                        }
+                    (state.projectImportMessage ?: state.gitCloneMessage)?.let { message ->
+                        Text(message, fontSize = 10.5.sp, color = MaterialTheme.colorScheme.primary)
                     }
-                }
-            }
-            item { Text(stringResource(R.string.projects_your_projects), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold) }
-            if (projects.isEmpty()) {
-                item {
-                    Card(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 10.dp),
-                        shape = RoundedCornerShape(18.dp),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)),
-                    ) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(28.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            Surface(
-                                shape = CircleShape,
-                                color = PocketOrange.copy(alpha = 0.15f),
-                                modifier = Modifier.size(56.dp),
-                            ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    Icon(
-                                        Icons.Default.Folder,
-                                        contentDescription = null,
-                                        tint = PocketOrange,
-                                        modifier = Modifier.size(28.dp),
-                                    )
-                                }
-                            }
-                            Spacer(Modifier.height(4.dp))
-                            Text(
-                                stringResource(R.string.projects_empty_title),
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold,
-                                textAlign = TextAlign.Center,
-                            )
-                            Text(
-                                stringResource(R.string.projects_empty_desc),
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                textAlign = TextAlign.Center,
-                                lineHeight = 20.sp,
-                            )
-                        }
-                    }
-                }
-            } else {
-                items(projects, key = { it.id }) { project ->
-                    ProjectCard(
-                        project = project,
-                        taskRunning = state.isRunning && state.activeProject?.id == project.id,
-                        terminalRunning = state.projectTerminalRunning && state.activeProject?.id == project.id,
-                        buildRunning = state.androidBuildRunning && state.activeProject?.id == project.id,
-                        onOpen = { onOpen(project) },
-                        onRename = { onRenameProject(project.id, it) },
-                        onDelete = { onDeleteProject(project.id) },
-                    )
                 }
             }
         }
     }
-    if (showCreate) AlertDialog(
-        onDismissRequest = { showCreate = false },
+    if (showGitDialog) {
+        GitCloneDialog(
+            state = state,
+            onCloneGit = onCloneGit,
+            onDismiss = { showGitDialog = false },
+        )
+    }
+    if (showGitHubDialog) {
+        GitHubImportDialog(
+            state = state,
+            onStartGitHubLogin = onStartGitHubLogin,
+            onGenerateNewGitHubCode = onGenerateNewGitHubCode,
+            onRefreshGitHub = onRefreshGitHub,
+            onDisconnectGitHub = onDisconnectGitHub,
+            onCloneGitHub = onCloneGitHub,
+            onDismiss = { showGitHubDialog = false },
+        )
+    }
+}
+
+@Composable
+private fun GitCloneDialog(
+    state: AppUiState,
+    onCloneGit: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var gitUrl by rememberSaveable { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = { if (!state.gitCloneRunning) onDismiss() },
+        icon = { Icon(Icons.Default.Code, null, tint = PocketOrange) },
+        title = { Text(stringResource(R.string.ws_clone_git_title)) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(stringResource(R.string.ws_clone_git_desc), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.5.sp)
+                OutlinedTextField(
+                    value = gitUrl,
+                    onValueChange = { gitUrl = it },
+                    label = { Text(stringResource(R.string.ws_https_git_url)) },
+                    placeholder = { Text("https://github.com/owner/repository.git") },
+                    singleLine = true,
+                )
+                state.gitCloneMessage?.let { Text(it, color = MaterialTheme.colorScheme.primary, fontSize = 12.sp) }
+            }
+        },
+        confirmButton = {
+            Button(
+                enabled = gitUrl.isNotBlank() && !state.gitCloneRunning,
+                onClick = { onCloneGit(gitUrl); onDismiss(); gitUrl = "" },
+            ) { Text(if (state.gitCloneRunning) stringResource(R.string.projects_cloning) else stringResource(R.string.ws_clone_project)) }
+        },
+        dismissButton = { TextButton(onClick = onDismiss, enabled = !state.gitCloneRunning) { Text(stringResource(R.string.action_cancel)) } },
+    )
+}
+
+@Composable
+private fun GitHubImportDialog(
+    state: AppUiState,
+    onStartGitHubLogin: () -> Unit,
+    onGenerateNewGitHubCode: () -> Unit,
+    onRefreshGitHub: () -> Unit,
+    onDisconnectGitHub: () -> Unit,
+    onCloneGitHub: (GitHubRepository) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var repositorySearch by rememberSaveable { mutableStateOf("") }
+    val clipboard = LocalClipboardManager.current
+    val filteredRepositories = state.githubRepositories.filter { repository ->
+        repositorySearch.isBlank() || repository.fullName.contains(repositorySearch, ignoreCase = true)
+    }
+    AlertDialog(
+        onDismissRequest = { if (!state.gitCloneRunning) onDismiss() },
+        icon = { Icon(Icons.Default.Code, null, tint = PocketOrange) },
+        title = { Text(state.githubLogin?.let { stringResource(R.string.projects_github_account, it) } ?: stringResource(R.string.projects_connect_github)) },
+        text = {
+            when (state.githubAuthStatus) {
+                GitHubAuthStatus.DISCONNECTED, GitHubAuthStatus.ERROR -> Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(
+                        state.githubMessage ?: stringResource(R.string.ws_github_signin_desc),
+                        color = if (state.githubAuthStatus == GitHubAuthStatus.ERROR) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontSize = 13.sp,
+                    )
+                    Button(onClick = onStartGitHubLogin, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.ws_github_signin)) }
+                }
+                GitHubAuthStatus.STARTING -> Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
+                    CircularProgressIndicator(Modifier.size(28.dp), strokeWidth = 2.5.dp)
+                    Spacer(Modifier.height(12.dp))
+                    Text(state.githubMessage ?: stringResource(R.string.ws_github_starting))
+                }
+                GitHubAuthStatus.AWAITING_USER -> Column(verticalArrangement = Arrangement.spacedBy(12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(stringResource(R.string.ws_github_enter_code), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Surface(
+                        modifier = Modifier.fillMaxWidth().clickable { state.githubUserCode?.let { clipboard.setText(AnnotatedString(it)) } },
+                        shape = RoundedCornerShape(14.dp),
+                        color = MaterialTheme.colorScheme.primaryContainer,
+                    ) {
+                        Text(
+                            state.githubUserCode.orEmpty(),
+                            modifier = Modifier.padding(16.dp),
+                            textAlign = TextAlign.Center,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 22.sp,
+                            letterSpacing = 2.sp,
+                        )
+                    }
+                    Text(stringResource(R.string.ws_github_tap_code), fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    OutlinedButton(
+                        onClick = onGenerateNewGitHubCode,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text(stringResource(R.string.ws_github_new_code))
+                    }
+                }
+                GitHubAuthStatus.CONNECTED -> Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(state.githubMessage ?: stringResource(R.string.ws_github_select_repo), modifier = Modifier.weight(1f), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        IconButton(onClick = onRefreshGitHub, enabled = !state.githubRepositoriesLoading) {
+                            Icon(Icons.Default.Refresh, stringResource(R.string.ws_github_refresh_repos))
+                        }
+                    }
+                    OutlinedTextField(
+                        value = repositorySearch,
+                        onValueChange = { repositorySearch = it },
+                        placeholder = { Text(stringResource(R.string.ws_github_search_repos)) },
+                        leadingIcon = { Icon(Icons.Default.Search, null) },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    if (state.githubRepositoriesLoading) LinearProgressIndicator(Modifier.fillMaxWidth())
+                    LazyColumn(Modifier.fillMaxWidth().heightIn(max = 350.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        items(filteredRepositories, key = { it.fullName }) { repository ->
+                            Surface(
+                                modifier = Modifier.fillMaxWidth().clickable(enabled = !state.gitCloneRunning) {
+                                    onDismiss()
+                                    onCloneGitHub(repository)
+                                },
+                                shape = RoundedCornerShape(12.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
+                            ) {
+                                Row(Modifier.padding(11.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(if (repository.private) Icons.Default.Key else Icons.Default.Code, null, modifier = Modifier.size(17.dp), tint = PocketOrange)
+                                    Spacer(Modifier.width(9.dp))
+                                    Column(Modifier.weight(1f)) {
+                                        Text(repository.fullName, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        Text("${if (repository.private) stringResource(R.string.ws_repo_private) else stringResource(R.string.ws_repo_public)} · ${repository.defaultBranch}", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            if (state.githubAuthStatus == GitHubAuthStatus.CONNECTED) {
+                TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_close)) }
+            }
+        },
+        dismissButton = {
+            if (state.githubAuthStatus == GitHubAuthStatus.CONNECTED) {
+                TextButton(onClick = { onDisconnectGitHub(); onDismiss() }) { Text(stringResource(R.string.ws_disconnect)) }
+            } else if (state.githubAuthStatus != GitHubAuthStatus.STARTING) {
+                TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) }
+            }
+        },
+    )
+}
+
+@Composable
+private fun CreateProjectDialog(
+    onDismiss: () -> Unit,
+    onCreate: (String) -> Unit,
+    onCreateAndroid: (String, AndroidTemplate) -> Unit,
+) {
+    var name by rememberSaveable { mutableStateOf("") }
+    var androidTemplate by rememberSaveable { mutableStateOf<AndroidTemplate?>(null) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.an_create_project)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -3907,202 +3821,212 @@ private fun ProjectsScreen(
             TextButton(
                 onClick = {
                     androidTemplate?.let { onCreateAndroid(name, it) } ?: onCreate(name)
-                    showCreate = false
-                    name = ""
-                    androidTemplate = null
                 },
                 enabled = name.isNotBlank(),
             ) { Text(stringResource(R.string.ws_create)) }
         },
-        dismissButton = { TextButton(onClick = { showCreate = false }) { Text(stringResource(R.string.action_cancel)) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) } },
     )
-    if (showGitDialog) AlertDialog(
-        onDismissRequest = { if (!state.gitCloneRunning) showGitDialog = false },
-        icon = { Icon(Icons.Default.Code, null, tint = PocketOrange) },
-        title = { Text(stringResource(R.string.ws_clone_git_title)) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text(stringResource(R.string.ws_clone_git_desc), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.5.sp)
-                OutlinedTextField(
-                    value = gitUrl,
-                    onValueChange = { gitUrl = it },
-                    label = { Text(stringResource(R.string.ws_https_git_url)) },
-                    placeholder = { Text("https://github.com/owner/repository.git") },
-                    singleLine = true,
+}
+
+/**
+ * Project switcher for the chat-first UI: opened from the chat header (title
+ * tap or the overflow menu). Lists existing projects (most recently used
+ * first) and offers Quick project / New project. Switching goes through the
+ * same openProject path the old Projects screen used.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ProjectSwitcherSheet(
+    state: AppUiState,
+    onDismiss: () -> Unit,
+    onOpenProject: (Project) -> Unit,
+    onCreateProject: (String) -> Unit,
+    onCreateAndroidProject: (String, AndroidTemplate) -> Unit,
+    onCreateQuickProject: () -> Unit,
+    onRenameProject: (String, String) -> Unit,
+    onDeleteProject: (String) -> Unit,
+) {
+    var showCreate by rememberSaveable { mutableStateOf(false) }
+    if (showCreate) {
+        CreateProjectDialog(
+            onDismiss = { showCreate = false },
+            onCreate = { name ->
+                showCreate = false
+                onDismiss()
+                onCreateProject(name)
+            },
+            onCreateAndroid = { name, template ->
+                showCreate = false
+                onDismiss()
+                onCreateAndroidProject(name, template)
+            },
+        )
+    }
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 18.dp, vertical = 8.dp),
+        ) {
+            Text(
+                stringResource(R.string.tab_projects),
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+            )
+            Spacer(Modifier.height(12.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Button(
+                    onClick = {
+                        onDismiss()
+                        onCreateQuickProject()
+                    },
+                    modifier = Modifier.weight(1f).height(48.dp),
+                    shape = RoundedCornerShape(14.dp),
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Chat,
+                        contentDescription = null,
+                        modifier = Modifier.size(17.dp),
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        text = stringResource(R.string.projects_quick_project),
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 13.sp,
+                        maxLines = 1,
+                        softWrap = false,
+                    )
+                }
+                OutlinedButton(
+                    onClick = { showCreate = true },
+                    modifier = Modifier.weight(1f).height(48.dp),
+                    shape = RoundedCornerShape(14.dp),
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Add,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        text = stringResource(R.string.projects_new_project),
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 13.sp,
+                        maxLines = 1,
+                        softWrap = false,
+                    )
+                }
+            }
+            Spacer(Modifier.height(14.dp))
+            val sortedProjects = state.projects.sortedByDescending { it.updatedAtMillis }
+            if (sortedProjects.isEmpty()) {
+                Text(
+                    stringResource(R.string.projects_empty_title),
+                    fontWeight = FontWeight.SemiBold,
                 )
-                state.gitCloneMessage?.let { Text(it, color = MaterialTheme.colorScheme.primary, fontSize = 12.sp) }
+                Text(
+                    stringResource(R.string.projects_empty_desc),
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else {
+                LazyColumn(
+                    modifier = Modifier.fillMaxWidth().heightIn(max = 430.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    items(sortedProjects, key = { it.id }) { project ->
+                        ProjectCard(
+                            project = project,
+                            taskRunning = state.isRunning && state.activeProject?.id == project.id,
+                            terminalRunning = state.projectTerminalRunning && state.activeProject?.id == project.id,
+                            buildRunning = state.androidBuildRunning && state.activeProject?.id == project.id,
+                            onOpen = {
+                                onDismiss()
+                                onOpenProject(project)
+                            },
+                            onRename = { onRenameProject(project.id, it) },
+                            onDelete = { onDeleteProject(project.id) },
+                        )
+                    }
+                }
+            }
+            Spacer(Modifier.height(18.dp))
+        }
+    }
+}
+
+@Composable
+private fun AppUpdateDialog(
+    state: AppUiState,
+    onInstallUpdate: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val update = state.appUpdate ?: return
+    val context = LocalContext.current
+    val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+        onInstallUpdate()
+    }
+    val canInstall = Build.VERSION.SDK_INT < Build.VERSION_CODES.O || context.packageManager.canRequestPackageInstalls()
+    val downloading = state.appUpdateStatus == AppUpdateStatus.DOWNLOADING
+    val installing = state.appUpdateStatus == AppUpdateStatus.INSTALLING
+    val total = state.appUpdateTotalBytes
+    val downloaded = state.appUpdateDownloadedBytes
+    val progress = if (total > 0) (downloaded.toFloat() / total).coerceIn(0f, 1f) else 0f
+    AlertDialog(
+        onDismissRequest = { if (!installing) onDismiss() },
+        icon = { Icon(Icons.Default.Download, null, tint = PocketOrange, modifier = Modifier.size(34.dp)) },
+        title = { Text(stringResource(R.string.ws_update_to, update.versionName), fontWeight = FontWeight.Bold) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(update.notes.ifBlank { stringResource(R.string.ws_update_default_notes) })
+                if (update.sizeBytes > 0) Text(stringResource(R.string.ws_update_download_size, formatMegabytes(update.sizeBytes)), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
+                if (!canInstall) {
+                    Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.65f)) {
+                        Row(Modifier.padding(12.dp), verticalAlignment = Alignment.Top) {
+                            Icon(Icons.Default.Warning, null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(20.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text(stringResource(R.string.ws_update_allow_unknown_apps), fontSize = 13.sp)
+                        }
+                    }
+                }
+                if (downloading) {
+                    if (total > 0) LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth())
+                    else LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    Text(
+                        if (total > 0) stringResource(R.string.ws_update_downloading_progress, formatMegabytes(downloaded), formatMegabytes(total), (progress * 100).toInt()) else stringResource(R.string.ws_update_downloading, formatMegabytes(downloaded)),
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                if (installing) Text(stringResource(R.string.ws_update_verified_installing), color = PocketGreen, fontSize = 13.sp)
+                state.appUpdateError?.let { Text(it, color = MaterialTheme.colorScheme.error, fontSize = 13.sp) }
             }
         },
         confirmButton = {
             Button(
-                enabled = gitUrl.isNotBlank() && !state.gitCloneRunning,
-                onClick = { onCloneGit(gitUrl); showGitDialog = false; gitUrl = "" },
-            ) { Text(if (state.gitCloneRunning) stringResource(R.string.projects_cloning) else stringResource(R.string.ws_clone_project)) }
+                enabled = !downloading && !installing,
+                onClick = {
+                    if (!canInstall && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        permissionLauncher.launch(
+                            Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${context.packageName}")),
+                        )
+                    } else {
+                        onInstallUpdate()
+                    }
+                },
+            ) {
+                Text(when { !canInstall -> stringResource(R.string.ws_grant_permission); downloading -> stringResource(R.string.ws_downloading_ellipsis); installing -> stringResource(R.string.tools_installing); else -> stringResource(R.string.ws_download_and_install) })
+            }
         },
-        dismissButton = { TextButton(onClick = { showGitDialog = false }, enabled = !state.gitCloneRunning) { Text(stringResource(R.string.action_cancel)) } },
+        dismissButton = { if (!installing) TextButton(onClick = onDismiss) { Text(stringResource(R.string.ws_later)) } },
     )
-    if (showGitHubDialog) {
-        val clipboard = LocalClipboardManager.current
-        val filteredRepositories = state.githubRepositories.filter { repository ->
-            repositorySearch.isBlank() || repository.fullName.contains(repositorySearch, ignoreCase = true)
-        }
-        AlertDialog(
-            onDismissRequest = { if (!state.gitCloneRunning) showGitHubDialog = false },
-            icon = { Icon(Icons.Default.Code, null, tint = PocketOrange) },
-            title = { Text(state.githubLogin?.let { stringResource(R.string.projects_github_account, it) } ?: stringResource(R.string.projects_connect_github)) },
-            text = {
-                when (state.githubAuthStatus) {
-                    GitHubAuthStatus.DISCONNECTED, GitHubAuthStatus.ERROR -> Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Text(
-                            state.githubMessage ?: stringResource(R.string.ws_github_signin_desc),
-                            color = if (state.githubAuthStatus == GitHubAuthStatus.ERROR) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
-                            fontSize = 13.sp,
-                        )
-                        Button(onClick = onStartGitHubLogin, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.ws_github_signin)) }
-                    }
-                    GitHubAuthStatus.STARTING -> Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
-                        CircularProgressIndicator(Modifier.size(28.dp), strokeWidth = 2.5.dp)
-                        Spacer(Modifier.height(12.dp))
-                        Text(state.githubMessage ?: stringResource(R.string.ws_github_starting))
-                    }
-                    GitHubAuthStatus.AWAITING_USER -> Column(verticalArrangement = Arrangement.spacedBy(12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(stringResource(R.string.ws_github_enter_code), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Surface(
-                            modifier = Modifier.fillMaxWidth().clickable { state.githubUserCode?.let { clipboard.setText(AnnotatedString(it)) } },
-                            shape = RoundedCornerShape(14.dp),
-                            color = MaterialTheme.colorScheme.primaryContainer,
-                        ) {
-                            Text(
-                                state.githubUserCode.orEmpty(),
-                                modifier = Modifier.padding(16.dp),
-                                textAlign = TextAlign.Center,
-                                fontFamily = FontFamily.Monospace,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 22.sp,
-                                letterSpacing = 2.sp,
-                            )
-                        }
-                        Text(stringResource(R.string.ws_github_tap_code), fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        OutlinedButton(
-                            onClick = onGenerateNewGitHubCode,
-                            modifier = Modifier.fillMaxWidth(),
-                        ) {
-                            Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(Modifier.width(8.dp))
-                            Text(stringResource(R.string.ws_github_new_code))
-                        }
-                    }
-                    GitHubAuthStatus.CONNECTED -> Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(state.githubMessage ?: stringResource(R.string.ws_github_select_repo), modifier = Modifier.weight(1f), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            IconButton(onClick = onRefreshGitHub, enabled = !state.githubRepositoriesLoading) {
-                                Icon(Icons.Default.Refresh, stringResource(R.string.ws_github_refresh_repos))
-                            }
-                        }
-                        OutlinedTextField(
-                            value = repositorySearch,
-                            onValueChange = { repositorySearch = it },
-                            placeholder = { Text(stringResource(R.string.ws_github_search_repos)) },
-                            leadingIcon = { Icon(Icons.Default.Search, null) },
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                        if (state.githubRepositoriesLoading) LinearProgressIndicator(Modifier.fillMaxWidth())
-                        LazyColumn(Modifier.fillMaxWidth().heightIn(max = 350.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            items(filteredRepositories, key = { it.fullName }) { repository ->
-                                Surface(
-                                    modifier = Modifier.fillMaxWidth().clickable(enabled = !state.gitCloneRunning) {
-                                        showGitHubDialog = false
-                                        onCloneGitHub(repository)
-                                    },
-                                    shape = RoundedCornerShape(12.dp),
-                                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
-                                ) {
-                                    Row(Modifier.padding(11.dp), verticalAlignment = Alignment.CenterVertically) {
-                                        Icon(if (repository.private) Icons.Default.Key else Icons.Default.Code, null, modifier = Modifier.size(17.dp), tint = PocketOrange)
-                                        Spacer(Modifier.width(9.dp))
-                                        Column(Modifier.weight(1f)) {
-                                            Text(repository.fullName, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                            Text("${if (repository.private) stringResource(R.string.ws_repo_private) else stringResource(R.string.ws_repo_public)} · ${repository.defaultBranch}", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            },
-            confirmButton = {
-                if (state.githubAuthStatus == GitHubAuthStatus.CONNECTED) {
-                    TextButton(onClick = { showGitHubDialog = false }) { Text(stringResource(R.string.action_close)) }
-                }
-            },
-            dismissButton = {
-                if (state.githubAuthStatus == GitHubAuthStatus.CONNECTED) {
-                    TextButton(onClick = { onDisconnectGitHub(); showGitHubDialog = false }) { Text(stringResource(R.string.ws_disconnect)) }
-                } else if (state.githubAuthStatus != GitHubAuthStatus.STARTING) {
-                    TextButton(onClick = { showGitHubDialog = false }) { Text(stringResource(R.string.action_cancel)) }
-                }
-            },
-        )
-    }
-    val update = state.appUpdate
-    if (showUpdateDialog && update != null) {
-        val canInstall = Build.VERSION.SDK_INT < Build.VERSION_CODES.O || context.packageManager.canRequestPackageInstalls()
-        val downloading = state.appUpdateStatus == AppUpdateStatus.DOWNLOADING
-        val installing = state.appUpdateStatus == AppUpdateStatus.INSTALLING
-        val total = state.appUpdateTotalBytes
-        val downloaded = state.appUpdateDownloadedBytes
-        val progress = if (total > 0) (downloaded.toFloat() / total).coerceIn(0f, 1f) else 0f
-        AlertDialog(
-            onDismissRequest = { if (!installing) showUpdateDialog = false },
-            icon = { Icon(Icons.Default.Download, null, tint = PocketOrange, modifier = Modifier.size(34.dp)) },
-            title = { Text(stringResource(R.string.ws_update_to, update.versionName), fontWeight = FontWeight.Bold) },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text(update.notes.ifBlank { stringResource(R.string.ws_update_default_notes) })
-                    if (update.sizeBytes > 0) Text(stringResource(R.string.ws_update_download_size, formatMegabytes(update.sizeBytes)), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
-                    if (!canInstall) {
-                        Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.65f)) {
-                            Row(Modifier.padding(12.dp), verticalAlignment = Alignment.Top) {
-                                Icon(Icons.Default.Warning, null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(20.dp))
-                                Spacer(Modifier.width(8.dp))
-                                Text(stringResource(R.string.ws_update_allow_unknown_apps), fontSize = 13.sp)
-                            }
-                        }
-                    }
-                    if (downloading) {
-                        if (total > 0) LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth())
-                        else LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-                        Text(
-                            if (total > 0) stringResource(R.string.ws_update_downloading_progress, formatMegabytes(downloaded), formatMegabytes(total), (progress * 100).toInt()) else stringResource(R.string.ws_update_downloading, formatMegabytes(downloaded)),
-                            fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    if (installing) Text(stringResource(R.string.ws_update_verified_installing), color = PocketGreen, fontSize = 13.sp)
-                    state.appUpdateError?.let { Text(it, color = MaterialTheme.colorScheme.error, fontSize = 13.sp) }
-                }
-            },
-            confirmButton = {
-                Button(
-                    enabled = !downloading && !installing,
-                    onClick = {
-                        if (!canInstall && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                            permissionLauncher.launch(
-                                Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${context.packageName}")),
-                            )
-                        } else {
-                            onInstallUpdate()
-                        }
-                    },
-                ) {
-                    Text(when { !canInstall -> stringResource(R.string.ws_grant_permission); downloading -> stringResource(R.string.ws_downloading_ellipsis); installing -> stringResource(R.string.tools_installing); else -> stringResource(R.string.ws_download_and_install) })
-                }
-            },
-            dismissButton = { if (!installing) TextButton(onClick = { showUpdateDialog = false }) { Text(stringResource(R.string.ws_later)) } },
-        )
-    }
 }
 
 @Composable
@@ -4379,7 +4303,6 @@ private fun ReadOnlyProjectScreen(
 @Composable
 private fun WorkspaceScreen(
     state: AppUiState,
-    onBack: () -> Unit,
     onSend: (String) -> Unit,
     onStop: () -> Unit,
     onSteerFollowUp: (String) -> Unit,
@@ -4443,43 +4366,13 @@ private fun WorkspaceScreen(
     onCancelAndroidBuild: () -> Unit,
     onCleanAndroid: () -> Unit,
     onInstallAndroidTools: () -> Unit,
+    onOpenProject: (Project) -> Unit,
+    onCreateProject: (String) -> Unit,
+    onCreateAndroidProject: (String, AndroidTemplate) -> Unit,
+    onCreateQuickProject: () -> Unit,
+    onRenameProject: (String, String) -> Unit,
+    onDeleteProject: (String) -> Unit,
 ) {
-    // Leaving while a terminal command runs asks whether to stop it or keep it running.
-    var confirmLeaveTerminal by rememberSaveable { mutableStateOf(false) }
-    val requestBack: () -> Unit = {
-        if (state.projectTerminalRunning) confirmLeaveTerminal = true else onBack()
-    }
-    BackHandler(onBack = requestBack)
-    if (confirmLeaveTerminal) {
-        AlertDialog(
-            onDismissRequest = { confirmLeaveTerminal = false },
-            title = { Text(stringResource(R.string.ws_terminal_leave_title)) },
-            text = {
-                Text(
-                    stringResource(
-                        R.string.ws_terminal_leave_body,
-                        state.projectTerminalCommand ?: stringResource(R.string.workspace_project_terminal),
-                    ),
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    confirmLeaveTerminal = false
-                    onTerminalStop()
-                    onBack()
-                }) { Text(stringResource(R.string.ws_terminal_leave_stop)) }
-            },
-            dismissButton = {
-                Row {
-                    TextButton(onClick = { confirmLeaveTerminal = false }) { Text(stringResource(R.string.cancel)) }
-                    TextButton(onClick = {
-                        confirmLeaveTerminal = false
-                        onBack()
-                    }) { Text(stringResource(R.string.ws_terminal_leave_keep)) }
-                }
-            },
-        )
-    }
     val context = LocalContext.current
     val isAndroidProject = state.androidProjectDetected
     val keyboardVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
@@ -4585,6 +4478,18 @@ private fun WorkspaceScreen(
     // sections live in this top-bar overflow menu instead.
     var sectionMenuOpen by remember { mutableStateOf(false) }
     var showChats by rememberSaveable { mutableStateOf(false) }
+    var showProjects by rememberSaveable { mutableStateOf(false) }
+    // Chat-first: the workspace is the home screen, so Back never leaves the
+    // project. From a workspace section it returns to Chat; on Chat itself the
+    // system default applies (leaves the app) unless work is running — running
+    // work keeps going across tabs, so Back is consumed with a hint instead.
+    BackHandler(enabled = selectedTab != WorkspaceTab.CHAT) {
+        selectedTab = WorkspaceTab.CHAT
+    }
+    val workRunning = state.isRunning || state.projectTerminalRunning || state.androidBuildRunning
+    BackHandler(enabled = selectedTab == WorkspaceTab.CHAT && workRunning) {
+        Toast.makeText(context, context.getString(R.string.ws_back_task_running), Toast.LENGTH_LONG).show()
+    }
     var showAndroidBuild by rememberSaveable { mutableStateOf(false) }
     val activeChat = state.projectChats.firstOrNull { it.id == state.activeChatId }
     val requestAndroidAction: (AndroidAction) -> Unit = { action ->
@@ -4649,6 +4554,18 @@ private fun WorkspaceScreen(
         return
     }
 
+    if (showProjects) {
+        ProjectSwitcherSheet(
+            state = state,
+            onDismiss = { showProjects = false },
+            onOpenProject = onOpenProject,
+            onCreateProject = onCreateProject,
+            onCreateAndroidProject = onCreateAndroidProject,
+            onCreateQuickProject = onCreateQuickProject,
+            onRenameProject = onRenameProject,
+            onDeleteProject = onDeleteProject,
+        )
+    }
     if (showChats) {
         ChatSwitcherDialog(
             chats = state.projectChats,
@@ -4693,30 +4610,39 @@ private fun WorkspaceScreen(
         topBar = {
             TopAppBar(
                 title = {
-                    Column(Modifier.fillMaxWidth()) {
-                        Text(
-                            state.activeProject?.name.orEmpty(),
-                            fontWeight = FontWeight.SemiBold,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.combinedClickable(
-                                onClick = {},
-                                onLongClick = {
-                                    Toast.makeText(context, state.activeProject?.name.orEmpty(), Toast.LENGTH_LONG).show()
-                                },
-                            ),
-                        )
-                        // Agent first so it always stays visible; a long chat title is cut with "…".
-                        Text(
-                            "${if (state.agentKind == AgentKind.ANTIGRAVITY) state.agentKind.localizedTitle() else state.provider.kind.localizedTitle()} · ${activeChat?.localizedTitle() ?: stringResource(R.string.tab_chat)}",
-                            fontSize = 11.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
+                    // Tapping the title opens the project switcher (chat-first:
+                    // there is no Projects home screen or back arrow anymore).
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { showProjects = true }
+                            .padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                state.activeProject?.name.orEmpty(),
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            // Agent first so it always stays visible; a long chat title is cut with "…".
+                            Text(
+                                "${if (state.agentKind == AgentKind.ANTIGRAVITY) state.agentKind.localizedTitle() else state.provider.kind.localizedTitle()} · ${activeChat?.localizedTitle() ?: stringResource(R.string.tab_chat)}",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                        Icon(
+                            Icons.Default.KeyboardArrowDown,
+                            contentDescription = stringResource(R.string.tab_projects),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(20.dp),
                         )
                     }
                 },
-                navigationIcon = { IconButton(onClick = requestBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.tab_projects)) } },
                 actions = {
                     if (isAndroidProject) {
                         IconButton(
@@ -4734,6 +4660,14 @@ private fun WorkspaceScreen(
                                 Icon(Icons.Default.MoreVert, stringResource(R.string.more_options))
                             }
                             DropdownMenu(expanded = sectionMenuOpen, onDismissRequest = { sectionMenuOpen = false }) {
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.tab_projects)) },
+                                    leadingIcon = { Icon(Icons.Default.Folder, null) },
+                                    onClick = {
+                                        sectionMenuOpen = false
+                                        showProjects = true
+                                    },
+                                )
                                 // The sections the bottom tab bar used to offer on this
                                 // screen (Changes was never reachable there either).
                                 listOf(WorkspaceTab.FILES, WorkspaceTab.TERMINAL, WorkspaceTab.PREVIEW).forEach { tab ->

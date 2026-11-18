@@ -1,5 +1,6 @@
 package com.jarves.mh.data
 
+import com.jarves.mh.model.AgentKind
 import com.jarves.mh.model.ProviderKind
 import com.jarves.mh.model.ProviderProfile
 import com.jarves.mh.runtime.HermesProviderCatalog
@@ -10,10 +11,12 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * The simple Settings → "API Keys" screen's field plan: which fields show
- * for the current configuration, and — the safety property — that every
- * field writes to the SAME ApiKeyVault pool the advanced surfaces and the
- * agent bridges already use.
+ * The simple Settings → "API Keys" screen's field plan under the v19
+ * unified provider store: fields are keyed by PROVIDER (canonical id),
+ * and when two agents are set to the same provider there is exactly ONE
+ * field for it — the regression test for the OpenRouter silo bug, where
+ * a Claude Code chat read an empty/stale `LLM_ROUTER` pool while the
+ * user's OpenRouter key sat in the Hermes setup pool.
  */
 class ApiKeysPlanTest {
 
@@ -34,88 +37,148 @@ class ApiKeysPlanTest {
         antigravity: ProviderProfile = antigravityResolved,
     ) = ApiKeysPlan.fields(setup, hostRemote, claude, antigravity)
 
+    private fun List<SimpleKeyField>.providerFields() =
+        filter { it.kind == SimpleKeyFieldKind.PROVIDER }
+
     @Test
     fun fusionDefaultShowsOneFreeLlmKeyFieldWithTheModelSelector() {
-        val fields = plan()
-        val hermes = fields.first { it.kind == SimpleKeyFieldKind.HERMES }
+        val hermes = plan().providerFields().first()
         assertTrue(hermes.hermesFusion)
         assertTrue(hermes.showModelSelector)
         assertEquals("FreeLLM", hermes.providerName)
-        // The pool the Hermes setup card and the bridge already use.
-        assertEquals("HERMES_SETUP", hermes.vaultId)
+        assertEquals(listOf(AgentKind.HERMES), hermes.agents)
+        // The unified pool for the Custom provider — the same pool the
+        // Hermes setup card and both bridges resolve.
+        assertEquals("custom", hermes.canonicalId)
+        assertEquals("custom", hermes.vaultId)
     }
 
     @Test
     fun changedHermesProviderSwapsTheFieldAndHidesTheSelector() {
-        val fields = plan(
+        val hermes = plan(
             setup = HermesSetupSettings("anthropic", "claude-fable-5", ""),
-        )
-        val hermes = fields.first { it.kind == SimpleKeyFieldKind.HERMES }
+            claude = ProviderProfile(ProviderKind.DEEPSEEK),
+        ).providerFields().first()
         assertFalse(hermes.hermesFusion)
         assertFalse(hermes.showModelSelector)
         assertEquals("Anthropic", hermes.providerName)
-        // Still the same single Hermes key pool — the provider has only one key.
-        assertEquals("HERMES_SETUP", hermes.vaultId)
+        assertEquals("anthropic", hermes.canonicalId)
     }
 
     @Test
     fun customEndpointOnAnotherUrlIsNotLabelledFreeLlm() {
-        val fields = plan(
+        val hermes = plan(
             setup = HermesSetupSettings(
                 HermesProviderCatalog.CUSTOM_ID,
                 "fusion",
                 "https://llm.example.com/v1",
             ),
-        )
-        val hermes = fields.first { it.kind == SimpleKeyFieldKind.HERMES }
+            claude = ProviderProfile(ProviderKind.DEEPSEEK),
+        ).providerFields().first()
         assertFalse(hermes.hermesFusion)
         assertFalse(hermes.showModelSelector)
         assertEquals("Custom endpoint", hermes.providerName)
+        assertEquals("custom", hermes.canonicalId)
     }
 
     @Test
-    fun claudeCodeFieldUsesItsCurrentProvidersVaultPool() {
-        val fields = plan()
-        val claude = fields.first { it.kind == SimpleKeyFieldKind.CLAUDE_CODE }
-        assertEquals(ProviderKind.ANTHROPIC, claude.providerKind)
-        // The pool the Claude bridge reads: vault.get(profile.kind.name).
-        assertEquals("ANTHROPIC", claude.vaultId)
+    fun sameProviderForHermesAndClaudeIsOneSharedField() {
+        // THE v19 regression: Hermes on OpenRouter + Claude Code on
+        // OpenRouter (LLM_ROUTER) must be a single field/pool, so the key
+        // entered once serves both agents.
+        val fields = plan(
+            setup = HermesSetupSettings("openrouter", "anthropic/claude-sonnet-4.6", ""),
+            claude = ProviderProfile(ProviderKind.LLM_ROUTER),
+        ).providerFields()
+        assertEquals(1, fields.size)
+        val shared = fields.single()
+        assertEquals("openrouter", shared.canonicalId)
+        assertEquals("OpenRouter", shared.providerName)
+        assertEquals(listOf(AgentKind.HERMES, AgentKind.CLAUDE_CODE), shared.agents)
+        assertEquals(ProviderKind.LLM_ROUTER, shared.claudeKind)
+        assertTrue(shared.isHermesProvider)
+    }
 
-        val custom = plan(claude = ProviderProfile(ProviderKind.CUSTOM))
-            .first { it.kind == SimpleKeyFieldKind.CLAUDE_CODE }
-        assertEquals("CUSTOM", custom.vaultId)
+    @Test
+    fun sameAnthropicProviderMergesToo() {
+        val fields = plan(
+            setup = HermesSetupSettings("anthropic", "claude-fable-5", ""),
+            claude = ProviderProfile(ProviderKind.ANTHROPIC),
+        ).providerFields()
+        assertEquals(1, fields.size)
+        assertEquals("anthropic", fields.single().canonicalId)
+        assertEquals(
+            listOf(AgentKind.HERMES, AgentKind.CLAUDE_CODE),
+            fields.single().agents,
+        )
+    }
+
+    @Test
+    fun differentProvidersGetSeparateFieldsHermesFirst() {
+        val fields = plan(claude = ProviderProfile(ProviderKind.DEEPSEEK)).providerFields()
+        assertEquals(2, fields.size)
+        assertEquals("custom", fields[0].canonicalId)
+        assertEquals(listOf(AgentKind.HERMES), fields[0].agents)
+        assertEquals("deepseek", fields[1].canonicalId)
+        assertEquals("DeepSeek", fields[1].providerName)
+        assertEquals(listOf(AgentKind.CLAUDE_CODE), fields[1].agents)
+        assertEquals(ProviderKind.DEEPSEEK, fields[1].claudeKind)
+        assertFalse(fields[1].showModelSelector)
+    }
+
+    @Test
+    fun claudeCustomMergesWithHermesCustom() {
+        val fields = plan(claude = ProviderProfile(ProviderKind.CUSTOM)).providerFields()
+        assertEquals(1, fields.size)
+        assertEquals("custom", fields.single().canonicalId)
+        assertEquals(
+            listOf(AgentKind.HERMES, AgentKind.CLAUDE_CODE),
+            fields.single().agents,
+        )
+        // Still the fusion configuration for Hermes, so the selector stays.
+        assertTrue(fields.single().showModelSelector)
     }
 
     @Test
     fun claudeSubscriptionTokenIsAFieldToo() {
         val claude = plan(claude = ProviderProfile(ProviderKind.CLAUDE))
-            .first { it.kind == SimpleKeyFieldKind.CLAUDE_CODE }
-        assertEquals("CLAUDE", claude.vaultId)
+            .providerFields().first { it.canonicalId == "claude" }
+        assertEquals(ProviderKind.CLAUDE, claude.claudeKind)
+        assertEquals(listOf(AgentKind.CLAUDE_CODE), claude.agents)
+    }
+
+    @Test
+    fun kimiKindMergesWithHermesKimiCoding() {
+        val fields = plan(
+            setup = HermesSetupSettings("kimi-coding", "kimi-k3", ""),
+            claude = ProviderProfile(ProviderKind.KIMI),
+        ).providerFields()
+        assertEquals(1, fields.size)
+        assertEquals("kimi-coding", fields.single().canonicalId)
     }
 
     @Test
     fun antigravityHasNoKeyField() {
         // Google sign-in, no API-key provider — skipped gracefully.
-        assertTrue(plan().none { it.kind == SimpleKeyFieldKind.ANTIGRAVITY })
+        assertTrue(
+            plan().providerFields().none { AgentKind.ANTIGRAVITY in it.agents },
+        )
     }
 
     @Test
     fun hostKeyFieldAppearsOnlyInRemoteMode() {
         assertTrue(plan(hostRemote = false).none { it.kind == SimpleKeyFieldKind.HERMES_HOST })
         val host = plan(hostRemote = true).first { it.kind == SimpleKeyFieldKind.HERMES_HOST }
-        // The pool the Hermes host card and the remote client already use.
-        assertEquals("HERMES_GATEWAY", host.vaultId)
+        // The gateway pool — the documented exception, NOT a provider pool.
+        assertEquals("HERMES_GATEWAY", host.canonicalId)
     }
 
     @Test
-    fun fieldOrderIsHermesThenAgentsThenHost() {
+    fun fieldOrderIsHermesProviderThenClaudeProviderThenHost() {
+        val fields = plan(hostRemote = true, claude = ProviderProfile(ProviderKind.DEEPSEEK))
         assertEquals(
-            listOf(
-                SimpleKeyFieldKind.HERMES,
-                SimpleKeyFieldKind.CLAUDE_CODE,
-                SimpleKeyFieldKind.HERMES_HOST,
-            ),
-            plan(hostRemote = true).map { it.kind },
+            listOf("custom", "deepseek", "HERMES_GATEWAY"),
+            fields.map { it.canonicalId },
         )
     }
 }

@@ -13,7 +13,7 @@ import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
-class ApiKeyVault(context: Context) {
+class ApiKeyVault(context: Context) : KeyPoolStore {
     private val preferences = context.getSharedPreferences("pocket_secrets", Context.MODE_PRIVATE)
     private val alias = "pocket-provider-key"
 
@@ -30,7 +30,7 @@ class ApiKeyVault(context: Context) {
     }
 
     @Synchronized
-    fun add(providerId: String, name: String, secret: String): ApiKeyInfo {
+    override fun add(providerId: String, name: String, secret: String): ApiKeyInfo {
         require(secret.isNotBlank()) { "API key cannot be empty" }
         val entries = ensurePool(providerId).toMutableList()
         val entry = ApiKeyInfo(
@@ -53,14 +53,14 @@ class ApiKeyVault(context: Context) {
     }
 
     @Synchronized
-    fun credentials(providerId: String): List<ApiKeyCredential> = list(providerId).mapNotNull { info ->
+    override fun credentials(providerId: String): List<ApiKeyCredential> = list(providerId).mapNotNull { info ->
         getEncrypted(secretKey(providerId, info.id))?.let { secret ->
             ApiKeyCredential(info.id, info.name, secret, info.isActive)
         }
     }.sortedByDescending(ApiKeyCredential::isActive)
 
     @Synchronized
-    fun activate(providerId: String, keyId: String): Boolean {
+    override fun activate(providerId: String, keyId: String): Boolean {
         if (ensurePool(providerId).none { it.id == keyId }) return false
         setActiveId(providerId, keyId)
         return true

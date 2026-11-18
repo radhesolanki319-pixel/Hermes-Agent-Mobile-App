@@ -103,6 +103,7 @@ import com.jarves.mh.model.ProviderProfile
 import com.jarves.mh.model.providersForAgent
 import com.jarves.mh.network.ConnectionValidation
 import com.jarves.mh.network.DiscoveredModel
+import com.jarves.mh.network.GitHubRepository
 import com.jarves.mh.network.ModelDiscoveryResult
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.ui.res.stringResource
@@ -115,7 +116,7 @@ import com.jarves.mh.ui.theme.AppThemeMode
 import com.jarves.mh.ui.theme.PocketOrange
 import kotlinx.coroutines.launch
 
-private enum class SettingsSection { API_KEYS, APPEARANCE, LANGUAGE, TOOLS, RUNTIME, DIAGNOSTICS, BACKUP, UPDATE_CHANNEL }
+private enum class SettingsSection { API_KEYS, PROJECT_IMPORT, APPEARANCE, LANGUAGE, TOOLS, RUNTIME, DIAGNOSTICS, BACKUP, UPDATE_CHANNEL }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -151,14 +152,20 @@ fun SettingsScreen(
     onStopInactiveProcesses: () -> Unit = {},
     onClearRuntimeCache: () -> Unit = {},
     onCheckForAppUpdate: () -> Unit = {},
-    getSavedHermesApiKey: () -> String = { "" },
-    onSaveHermesApiKey: (String) -> Unit = {},
+    getSavedProviderKey: (String) -> String = { "" },
     getSavedHermesHostKey: () -> String = { "" },
     onSaveHermesHostKey: (String) -> Unit = {},
     getAgentProfile: (AgentKind) -> ProviderProfile = { ProviderProfile(ProviderKind.ANTHROPIC) },
-    onSaveAgentApiKey: (ProviderKind, String) -> Unit = { _, _ -> },
+    onSaveProviderKey: (String, String) -> Unit = { _, _ -> },
     onSaveHermesModel: (String) -> Unit = {},
     onOpenAgentSettings: () -> Unit = {},
+    onImportZip: (Uri) -> Unit = {},
+    onCloneGit: (String) -> Unit = {},
+    onStartGitHubLogin: () -> Unit = {},
+    onGenerateNewGitHubCode: () -> Unit = {},
+    onRefreshGitHub: () -> Unit = {},
+    onDisconnectGitHub: () -> Unit = {},
+    onCloneGitHub: (GitHubRepository) -> Unit = {},
     showBackupDot: Boolean = false,
     onBackupOpened: () -> Unit = {},
     openBackup: Boolean = false,
@@ -252,15 +259,34 @@ fun SettingsScreen(
                 ) {
                     ApiKeysSimpleContent(
                         state = state,
-                        getSavedApiKey = getSavedApiKey,
-                        getSavedHermesApiKey = getSavedHermesApiKey,
+                        getSavedProviderKey = getSavedProviderKey,
                         getSavedHermesHostKey = getSavedHermesHostKey,
                         getAgentProfile = getAgentProfile,
-                        onSaveHermesApiKey = onSaveHermesApiKey,
+                        onSaveProviderKey = onSaveProviderKey,
                         onSaveHermesHostKey = onSaveHermesHostKey,
-                        onSaveAgentApiKey = onSaveAgentApiKey,
                         onSaveHermesModel = onSaveHermesModel,
                         onOpenAgentSettings = onOpenAgentSettings,
+                    )
+                }
+            }
+
+            item {
+                SettingsAccordion(
+                    title = stringResource(R.string.settings_github_import_title),
+                    subtitle = stringResource(R.string.projects_import_sources),
+                    icon = Icons.Default.Code,
+                    expanded = expanded == SettingsSection.PROJECT_IMPORT,
+                    onClick = { toggle(SettingsSection.PROJECT_IMPORT) },
+                ) {
+                    ProjectImportSection(
+                        state = state,
+                        onImportZip = onImportZip,
+                        onCloneGit = onCloneGit,
+                        onStartGitHubLogin = onStartGitHubLogin,
+                        onGenerateNewGitHubCode = onGenerateNewGitHubCode,
+                        onRefreshGitHub = onRefreshGitHub,
+                        onDisconnectGitHub = onDisconnectGitHub,
+                        onCloneGitHub = onCloneGitHub,
                     )
                 }
             }
@@ -540,7 +566,7 @@ fun SettingsScreen(
             item {
                 // Manual self-update check (the automatic check runs on app start,
                 // throttled to once per 6 hours). A found update is announced here
-                // and opens the install dialog from the Projects screen.
+                // and opens the install dialog hosted by PocketDevApp.
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -792,28 +818,29 @@ private fun SettingsAccordion(
 }
 
 /**
- * The simple "API Keys" surface: one plain-language field per active key —
- * no provider jargon, no env-var names. Every field reads and writes the
- * SAME vault pool the advanced surfaces use (see [ApiKeysPlan]), so a key
- * entered here is the key the Agent screen shows, and vice versa. The
- * surface is provider-neutral (v17): the Hermes field is labelled with
- * whichever provider is currently chosen in the advanced setup — the
- * user's stored choice is final and nothing here steers it. The
- * Fusion/Auto model choice sits under the Hermes field ONLY in the
- * Custom/FreeLLM configuration, where those virtual models exist; the
- * full setup stays one tap away under "Advanced" (it lives on the
- * Agent screen).
+ * The simple "API Keys" surface: one plain-language field per provider —
+ * no provider jargon, no env-var names. Since v19 there is ONE key store
+ * per provider, shared by every agent (see [ApiKeysPlan]): each field
+ * reads and writes that provider's single pool, so a key entered here is
+ * the key the Agent screen shows and the key every agent set to that
+ * provider uses. When Hermes and Claude Code are set to the same
+ * provider, there is ONE field for it — never a duplicate per agent.
+ * The surface is provider-neutral (v17): fields are labelled with
+ * whichever providers are currently chosen — the user's stored choice is
+ * final and nothing here steers it. The Fusion/Auto model choice sits
+ * under Hermes's provider field ONLY in the Custom/FreeLLM
+ * configuration, where those virtual models exist; the full setup stays
+ * one tap away under "Advanced" (it lives on the Agent screen). The
+ * Hermes host key is not a provider key and keeps its own field.
  */
 @Composable
 private fun ApiKeysSimpleContent(
     state: AppUiState,
-    getSavedApiKey: (ProviderKind) -> String,
-    getSavedHermesApiKey: () -> String,
+    getSavedProviderKey: (String) -> String,
     getSavedHermesHostKey: () -> String,
     getAgentProfile: (AgentKind) -> ProviderProfile,
-    onSaveHermesApiKey: (String) -> Unit,
+    onSaveProviderKey: (String, String) -> Unit,
     onSaveHermesHostKey: (String) -> Unit,
-    onSaveAgentApiKey: (ProviderKind, String) -> Unit,
     onSaveHermesModel: (String) -> Unit,
     onOpenAgentSettings: () -> Unit,
 ) {
@@ -828,18 +855,32 @@ private fun ApiKeysSimpleContent(
 
     fields.forEach { field ->
         when (field.kind) {
-            SimpleKeyFieldKind.HERMES -> {
+            SimpleKeyFieldKind.PROVIDER -> {
                 SimpleKeyFieldEditor(
-                    heading = AgentKind.HERMES.localizedTitle(),
-                    // Provider-neutral (v17): the field always names the
-                    // CURRENTLY CHOSEN provider — in the fusion
-                    // configuration providerName is "FreeLLM", so the
-                    // label reads the same there without a special case.
-                    label = stringResource(R.string.api_keys_provider_label, field.providerName),
-                    hint = stringResource(R.string.api_keys_hermes_provider_hint, field.providerName),
-                    initialValue = getSavedHermesApiKey(),
-                    fieldKey = field.vaultId,
-                    onSave = onSaveHermesApiKey,
+                    heading = field.providerName,
+                    label = if (field.claudeKind == ProviderKind.CLAUDE && !field.isHermesProvider) {
+                        stringResource(R.string.provider_claude_token)
+                    } else {
+                        stringResource(R.string.api_keys_provider_label, field.providerName)
+                    },
+                    hint = when {
+                        field.agents.size > 1 -> stringResource(
+                            R.string.api_keys_shared_hint,
+                            field.providerName,
+                        )
+                        field.isHermesProvider -> stringResource(
+                            R.string.api_keys_hermes_provider_hint,
+                            field.providerName,
+                        )
+                        else -> stringResource(
+                            R.string.api_keys_agent_provider_hint,
+                            field.agents.first().localizedTitle(),
+                            field.providerName,
+                        )
+                    },
+                    initialValue = getSavedProviderKey(field.canonicalId),
+                    fieldKey = field.canonicalId,
+                    onSave = { secret -> onSaveProviderKey(field.canonicalId, secret) },
                 )
                 if (field.showModelSelector) {
                     HermesModelSelector(
@@ -847,30 +888,6 @@ private fun ApiKeysSimpleContent(
                         onSelect = onSaveHermesModel,
                     )
                 }
-            }
-            SimpleKeyFieldKind.CLAUDE_CODE, SimpleKeyFieldKind.ANTIGRAVITY -> {
-                val kind = field.providerKind ?: return@forEach
-                val agent = if (field.kind == SimpleKeyFieldKind.CLAUDE_CODE) {
-                    AgentKind.CLAUDE_CODE
-                } else {
-                    AgentKind.ANTIGRAVITY
-                }
-                SimpleKeyFieldEditor(
-                    heading = agent.localizedTitle(),
-                    label = if (kind == ProviderKind.CLAUDE) {
-                        stringResource(R.string.provider_claude_token)
-                    } else {
-                        stringResource(R.string.api_keys_provider_label, kind.localizedTitle())
-                    },
-                    hint = stringResource(
-                        R.string.api_keys_agent_provider_hint,
-                        agent.localizedTitle(),
-                        kind.localizedTitle(),
-                    ),
-                    initialValue = getSavedApiKey(kind),
-                    fieldKey = field.vaultId,
-                    onSave = { secret -> onSaveAgentApiKey(kind, secret) },
-                )
             }
             SimpleKeyFieldKind.HERMES_HOST -> {
                 SimpleKeyFieldEditor(

@@ -158,6 +158,11 @@ class AppPreferences(private val context: Context) {
         get() = preferences.getBoolean("legacy_seeded_credential_removed", false)
         set(value) { preferences.edit().putBoolean("legacy_seeded_credential_removed", value).apply() }
 
+    /** One-time v19 flag: the per-agent key silos have been merged into the unified provider store. */
+    var providerKeysUnified: Boolean
+        get() = preferences.getBoolean("provider_keys_unified_v19", false)
+        set(value) { preferences.edit().putBoolean("provider_keys_unified_v19", value).apply() }
+
     var testProviderDefaultsVersion: Int
         get() = preferences.getInt("test_provider_defaults_version", 0)
         set(value) { preferences.edit().putInt("test_provider_defaults_version", value).apply() }
@@ -201,7 +206,9 @@ class AppPreferences(private val context: Context) {
 
     // --- Hermes-native settings (Hermes's own setup system in the app) ---
     // Provider/model/base-URL mirror `hermes setup`; the API key lives in
-    // ApiKeyVault under HERMES_SETUP_VAULT_ID. The option keys map one-to-one
+    // the unified provider store (ApiKeyVault pool named by the provider's
+    // canonical id — see ProviderKeys; before v19 it sat in the single
+    // HERMES_SETUP pool). The option keys map one-to-one
     // onto HermesConfigOptions and are written into the guest's config.yaml
     // on every launch. Defaults are the full-power posture.
 
@@ -447,7 +454,7 @@ class AppPreferences(private val context: Context) {
                 kind.defaultBaseUrl
             },
             model = model,
-            hasSecret = vault.contains(kind.name),
+            hasSecret = vault.contains(ProviderKeys.canonicalForKind(kind)),
             openRouterProviderOrder = if (useStoredValues) {
                 preferences.getString("${sourcePrefix}openrouter_order", "").orEmpty()
             } else {
