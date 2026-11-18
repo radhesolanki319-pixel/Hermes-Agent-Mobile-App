@@ -27,6 +27,7 @@ import com.jarves.mh.R
 import com.jarves.mh.data.ApiKeyVault
 import com.jarves.mh.data.ApiKeyInfo
 import com.jarves.mh.data.AppPreferences
+import com.jarves.mh.data.FreeLlmPreconnect
 import com.jarves.mh.data.ProviderKeyMigration
 import com.jarves.mh.data.ProviderKeyMigrator
 import com.jarves.mh.data.ProviderKeys
@@ -71,11 +72,10 @@ import com.jarves.mh.runtime.AntigravityAuthState
 import com.jarves.mh.runtime.AntigravityAuthStatus
 import com.jarves.mh.runtime.AntigravityRuntimeBridge
 import com.jarves.mh.runtime.HERMES_GATEWAY_VAULT_ID
+import com.jarves.mh.runtime.HERMES_SETUP_VAULT_ID
 import com.jarves.mh.runtime.HermesConfigOptions
 import com.jarves.mh.runtime.HermesGatewayPreconnect
-import com.jarves.mh.runtime.HermesGatewayUrls
 import com.jarves.mh.runtime.HermesHostConfig
-import com.jarves.mh.runtime.HermesHostProbe
 import com.jarves.mh.runtime.HermesRemoteMessages
 import com.jarves.mh.runtime.HermesProfileRoute
 import com.jarves.mh.runtime.HermesProfileSeeding
@@ -83,7 +83,6 @@ import com.jarves.mh.runtime.HermesProviderCatalog
 import com.jarves.mh.runtime.HermesRuntimeBridge
 import com.jarves.mh.runtime.HermesRuntimeSettings
 import com.jarves.mh.runtime.HermesSeededModelClear
-import com.jarves.mh.runtime.probeHermesHost
 import com.jarves.mh.runtime.NativeSpawnProcess
 import com.jarves.mh.runtime.RuntimeInstallProgress
 import com.jarves.mh.runtime.RuntimeInstaller
@@ -407,10 +406,6 @@ data class AppUiState(
     val antigravityAuth: AntigravityAuthState = AntigravityAuthState(),
     val antigravityModel: String = "",
     val antigravityEffort: String = "high",
-    val hermesHostRemote: Boolean = false,
-    val hermesHostUrl: String = "",
-    /** v26: the baked-in gateway connection is live (no explicit host choice on record). */
-    val hermesHostPreconnected: Boolean = false,
     val antigravityModels: List<String> = emptyList(),
     val antigravityModelsLoading: Boolean = false,
     val androidBuildRunning: Boolean = false,
@@ -448,8 +443,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val vault = ApiKeyVault(application)
     private val preferences = AppPreferences(application)
+
+    /**
+     * The single key-resolution choke point for launches and connection
+     * tests (v27): the vault's stored key for the profile's provider
+     * pool, with the baked-in FreeLLM key filling a blank in the `custom`
+     * pool only (see [FreeLlmPreconnect]). Deliberately NOT used by the
+     * Agent screen's key field (`getSavedApiKey` stays vault-only): the
+     * baked key must never be displayed as a stored credential or saved
+     * back into the vault by a profile save. The failed-key rotation also
+     * reads the vault directly, so it can never see or touch it.
+     */
+    private fun resolvedApiKey(kind: ProviderKind): String? {
+        val pool = ProviderKeys.canonicalForKind(kind)
+        return FreeLlmPreconnect.resolveKey(pool, vault.get(pool), BuildConfig.FREELLM_KEY)
+    }
+
     private val claudeRuntime = ClaudeRuntimeBridge(application) { profile ->
-        vault.get(ProviderKeys.canonicalForKind(profile.kind))
+        resolvedApiKey(profile.kind)
     }
     private val installer = RuntimeInstaller(application)
     private val antigravityRuntime = AntigravityRuntimeBridge(
@@ -479,7 +490,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             HermesRuntimeSettings(
                 route = HermesProfileRoute.routeFor(profile),
                 model = HermesProfileRoute.modelFor(profile),
-                secret = vault.get(ProviderKeys.canonicalForKind(profile.kind)).orEmpty(),
+                secret = resolvedApiKey(profile.kind).orEmpty(),
                 options = HermesConfigOptions.FULL_POWER,
             )
         },
@@ -546,11 +557,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         preferences.antigravityAccountEmail = email.orEmpty()
         if (!signedIn) preferences.clearAgentConversations(AgentKind.ANTIGRAVITY)
     }
-    // v26: the host state the UI starts from is the EFFECTIVE config —
-    // on an unconfigured install with a baked gateway key that is the
-    // pre-connected remote gateway, not the raw (empty) stored values.
-    private val initialHermesHostPreconnected = hermesHostPreconnectActive()
-    private val initialHermesHostConfig = effectiveHermesHostConfig()
     private val _state = MutableStateFlow(
         AppUiState(
             startupMessage = str(R.string.vm_checking_device),
@@ -570,9 +576,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             ),
             antigravityModel = preferences.antigravityModel,
             antigravityEffort = preferences.antigravityEffort,
-            hermesHostRemote = initialHermesHostConfig.remote,
-            hermesHostUrl = initialHermesHostConfig.baseUrl,
-            hermesHostPreconnected = initialHermesHostPreconnected,
             themeMode = runCatching { com.jarves.mh.ui.theme.AppThemeMode.valueOf(preferences.themeMode.uppercase()) }
                 .getOrDefault(com.jarves.mh.ui.theme.AppThemeMode.DARK),
             languageCode = preferences.languageCode,
@@ -2107,15 +2110,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun getSavedHermesHostKey(): String = vault.get(HERMES_GATEWAY_VAULT_ID).orEmpty()
 
-    /** v26: whether the baked-in gateway connection is the one in force (see HermesGatewayPreconnect). */
-    private fun hermesHostPreconnectActive(): Boolean = HermesGatewayPreconnect.isActive(
-        configured = preferences.hermesHostConfigured,
-        storedRemote = preferences.hermesHostRemote,
-        storedUrl = preferences.hermesHostUrl,
-        storedKey = getSavedHermesHostKey(),
-        bakedKey = BuildConfig.GATEWAY_KEY,
-    )
-
     /**
      * The Hermes host config a turn actually uses, resolved live from the
      * stored state on every call: the user's own host-card choice when one
@@ -2132,43 +2126,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         bakedKey = BuildConfig.GATEWAY_KEY,
     )
 
-    /** Persists the Hermes host choice; the gateway key is stored in the encrypted vault like provider keys. */
-    fun saveHermesHost(remote: Boolean, url: String, key: String) {
-        val normalized = HermesGatewayUrls.normalizeBaseUrl(url)
-        preferences.hermesHostRemote = remote
-        preferences.hermesHostUrl = normalized
-        // v26: any host-card save is an explicit choice — the baked-in
-        // pre-connect never applies again after this, whatever was saved.
-        preferences.hermesHostConfigured = true
-        if (key.isBlank()) vault.remove(HERMES_GATEWAY_VAULT_ID) else vault.put(HERMES_GATEWAY_VAULT_ID, key)
-        _state.update {
-            it.copy(hermesHostRemote = remote, hermesHostUrl = normalized, hermesHostPreconnected = false)
-        }
-    }
-
-    suspend fun testHermesHost(url: String, key: String): ConnectionValidation {
-        val typedOrSavedKey = key.ifBlank { getSavedHermesHostKey() }
-        val effectiveKey = typedOrSavedKey.ifBlank {
-            // v26: the baked gateway's key is built in, so testing that
-            // exact host needs no typed key. Any other URL only ever gets
-            // a user-entered or saved key — never the baked one.
-            if (HermesGatewayUrls.normalizeBaseUrl(url) ==
-                HermesGatewayUrls.normalizeBaseUrl(BuildConfig.GATEWAY_URL)
-            ) {
-                BuildConfig.GATEWAY_KEY
-            } else {
-                ""
-            }
-        }
-        return when (val probe = probeHermesHost(url, effectiveKey)) {
-            HermesHostProbe.Awake -> ConnectionValidation.Success(HermesRemoteMessages.PROBE_OK)
-            is HermesHostProbe.Failed -> ConnectionValidation.Failure(probe.message)
-        }
-    }
-
     /** The stored provider profile for any agent (the Agent screen's per-agent form reads these). */
     fun providerProfileFor(agent: AgentKind): ProviderProfile = preferences.loadProvider(vault, agent)
 
+    /**
+     * The STORED key for the Agent screen's key field — vault-only on
+     * purpose (v27): unlike launch/test resolution ([resolvedApiKey]),
+     * this value is displayed in the Credentials UI and written back into
+     * the vault by profile saves, so the baked-in FreeLLM key must never
+     * flow through here.
+     */
     fun getSavedApiKey(kind: ProviderKind): String =
         vault.get(ProviderKeys.canonicalForKind(kind)).orEmpty()
 
@@ -2219,6 +2186,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         migrateProviderKeysIfNeeded()
         seedHermesProfileIfNeeded()
         clearSeededVirtualHermesModelIfNeeded()
+        seedFreeLlmDefaultsIfFresh()
         viewModelScope.launch { RuntimeSetupController.snapshot.collect(::onSetupSnapshot) }
         viewModelScope.launch { claudeRuntime.events.collect(::onRuntimeEvent) }
         viewModelScope.launch { bootstrap() }
@@ -2327,6 +2295,54 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         // mirroring the seeding's refresh above.
         if (_state.value.agentKind == AgentKind.HERMES) {
             val refreshed = preferences.loadProvider(vault, AgentKind.HERMES)
+            _state.update { current ->
+                current.copy(
+                    provider = refreshed,
+                    activeApiKeyName = vault.list(ProviderKeys.canonicalForKind(refreshed.kind))
+                        .firstOrNull(ApiKeyInfo::isActive)?.name,
+                )
+            }
+        }
+    }
+
+    /**
+     * One-time v27 fresh-install default: on a truly fresh install —
+     * nothing stored at all (no agent profiles, no shared profile, no
+     * legacy Hermes setup, no key in any provider pool) — the Hermes and
+     * Claude Code profiles start on the FreeLLM Custom provider with the
+     * baked endpoint, so FreeLLM works with zero setup exactly like the
+     * v26 gateway pre-connect (see [FreeLlmPreconnect] for the guard and
+     * the profiles). Runs after the v19 key migration, so keys copied
+     * from the old silos already count as "stored" here. A keyless build
+     * leaves even the one-time flag untouched; any stored choice anywhere
+     * disables the seeding permanently — nothing is ever overridden.
+     */
+    private fun seedFreeLlmDefaultsIfFresh() {
+        if (BuildConfig.FREELLM_KEY.isBlank()) return
+        val anyStoredProviderKey =
+            (ProviderKind.entries.map { ProviderKeys.canonicalForKind(it) } + HERMES_SETUP_VAULT_ID)
+                .distinct()
+                .any { pool -> vault.credentials(pool).isNotEmpty() }
+        val shouldSeed = FreeLlmPreconnect.shouldSeedFreshDefault(
+            bakedKey = BuildConfig.FREELLM_KEY,
+            alreadySeeded = preferences.freellmDefaultSeeded,
+            hasHermesProfile = preferences.hasAgentProfile(AgentKind.HERMES),
+            hasClaudeProfile = preferences.hasAgentProfile(AgentKind.CLAUDE_CODE),
+            hasSharedProfile = preferences.hasSharedProviderProfile(),
+            hasLegacyHermesSetup = preferences.legacyHermesSetup() != null,
+            anyStoredProviderKey = anyStoredProviderKey,
+        )
+        preferences.freellmDefaultSeeded = true
+        if (!shouldSeed) return
+        val endpoint = BuildConfig.FREELLM_BASE_URL
+        preferences.saveProvider(FreeLlmPreconnect.profileFor(AgentKind.HERMES, endpoint), AgentKind.HERMES)
+        preferences.saveProvider(FreeLlmPreconnect.profileFor(AgentKind.CLAUDE_CODE, endpoint), AgentKind.CLAUDE_CODE)
+        // The initial state snapshot predates the seeding; refresh the
+        // on-screen profile when it belongs to a seeded agent. The active
+        // key name stays vault-based (no stored key exists — the baked
+        // key is never presented as one).
+        if (_state.value.agentKind == AgentKind.HERMES || _state.value.agentKind == AgentKind.CLAUDE_CODE) {
+            val refreshed = preferences.loadProvider(vault, _state.value.agentKind)
             _state.update { current ->
                 current.copy(
                     provider = refreshed,
@@ -3247,7 +3263,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     suspend fun discoverModels(profile: ProviderProfile, secret: String): ModelDiscoveryResult {
-        val key = secret.ifBlank { vault.get(ProviderKeys.canonicalForKind(profile.kind)).orEmpty() }
+        val key = secret.ifBlank { resolvedApiKey(profile.kind).orEmpty() }
         return providerApi.discoverModels(profile.baseUrl, key, profile.kind.protocol)
     }
 
@@ -3256,7 +3272,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         secret: String,
         models: List<com.jarves.mh.network.DiscoveredModel>,
     ): ConnectionValidation {
-        val key = secret.ifBlank { vault.get(ProviderKeys.canonicalForKind(profile.kind)).orEmpty() }
+        val key = secret.ifBlank { resolvedApiKey(profile.kind).orEmpty() }
         return providerApi.validate(
             profile.baseUrl,
             profile.model,
@@ -3292,7 +3308,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (_state.value.apiPingStatus == ApiPingStatus.PINGING) return
         _state.update { it.copy(apiPingStatus = ApiPingStatus.PINGING, apiPingMessage = str(R.string.vm_ping_sending)) }
         viewModelScope.launch {
-            val key = vault.get(ProviderKeys.canonicalForKind(profile.kind)).orEmpty()
+            val key = resolvedApiKey(profile.kind).orEmpty()
             val result = providerApi.validate(
                 profile.baseUrl,
                 profile.model,

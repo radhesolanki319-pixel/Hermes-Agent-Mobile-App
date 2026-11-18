@@ -135,6 +135,17 @@ class AppPreferences(private val context: Context) {
         get() = preferences.getBoolean("hermes_seeded_virtual_model_cleared_v24", false)
         set(value) { preferences.edit().putBoolean("hermes_seeded_virtual_model_cleared_v24", value).apply() }
 
+    /**
+     * One-time v27 flag: the fresh-install FreeLLM default has been
+     * seeded (see FreeLlmPreconnect). Consumed on the first run of a
+     * build that carries a baked FreeLLM key, whether or not the guard
+     * let it seed, so profiles the user later deletes are never
+     * re-defaulted. A keyless build leaves it untouched.
+     */
+    var freellmDefaultSeeded: Boolean
+        get() = preferences.getBoolean("freellm_default_seeded_v27", false)
+        set(value) { preferences.edit().putBoolean("freellm_default_seeded_v27", value).apply() }
+
     var testProviderDefaultsVersion: Int
         get() = preferences.getInt("test_provider_defaults_version", 0)
         set(value) { preferences.edit().putInt("test_provider_defaults_version", value).apply() }
@@ -220,6 +231,10 @@ class AppPreferences(private val context: Context) {
     /** Whether a per-agent profile has ever been saved for [agent]. */
     fun hasAgentProfile(agent: AgentKind): Boolean =
         preferences.contains("${providerPrefix(agent)}kind")
+
+    /** Whether the shared (agent-less) provider profile has ever been saved. */
+    fun hasSharedProviderProfile(): Boolean =
+        preferences.contains("provider_kind")
 
     /**
      * The Hermes profile's raw stored model, exactly as saved — null

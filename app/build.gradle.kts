@@ -46,6 +46,18 @@ val appUpdateManifestUrl =
 // manual host-card flow remains exactly as before.
 val hermesGatewayUrl = "https://hermes-gateway-l14d.onrender.com"
 val hermesGatewayKey = System.getenv("HERMES_GATEWAY_KEY") ?: ""
+// v27: FreeLLM — the user's own 107-model API on Render — is pre-connected
+// the same way as the gateway above: the endpoint is a public constant, and
+// the API key reaches the build ONLY through the FREELLM_API_KEY
+// environment variable (a GitHub Actions secret on the user's repo, mapped
+// into the build step's env); no key material is ever committed here. A
+// build without the variable carries an empty key, the baked connection
+// stays inactive, and behaviour is exactly as before. In the app the baked
+// key only ever fills a BLANK in the shared `custom` provider pool (see
+// FreeLlmPreconnect in data/ProviderKeys.kt): a key the user stored always
+// wins, and the baked key is never written into the vault.
+val freellmBaseUrl = "https://freellmapi-backup.onrender.com/v1"
+val freellmApiKey = System.getenv("FREELLM_API_KEY") ?: ""
 val runtimeBundleDir = rootProject.layout.projectDirectory.dir("dist/runtime-bundles")
 val generatedRuntimeAssets = layout.buildDirectory.dir("generated/runtime-assets")
 
@@ -131,8 +143,8 @@ android {
         targetSdk = if (playBuild) 36 else 28
         // Keep literal defaults so F-Droid's static manifest parser can detect
         // the tagged release. Gradle properties may still override Play builds.
-        versionCode = 26
-        versionName = "1.0.25"
+        versionCode = 27
+        versionName = "1.0.26"
         providers.gradleProperty("appVersionCode").orNull?.toIntOrNull()?.let { versionCode = it }
         providers.gradleProperty("appVersionName").orNull?.let { versionName = it }
 
@@ -162,6 +174,8 @@ android {
             buildConfigField("String", "APP_VARIANT", "\"online\"")
             buildConfigField("String", "GATEWAY_URL", buildConfigString(hermesGatewayUrl))
             buildConfigField("String", "GATEWAY_KEY", buildConfigString(hermesGatewayKey))
+            buildConfigField("String", "FREELLM_BASE_URL", buildConfigString(freellmBaseUrl))
+            buildConfigField("String", "FREELLM_KEY", buildConfigString(freellmApiKey))
         }
         create("offline") {
             dimension = "runtimeDelivery"
@@ -171,6 +185,8 @@ android {
             buildConfigField("String", "APP_VARIANT", "\"offline\"")
             buildConfigField("String", "GATEWAY_URL", buildConfigString(hermesGatewayUrl))
             buildConfigField("String", "GATEWAY_KEY", buildConfigString(hermesGatewayKey))
+            buildConfigField("String", "FREELLM_BASE_URL", buildConfigString(freellmBaseUrl))
+            buildConfigField("String", "FREELLM_KEY", buildConfigString(freellmApiKey))
         }
     }
 

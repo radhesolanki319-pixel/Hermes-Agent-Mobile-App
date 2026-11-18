@@ -1,6 +1,8 @@
 package com.jarves.mh.data
 
+import com.jarves.mh.model.AgentKind
 import com.jarves.mh.model.ProviderKind
+import com.jarves.mh.model.ProviderProfile
 import com.jarves.mh.runtime.HERMES_SETUP_VAULT_ID
 
 /**
@@ -155,5 +157,105 @@ object ProviderKeyMigrator {
                     ?.let { store.activate(canonicalId, it.id) }
             }
         }
+    }
+}
+
+/**
+ * v27: the baked-in FreeLLM pre-connect — the second half of the "connect
+ * it from inside the app" pair (the gateway pre-connect, v26, is
+ * HermesGatewayPreconnect). FreeLLM is the user's own 107-model API on
+ * Render; its endpoint is a public constant baked into the build
+ * (`BuildConfig.FREELLM_BASE_URL`) and its key reaches the build only
+ * through CI (`BuildConfig.FREELLM_KEY`, from the FREELLM_API_KEY Actions
+ * secret). The key itself is never committed, never written into the
+ * vault, and never shown as a stored credential.
+ *
+ * Two behaviours, both deliberately narrow:
+ *
+ * 1. **Key fallback.** When a launch/test consumer resolves the `custom`
+ *    pool's key (FreeLLM is the Custom provider) and the pool holds NO
+ *    stored key, the baked key is used instead. A stored key ALWAYS wins.
+ *    The fallback lives only at key-resolution time in MainViewModel —
+ *    the vault's own reads (`get`/`list`/`credentials`) are untouched, so
+ *    the Credentials UI never displays the baked key as a stored key, and
+ *    the failed-key rotation (which works off `vault.credentials`) can
+ *    never see, activate, or delete it. With an empty baked key every
+ *    result here is exactly the stored value — pre-v27 behaviour.
+ *
+ * 2. **Fresh-install default.** Only on a truly fresh install — nothing
+ *    stored at all: no Hermes profile, no Claude Code profile, no shared
+ *    profile, no legacy pre-v20 Hermes setup, and no key in any provider
+ *    pool — the Hermes and Claude Code profiles default to the FreeLLM
+ *    Custom provider with the baked endpoint. The Hermes model stays
+ *    UNSET (v24: Hermes decides). The Claude model is the Custom kind's
+ *    own existing default (no new default is invented here). If ANYTHING
+ *    is stored, nothing is seeded — a stored provider/model/key choice
+ *    is never overridden (standing rule).
+ */
+object FreeLlmPreconnect {
+
+    /** Canonical pool id of the Custom / FreeLLM provider — the only pool the baked key may fill. */
+    const val CUSTOM_POOL_ID: String = "custom"
+
+    /**
+     * The key a launch/test consumer should use for [poolId]: the stored
+     * key when one exists (it always wins), otherwise the baked FreeLLM
+     * key — and only for the `custom` pool. Every other case returns the
+     * stored value untouched (including null/blank), so an empty baked
+     * key changes nothing anywhere.
+     */
+    fun resolveKey(poolId: String, storedKey: String?, bakedKey: String): String? =
+        when {
+            !storedKey.isNullOrBlank() -> storedKey
+            poolId == CUSTOM_POOL_ID && bakedKey.isNotBlank() -> bakedKey
+            else -> storedKey
+        }
+
+    /**
+     * The fresh-install guard: every input must say "nothing stored" and
+     * the build must actually carry a baked key (a keyless build never
+     * seeds — the pre-connect is simply inactive there). [alreadySeeded]
+     * is the one-time v27 flag: once the seeding has run, profiles the
+     * user later deletes are never re-defaulted behind their back.
+     */
+    fun shouldSeedFreshDefault(
+        bakedKey: String,
+        alreadySeeded: Boolean,
+        hasHermesProfile: Boolean,
+        hasClaudeProfile: Boolean,
+        hasSharedProfile: Boolean,
+        hasLegacyHermesSetup: Boolean,
+        anyStoredProviderKey: Boolean,
+    ): Boolean =
+        bakedKey.isNotBlank() &&
+            !alreadySeeded &&
+            !hasHermesProfile &&
+            !hasClaudeProfile &&
+            !hasSharedProfile &&
+            !hasLegacyHermesSetup &&
+            !anyStoredProviderKey
+
+    /**
+     * The profile a fresh install seeds for [agent]: FreeLLM Custom with
+     * the baked endpoint. Hermes's model is UNSET ("", v24 — Hermes
+     * decides); Claude Code's model is [ProviderKind.defaultModel] of the
+     * Custom kind itself — the same default a hand-created Custom profile
+     * gets today. Antigravity has no provider profile (Google sign-in
+     * only) and is never seeded.
+     */
+    fun profileFor(agent: AgentKind, endpoint: String): ProviderProfile = when (agent) {
+        AgentKind.HERMES -> ProviderProfile(
+            kind = ProviderKind.CUSTOM,
+            baseUrl = endpoint,
+            model = "",
+        )
+        AgentKind.CLAUDE_CODE -> ProviderProfile(
+            kind = ProviderKind.CUSTOM,
+            baseUrl = endpoint,
+            model = ProviderKind.CUSTOM.defaultModel,
+        )
+        AgentKind.ANTIGRAVITY -> throw IllegalArgumentException(
+            "Antigravity has no provider profile to seed",
+        )
     }
 }
