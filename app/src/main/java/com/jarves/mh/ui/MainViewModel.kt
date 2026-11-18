@@ -3538,12 +3538,38 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun consumeToast() = _state.update { it.copy(toastMessage = null) }
 
+    /**
+     * v25: a brand-new project always opens on Hermes — the user's main
+     * agent — no matter which agent happened to be active when the
+     * project was created. (Incident 2026-11-18: a fresh auto-created
+     * project opened on Claude Code's chat because Claude was the
+     * persisted active agent from earlier testing, and Claude answered
+     * a "hi" meant for Hermes.) Every project-creation entry point
+     * calls this right after its running-work guard, before the new
+     * project's first chat exists: it routes through [selectAgent], so
+     * the persisted agent choice, the provider profile and the
+     * per-agent chat swap all move to Hermes together, and the first
+     * chat the creation path then makes — with the now-current agent —
+     * is Hermes's own chat, which the open flow lands on. Later
+     * explicit agent switches inside the project stick as before;
+     * existing projects are never touched by this.
+     *
+     * Every caller has already refused to run while a turn, a terminal
+     * or a build is active, so [selectAgent]'s running-turn guard
+     * cannot block the switch here; if it ever did, creation would
+     * simply proceed on the current agent, exactly as before v25.
+     */
+    private fun activateHermesForNewProject() {
+        if (_state.value.agentKind != AgentKind.HERMES) selectAgent(AgentKind.HERMES)
+    }
+
     fun createProject(name: String) {
         if (name.isBlank()) return
         if (_state.value.isRunning || _state.value.projectTerminalRunning || _state.value.androidBuildRunning) {
             _state.update { it.copy(toastMessage = str(R.string.vm_stop_before_new_project)) }
             return
         }
+        activateHermesForNewProject()
         val baseSlug = projectSlug(name)
         val usedSlugs = _state.value.projects.mapTo(mutableSetOf()) { it.slug }
         val slug = generateSequence(1) { it + 1 }
@@ -3597,6 +3623,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _state.update { it.copy(toastMessage = str(R.string.an_stop_before_new_project)) }
             return
         }
+        activateHermesForNewProject()
         val cleanName = name.replace(Regex("\\s+"), " ").trim().take(60)
         val baseSlug = projectSlug(cleanName)
         val usedSlugs = _state.value.projects.mapTo(mutableSetOf()) { it.slug }
@@ -3632,6 +3659,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _state.update { it.copy(toastMessage = str(R.string.vm_stop_before_new_project)) }
             return
         }
+        activateHermesForNewProject()
         val identity = generateQuickChatIdentity(_state.value.projects.mapTo(mutableSetOf()) { it.slug })
         val project = Project(
             name = identity.displayName,
@@ -3655,6 +3683,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val result = withContext(Dispatchers.IO) { runCatching { extractImportedProject(uri) } }
             result.onSuccess { imported ->
                 val project = imported.project
+                activateHermesForNewProject()
                 val firstChat = ProjectChat(title = str(R.string.vm_new_chat), agentKind = _state.value.agentKind)
                 preferences.saveProjectChats(project.id, listOf(firstChat))
                 _state.update { current ->
@@ -3877,6 +3906,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
             result.onSuccess { project ->
+                activateHermesForNewProject()
                 val chat = ProjectChat(title = str(R.string.vm_new_chat), agentKind = _state.value.agentKind)
                 preferences.saveProjectChats(project.id, listOf(chat))
                 _state.update { current -> current.copy(projects = listOf(project) + current.projects) }

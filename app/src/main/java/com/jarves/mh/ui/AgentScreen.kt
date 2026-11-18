@@ -185,7 +185,9 @@ fun AgentScreen(
     onAddApiKey: (ProviderKind, String, String) -> List<ApiKeyInfo>,
     onActivateApiKey: (ProviderKind, String) -> List<ApiKeyInfo>,
     onRemoveApiKey: (ProviderKind, String) -> List<ApiKeyInfo>,
-    onSelectAgent: (AgentKind) -> Unit = {},
+    // v25: required, not defaulted — a call site that forgets this
+    // silently breaks the tab-selection == chat-agent contract below.
+    onSelectAgent: (AgentKind) -> Unit,
     onInstallAgent: (AgentKind) -> Unit = {},
     onCheckAgentUpdates: () -> Unit = {},
     onUpdateAgent: (AgentKind) -> Unit = {},
@@ -209,6 +211,21 @@ fun AgentScreen(
     // below is the viewed agent's persisted profile, and saves carry
     // the viewed agent explicitly (see MainViewModel.updateProvider).
     var viewedAgent by rememberSaveable { mutableStateOf(state.agentKind) }
+    // v25 (Fix 2): switching the agent tab is also an agent switch.
+    // The tapped agent becomes the ACTIVE chat agent through the same
+    // selectAgent path the chat header chip uses, so the agent whose
+    // screen this is is the agent the user talks to when he goes back
+    // to Chat. Two cases deliberately change only the viewed tab:
+    //  - the agent is not installed yet — there is nothing to chat
+    //    with; once its install finishes, installAgent selects it;
+    //  - a turn is running — selectAgent refuses (and toasts "stop the
+    //    agent before switching"), the ACTIVE agent stays exactly as
+    //    it was, and only the viewed tab moves, so this screen still
+    //    shows the tapped agent's own settings (the v21 form binding).
+    fun selectViewedAgent(agent: AgentKind, isInstalled: Boolean) {
+        viewedAgent = agent
+        if (isInstalled) onSelectAgent(agent)
+    }
     val viewedProfile = profileForAgent(viewedAgent)
     var selectedKind by rememberSaveable(viewedAgent, viewedProfile.kind) { mutableStateOf(viewedProfile.kind) }
     val selectedProviderTitle = stringResource(selectedKind.titleRes())
@@ -1060,8 +1077,7 @@ fun AgentScreen(
                                     modifier = Modifier
                                         .weight(1f)
                                         .clickable(enabled = state.agentInstalling == null) {
-                                            viewedAgent = agent
-                                            if (isInstalled) onSelectAgent(agent)
+                                            selectViewedAgent(agent, isInstalled)
                                         },
                                 ) {
                                     Box(
