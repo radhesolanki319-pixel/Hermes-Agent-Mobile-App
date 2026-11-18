@@ -150,6 +150,15 @@ data class ProviderProfile(
  * resolves from the unified store's `custom` pool
  * (ProviderKeys.canonicalForKind(CUSTOM)), and both agent bridges pass the
  * stored base URL, key and literal model id through unchanged.
+ *
+ * MANUAL-SELECT ONLY (user's standing order, v23): [bind] may be invoked
+ * ONLY from an explicit tap on a pinned row in the model sheet, and the
+ * pick is persisted at that moment. No default, migration, seeding,
+ * launch route or save path may ever write a virtual id into a profile —
+ * the v20 seeding did exactly that (it carried the pre-v20 setup's
+ * stored model over verbatim, and the old setup system's defaults were
+ * these virtual ids), which is why a profile could sit on `auto`
+ * without the user ever choosing it there.
  */
 object VirtualModels {
     const val FUSION_ID = "fusion"

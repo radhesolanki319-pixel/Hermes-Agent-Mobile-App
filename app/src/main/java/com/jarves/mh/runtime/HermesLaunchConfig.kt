@@ -3,6 +3,7 @@ package com.jarves.mh.runtime
 import com.jarves.mh.data.ProviderKeys
 import com.jarves.mh.model.ProviderKind
 import com.jarves.mh.model.ProviderProfile
+import com.jarves.mh.model.VirtualModels
 
 /**
  * How a Hermes launch is configured, since v20 deleted Hermes's separate
@@ -212,8 +213,21 @@ data class LegacyHermesSetup(
  * default base URL — the launch route translates it to Hermes's
  * endpoint, see [HermesProfileRoute]) and the stored model kept
  * verbatim. A stored Custom setup maps to a Custom profile with its
- * base URL and model untouched (a FreeLLM `fusion` configuration
- * carries over exactly).
+ * base URL untouched.
+ *
+ * ONE exception (v23): a stored FreeLLM virtual model (`fusion` /
+ * `auto`) is NEVER carried over. In the pre-v20 setup system those ids
+ * were the simple surface's factory defaults — Fusion was literally
+ * the default choice of the old selector — so a stored virtual id is
+ * indistinguishable from "never chose anything", and carrying it over
+ * manufactured a Fusion/Auto binding the user never picked in the
+ * profile system (exactly what happened on the user's device: the
+ * seeded Hermes profile sat on `auto` and, because model picks only
+ * persisted after a successful connection test, kept coming back).
+ * The seeded profile therefore falls back to the provider's default
+ * model instead. Since v23 the ONLY way a profile can hold a virtual
+ * model is an explicit tap on its row in the model sheet
+ * ([VirtualModels.bind] at the pick site).
  *
  * A Hermes-catalogue provider the profile system has NO kind for (xAI,
  * Gemini, Z.AI, …) cannot be a first-class profile; it is carried as a
@@ -241,6 +255,12 @@ object HermesProfileSeeding {
     )
 
     fun profileFor(legacy: LegacyHermesSetup): ProviderProfile {
+        // v23: never seed a FreeLLM virtual model — see the object doc.
+        // A real stored model carries over verbatim; a virtual one (or a
+        // blank) falls back to the target provider's default model.
+        val carriedModel = legacy.model.trim()
+            .takeUnless { VirtualModels.isVirtual(it) }
+            .orEmpty()
         val kind = KIND_BY_LEGACY_ID[legacy.providerId]
         if (kind != null) {
             return ProviderProfile(
@@ -250,14 +270,14 @@ object HermesProfileSeeding {
                 } else {
                     kind.defaultBaseUrl
                 },
-                model = legacy.model.trim().ifBlank { kind.defaultModel },
+                model = carriedModel.ifBlank { kind.defaultModel },
             )
         }
         val def = HermesProviderCatalog.find(legacy.providerId)
         return ProviderProfile(
             kind = ProviderKind.CUSTOM,
             baseUrl = def?.baseUrl.orEmpty(),
-            model = legacy.model.trim().ifBlank { def?.defaultModel.orEmpty() },
+            model = carriedModel.ifBlank { def?.defaultModel.orEmpty() },
         )
     }
 

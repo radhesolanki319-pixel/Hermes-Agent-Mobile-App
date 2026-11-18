@@ -139,7 +139,11 @@ class HermesProfileMappingTest {
     }
 
     @Test
-    fun customFusionSetupSeedsACustomProfileVerbatim() {
+    fun customFusionSetupSeedsTheEndpointWithoutTheVirtualModel() {
+        // v23: the pre-v20 setup's stored `fusion` was that system's
+        // factory default, not a pick made in the profile system — the
+        // seeding must NOT turn it into a Fusion binding. The stored
+        // endpoint still carries over verbatim; the model does not.
         val legacy = LegacyHermesSetup(
             "custom",
             "fusion",
@@ -148,12 +152,42 @@ class HermesProfileMappingTest {
         val profile = HermesProfileSeeding.profileFor(legacy)
         assertEquals(ProviderKind.CUSTOM, profile.kind)
         assertEquals("https://freellmapi-backup.onrender.com/v1", profile.baseUrl)
-        assertEquals("fusion", profile.model)
+        assertEquals("", profile.model)
         assertNull(HermesProfileSeeding.keyCopySourcePool(legacy))
         val route = HermesProfileRoute.routeFor(profile)
         assertTrue(route.custom)
         assertEquals("https://freellmapi-backup.onrender.com/v1", route.baseUrl)
-        assertEquals("fusion", HermesProfileRoute.modelFor(profile))
+        assertEquals("", HermesProfileRoute.modelFor(profile))
+    }
+
+    @Test
+    fun virtualModelOnAMappableProviderSeedsTheKindDefaultInstead() {
+        // The user's actual device state: the legacy setup's stored
+        // model was `auto`. Seeded onto OpenRouter it must fall back to
+        // the kind's default model — never the virtual id.
+        val legacy = LegacyHermesSetup("openrouter", "auto", "")
+        val profile = HermesProfileSeeding.profileFor(legacy)
+        assertEquals(ProviderKind.LLM_ROUTER, profile.kind)
+        assertEquals(ProviderKind.LLM_ROUTER.defaultModel, profile.model)
+
+        val anthropic = HermesProfileSeeding.profileFor(LegacyHermesSetup("anthropic", "fusion", ""))
+        assertEquals(ProviderKind.ANTHROPIC, anthropic.kind)
+        assertEquals(ProviderKind.ANTHROPIC.defaultModel, anthropic.model)
+    }
+
+    @Test
+    fun customRealModelSetupStillSeedsVerbatim() {
+        // Only virtual ids are stripped: a real model the user stored
+        // in the old setup carries over exactly, as before.
+        val legacy = LegacyHermesSetup(
+            "custom",
+            "my-local-model",
+            "http://127.0.0.1:1234/v1",
+        )
+        val profile = HermesProfileSeeding.profileFor(legacy)
+        assertEquals(ProviderKind.CUSTOM, profile.kind)
+        assertEquals("http://127.0.0.1:1234/v1", profile.baseUrl)
+        assertEquals("my-local-model", profile.model)
     }
 
     @Test

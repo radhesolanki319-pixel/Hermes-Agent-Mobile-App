@@ -340,17 +340,54 @@ fun AgentScreen(
         }
     }
 
+    /** The profile this card's form currently describes. */
+    fun formProfile(kind: ProviderKind, url: String, chosenModel: String): ProviderProfile =
+        ProviderProfile(
+            kind,
+            url,
+            chosenModel,
+            openRouterProviderOrder = openRouterProviderOrder,
+            openRouterAllowFallbacks = openRouterAllowFallbacks,
+        )
+
+    /** The base URL the form would save for [kind] right now. */
+    fun formBaseUrl(kind: ProviderKind): String =
+        if (kind.fixedBaseUrl) kind.defaultBaseUrl else baseUrl.trim()
+
+    /**
+     * A model pick is a decision, not a draft (v23): it persists for the
+     * VIEWED agent the moment it is made. Before v23 a pick lived only
+     * in form state and reached storage solely through a SUCCESSFUL
+     * connection test — every failed test (key rejections, provider
+     * 402s, cold starts) silently discarded the pick, so the previously
+     * stored model (on the user's device: a virtual model carried over
+     * by the v20 seeding) kept "coming back" no matter what he chose.
+     */
+    fun selectModel(modelId: String) {
+        model = modelId
+        modelSearch = ""
+        showModels = false
+        onSaveProvider(
+            viewedAgent,
+            formProfile(selectedKind, formBaseUrl(selectedKind), modelId),
+            apiKey.trim(),
+        )
+    }
+
     /**
      * Picking a pinned FreeLLM virtual model (Fusion / Auto) rebinds the
      * whole profile to the Custom/FreeLLM configuration — provider, base
      * URL and model change together, visibly, in this card's own state
      * (the credentials section follows selectedKind, so it switches to the
-     * unified store's `custom` pool). The bound profile is then saved and
-     * tested through the same paths as any other profile.
+     * unified store's `custom` pool). This explicit tap is the ONLY way a
+     * profile can become Fusion/Auto (v23), and the bound profile is
+     * persisted immediately, like any other pick — saved with the key of
+     * the pool the bound profile actually reads, not the key field of
+     * the provider being replaced.
      */
     fun selectVirtualModel(modelId: String) {
         val bound = VirtualModels.bind(
-            ProviderProfile(selectedKind, baseUrl, model),
+            formProfile(selectedKind, baseUrl, model),
             modelId,
         )
         selectedKind = bound.kind
@@ -358,6 +395,7 @@ fun AgentScreen(
         model = bound.model
         modelSearch = ""
         showModels = false
+        onSaveProvider(viewedAgent, bound, getSavedApiKey(bound.kind).trim())
     }
 
     // ── Live connection status calculations ──
@@ -713,11 +751,7 @@ fun AgentScreen(
                                 border = BorderStroke(1.dp, PocketOrange.copy(alpha = 0.5f)),
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clickable {
-                                        model = modelSearch.trim()
-                                        modelSearch = ""
-                                        showModels = false
-                                    },
+                                    .clickable { selectModel(modelSearch.trim()) },
                             ) {
                                 Row(
                                     Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
@@ -764,11 +798,7 @@ fun AgentScreen(
                                     ),
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .clickable {
-                                            model = opt.id
-                                            modelSearch = ""
-                                            showModels = false
-                                        },
+                                        .clickable { selectModel(opt.id) },
                                 ) {
                                     Row(
                                         Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
@@ -808,11 +838,7 @@ fun AgentScreen(
                                     border = BorderStroke(1.dp, PocketOrange.copy(alpha = 0.5f)),
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .clickable {
-                                            model = modelSearch.trim()
-                                            modelSearch = ""
-                                            showModels = false
-                                        },
+                                        .clickable { selectModel(modelSearch.trim()) },
                                 ) {
                                     Row(
                                         Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
@@ -839,11 +865,7 @@ fun AgentScreen(
                                 ),
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clickable {
-                                        model = option.id
-                                        modelSearch = ""
-                                        showModels = false
-                                    },
+                                    .clickable { selectModel(option.id) },
                             ) {
                                 Row(
                                     Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
@@ -1233,16 +1255,18 @@ fun AgentScreen(
                                     statusOk = true
                                 }
                                 val kind = selectedKind
-                                val url = if (kind.fixedBaseUrl) kind.defaultBaseUrl else baseUrl.trim()
-                                val profile = ProviderProfile(
-                                    kind,
-                                    url,
-                                    model.trim(),
-                                    openRouterProviderOrder = openRouterProviderOrder,
-                                    openRouterAllowFallbacks = openRouterAllowFallbacks,
-                                )
+                                val profile = formProfile(kind, formBaseUrl(kind), model.trim())
+                                // v23: persist the form BEFORE testing it.
+                                // The profile used to be saved only after a
+                                // successful test, so a failed test silently
+                                // threw the user's provider/model edits away
+                                // and the previously stored profile (on the
+                                // user's device, a seeded virtual model)
+                                // reappeared — the "it sets itself back to
+                                // Auto/Fusion" bug. The test now only
+                                // reports; it never decides what is stored.
+                                onSaveProvider(viewedAgent, profile, apiKey.trim())
                                 if (kind == ProviderKind.CLAUDE) {
-                                    onSaveProvider(viewedAgent, profile, apiKey.trim())
                                     status = context.getString(R.string.st_claude_token_saved_status)
                                     statusOk = true
                                     activeKeyId?.let {
@@ -1251,7 +1275,6 @@ fun AgentScreen(
                                     }
                                 } else when (val result = onValidateProvider(profile, apiKey.trim(), models)) {
                                     is ConnectionValidation.Success -> {
-                                        onSaveProvider(viewedAgent, profile, apiKey.trim())
                                         if (activeKeyId != null) {
                                             keyConnectionStatuses = keyConnectionStatuses +
                                                 (activeKeyId to KeyConnectionStatus(selectedProviderVerifiedMessage, true, label = verifiedStatusLabel))
