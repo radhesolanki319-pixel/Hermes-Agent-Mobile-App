@@ -26,6 +26,7 @@ jobs:
       - name: Build debug APK
         env:
           HERMES_GATEWAY_KEY: ${{ secrets.HERMES_GATEWAY_KEY }}
+          FREELLM_API_KEY: ${{ secrets.FREELLM_API_KEY }}
         run: gradle assembleDebug --stacktrace
 
       - name: Upload APK
