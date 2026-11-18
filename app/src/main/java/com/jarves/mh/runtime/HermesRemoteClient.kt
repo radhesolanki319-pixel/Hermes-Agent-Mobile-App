@@ -1,5 +1,6 @@
 package com.jarves.mh.runtime
 
+import android.util.Log
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.net.HttpURLConnection
@@ -56,10 +57,28 @@ internal const val HERMES_GATEWAY_VAULT_ID = "HERMES_GATEWAY"
  * because the provider key lives on the host, not in the app.
  */
 internal object HermesRemoteMessages {
-    const val KEY_REJECTED = "The Hermes host rejected the gateway key. Check the key saved in Agent → Hermes host."
-    const val NO_URL = "No Hermes host URL is saved. Add one in Agent → Hermes host."
-    const val NO_KEY = "No Hermes host gateway key is saved. Add one in Agent → Hermes host."
-    const val UNREACHABLE = "Could not reach the Hermes host. Check the host URL in Agent → Hermes host and that the host is running."
+    // Since v27 there is no Hermes host card in the app (the gateway is
+    // pre-connected from inside the build), so none of these messages may
+    // send the user to a settings surface that no longer exists.
+    const val KEY_REJECTED = "The Hermes host rejected the gateway key."
+    const val NO_URL = "No Hermes host URL is configured."
+    const val NO_KEY = "No Hermes host gateway key is configured."
+    const val UNREACHABLE = "Could not reach Hermes on its computer. It may be waking up — wait a few seconds and try again."
+
+    /**
+     * v28 diagnostics: [UNREACHABLE] plus the host the app was actually
+     * pointing at and the root network cause (exception class + message),
+     * so a screenshot of the failure shows both — a bare "unreachable"
+     * hides whether the address, the DNS, or the connection is at fault.
+     * MainViewModel's exact-match localization deliberately falls through
+     * to this raw text: the detail IS the message.
+     */
+    fun unreachableDetail(host: String, error: Exception?): String {
+        val cause = error?.let { e ->
+            " (${e.javaClass.simpleName}: ${e.message?.takeIf(String::isNotBlank) ?: "no detail"})"
+        }.orEmpty()
+        return "$UNREACHABLE Host: $host.$cause"
+    }
     const val STILL_WAKING = "The Hermes host is still waking up. Free hosts sleep when idle — wait a minute, then send again."
     const val DROPPED = "The connection to the Hermes host dropped before the reply finished."
     const val PROBE_OK = "Hermes host is awake and the gateway key works."
@@ -82,6 +101,10 @@ internal object HermesGatewayUrls {
         return value
     }
 
+    /** Host of a normalized base URL (lowercased, no port), or "" when it cannot be parsed. */
+    fun hostOf(normalizedBaseUrl: String): String =
+        runCatching { URL(normalizedBaseUrl).host }.getOrNull()?.lowercase().orEmpty()
+
     fun chatCompletionsUrl(normalizedBaseUrl: String): String = "$normalizedBaseUrl/v1/chat/completions"
     fun modelsUrl(normalizedBaseUrl: String): String = "$normalizedBaseUrl/v1/models"
     fun healthUrl(normalizedBaseUrl: String): String = "$normalizedBaseUrl/health"
@@ -101,6 +124,13 @@ internal object HermesGatewayUrls {
  * [configured] flag), and the stored choice is then respected forever —
  * this resolver never overrides it. On a build whose baked key is empty
  * nothing here activates and the pre-v26 manual flow is unchanged.
+ *
+ * One v28 exception: the host card is gone, so the baked gateway is the
+ * only legitimate remote host left. A stored remote URL whose host is
+ * NOT the baked gateway's host ([isStaleRemoteUrl]) is a leftover from
+ * the host-card era — a typo'd or dead address the user can no longer
+ * see or fix — and is ignored in favour of the baked connection. A
+ * stored URL on the same host, in any scheme/path shape, stands.
  */
 internal object HermesGatewayPreconnect {
 
@@ -130,6 +160,28 @@ internal object HermesGatewayPreconnect {
         bakedKey.isNotBlank() && !hasExplicitChoice(configured, storedRemote, storedUrl, storedKey)
 
     /**
+     * v28 stale-URL guard: a stored REMOTE config whose URL host differs
+     * from the baked gateway's host. Only a remote config is judged (a
+     * local "on this phone" choice keeps its inert stored URL), a blank
+     * stored URL is not judged (pre-v28 behaviour stands), and the guard
+     * needs a live baked connection (non-blank baked key and URL) to
+     * fall back to. Hosts are compared after [HermesGatewayUrls.normalizeBaseUrl],
+     * so scheme, port and path variations of the same host are NOT stale.
+     */
+    fun isStaleRemoteUrl(
+        storedRemote: Boolean,
+        storedUrl: String,
+        bakedUrl: String,
+        bakedKey: String,
+    ): Boolean {
+        if (!storedRemote || bakedKey.isBlank()) return false
+        val storedHost = HermesGatewayUrls.hostOf(HermesGatewayUrls.normalizeBaseUrl(storedUrl))
+        if (storedHost.isBlank()) return false
+        val bakedHost = HermesGatewayUrls.hostOf(HermesGatewayUrls.normalizeBaseUrl(bakedUrl))
+        return bakedHost.isNotBlank() && storedHost != bakedHost
+    }
+
+    /**
      * The host config a Hermes turn (and the host card's initial state)
      * actually uses. Unconfigured + baked key → the baked gateway:
      * remote, baked URL, baked key. Otherwise the stored choice stands
@@ -137,7 +189,10 @@ internal object HermesGatewayPreconnect {
      * wins and the baked key only fills a blank (so a host card saved
      * against this same gateway works without re-typing the key the app
      * already carries). With an empty baked key the result is exactly
-     * the stored config.
+     * the stored config. The one override is the v28 stale-URL guard
+     * ([isStaleRemoteUrl]): a stored remote URL on a foreign host is
+     * ignored and the baked connection is used instead — with the same
+     * key resolution, so a stored key still wins over the baked key.
      */
     fun resolve(
         configured: Boolean,
@@ -148,7 +203,9 @@ internal object HermesGatewayPreconnect {
         bakedKey: String,
     ): HermesHostConfig {
         val key = storedKey.ifBlank { bakedKey }
-        return if (isActive(configured, storedRemote, storedUrl, storedKey, bakedKey)) {
+        val useBaked = isActive(configured, storedRemote, storedUrl, storedKey, bakedKey) ||
+            isStaleRemoteUrl(storedRemote, storedUrl, bakedUrl, bakedKey)
+        return if (useBaked) {
             HermesHostConfig(
                 remote = true,
                 baseUrl = HermesGatewayUrls.normalizeBaseUrl(bakedUrl),
@@ -283,10 +340,55 @@ internal object HermesGatewayErrors {
         }
     }
 
-    /** A proxy in front of a sleeping free host answers 502/503/504 until the service is up. */
+    /**
+     * A proxy in front of a sleeping free host answers 502/503/504 until
+     * the service is up. Classification only: since v28 the chat path
+     * never retries an HTTP response (see [HermesColdStartRetry]).
+     */
     fun isRetryableStatus(code: Int): Boolean = code == 502 || code == 503 || code == 504
 
     fun isAuthStatus(code: Int): Boolean = code == 401 || code == 403
+}
+
+/**
+ * v28 cold-start retry policy for one remote turn, extracted pure so the
+ * schedule is unit-testable. A sleeping free host can take a minute to
+ * boot, so a turn whose request dies at the network level — connect
+ * timeout, reset, no HTTP response at all — BEFORE anything was delivered
+ * is replayed up to [MAX_RETRIES] times, after 15s and then 30s, while
+ * the turn's normal in-progress UI covers the wait. The stable per-turn
+ * Idempotency-Key keeps a replay from ever running the turn twice on the
+ * gateway.
+ *
+ * Two shapes are never replayed:
+ *  - an HTTP response, whatever its status — it is a real answer from an
+ *    awake host, and its error is reported as-is;
+ *  - a failure after any stream event was delivered — replaying would
+ *    duplicate output the user already saw.
+ */
+internal object HermesColdStartRetry {
+    /** Retries after the initial attempt. */
+    const val MAX_RETRIES = 2
+
+    /** Total tries for one turn: the initial request plus the retries. */
+    const val MAX_ATTEMPTS = 1 + MAX_RETRIES
+
+    private val RETRY_DELAYS_MS = listOf(15_000L, 30_000L)
+
+    /**
+     * Whether a failed attempt may be replayed: only a network-level
+     * failure (no HTTP response arrived) with zero stream events
+     * delivered so far.
+     */
+    fun isReplayable(networkLevelFailure: Boolean, deliveredEvents: Int): Boolean =
+        networkLevelFailure && deliveredEvents == 0
+
+    /**
+     * Wait before the next attempt after attempt #[attempt] (1-based)
+     * failed replayably, or null once every attempt is used up.
+     */
+    fun delayAfterAttemptMs(attempt: Int): Long? =
+        if (attempt < 1 || attempt >= MAX_ATTEMPTS) null else RETRY_DELAYS_MS.getOrNull(attempt - 1)
 }
 
 internal sealed interface HermesGatewayOutcome {
@@ -295,10 +397,12 @@ internal sealed interface HermesGatewayOutcome {
 }
 
 /**
- * Streaming chat client for one gateway host. A turn whose request fails
- * before a single stream event was delivered is retried while the host
- * wakes (free hosts sleep when idle and can take a minute to boot); once
- * output has flowed, a failure is terminal — the turn is never replayed
+ * Streaming chat client for one gateway host. Retry behaviour follows
+ * [HermesColdStartRetry]: a turn whose request dies at the network level
+ * before a single stream event was delivered is replayed while the host
+ * wakes (free hosts sleep when idle and can take a minute to boot); an
+ * HTTP response is a real answer and is never replayed, and once output
+ * has flowed, a failure is terminal — the turn is never replayed
  * underneath the user. The stable per-turn Idempotency-Key makes even the
  * early retries safe against double execution on the gateway.
  */
@@ -322,25 +426,34 @@ internal class HermesGatewayClient {
         val baseUrl = HermesGatewayUrls.normalizeBaseUrl(config.baseUrl)
         val bodyJson = HermesGatewayRequests.chatCompletionBody(model, prompt).toString()
         val idempotencyKey = UUID.randomUUID().toString()
-        var lastFailureWasWaking = false
-        for (attempt in 1..MAX_ATTEMPTS) {
+        var lastError: Exception? = null
+        for (attempt in 1..HermesColdStartRetry.MAX_ATTEMPTS) {
             if (isStopped()) return HermesGatewayOutcome.Failed(STOPPED_MESSAGE, sessionId)
             val result = try {
                 streamOnce(baseUrl, config.apiKey, bodyJson, sessionId, idempotencyKey, isStopped, onEvent)
             } catch (error: Exception) {
                 if (isStopped()) return HermesGatewayOutcome.Failed(STOPPED_MESSAGE, sessionId)
-                // Connect/read failure before any response: the classic
-                // cold-start shape (proxy resets while the service boots).
-                AttemptResult.Retryable(waking = false)
+                // Connect/write failure before any response arrived:
+                // the classic cold-start shape (the proxy resets while
+                // the service boots). streamOnce only throws from its
+                // setup phase, so nothing was delivered and the policy
+                // allows a replay. Never swallow the cause (v28): log it
+                // in full and keep it for the final failure message.
+                Log.e(TAG, "Hermes gateway attempt $attempt failed before any response", error)
+                lastError = error
+                AttemptResult.Retryable()
             }
             when (result) {
                 is AttemptResult.Done -> return result.outcome
                 is AttemptResult.Retryable -> {
-                    lastFailureWasWaking = result.waking
-                    if (attempt == MAX_ATTEMPTS) break
+                    result.cause?.let { cause ->
+                        Log.e(TAG, "Hermes gateway attempt $attempt dropped before any output", cause)
+                        lastError = cause
+                    }
+                    val waitMs = HermesColdStartRetry.delayAfterAttemptMs(attempt) ?: break
                     onWaking()
                     // Chunked wait so a stop request lands within half a second.
-                    repeat(RETRY_DELAY_MS / STOP_CHECK_SLICE_MS) {
+                    repeat((waitMs / STOP_CHECK_SLICE_MS).toInt()) {
                         if (isStopped()) return HermesGatewayOutcome.Failed(STOPPED_MESSAGE, sessionId)
                         delay(STOP_CHECK_SLICE_MS.toLong())
                     }
@@ -348,7 +461,10 @@ internal class HermesGatewayClient {
             }
         }
         return HermesGatewayOutcome.Failed(
-            if (lastFailureWasWaking) HermesRemoteMessages.STILL_WAKING else HermesRemoteMessages.UNREACHABLE,
+            HermesRemoteMessages.unreachableDetail(
+                host = HermesGatewayUrls.hostOf(baseUrl).ifBlank { baseUrl },
+                error = lastError,
+            ),
             sessionId,
         )
     }
@@ -356,8 +472,13 @@ internal class HermesGatewayClient {
     private sealed interface AttemptResult {
         data class Done(val outcome: HermesGatewayOutcome) : AttemptResult
 
-        /** Nothing was delivered to the caller, so replaying the turn cannot duplicate output. */
-        data class Retryable(val waking: Boolean) : AttemptResult
+        /**
+         * Nothing was delivered to the caller, so replaying the turn
+         * cannot duplicate output. [cause] carries the network failure
+         * when the attempt produced one internally (a dropped stream
+         * before any event), for diagnostics.
+         */
+        data class Retryable(val cause: Exception? = null) : AttemptResult
     }
 
     private suspend fun streamOnce(
@@ -394,7 +515,9 @@ internal class HermesGatewayClient {
                     HermesGatewayErrors.isAuthStatus(code) -> AttemptResult.Done(
                         HermesGatewayOutcome.Failed(HermesRemoteMessages.KEY_REJECTED, responseSessionId),
                     )
-                    HermesGatewayErrors.isRetryableStatus(code) -> AttemptResult.Retryable(waking = true)
+                    // Any other HTTP response — 502/503/504 from a proxy
+                    // included — is a real answer from an awake host and
+                    // is never replayed (HermesColdStartRetry).
                     else -> AttemptResult.Done(
                         HermesGatewayOutcome.Failed(
                             HermesGatewayErrors.parseErrorMessage(errorBody)
@@ -455,7 +578,9 @@ internal class HermesGatewayClient {
                         responseSessionId,
                     ),
                 )
-                readError != null && deliveredEvents == 0 -> AttemptResult.Retryable(waking = false)
+                readError != null &&
+                    HermesColdStartRetry.isReplayable(networkLevelFailure = true, deliveredEvents = deliveredEvents) ->
+                    AttemptResult.Retryable(cause = readError)
                 readError != null || !sawStreamEnd -> AttemptResult.Done(
                     HermesGatewayOutcome.Failed(HermesRemoteMessages.DROPPED, responseSessionId),
                 )
@@ -468,13 +593,12 @@ internal class HermesGatewayClient {
     }
 
     companion object {
+        private const val TAG = "HermesGatewayClient"
         private const val STOPPED_MESSAGE = "Stopped by user"
         private const val CONNECT_TIMEOUT_MS = 30_000
 
         /** Per-read gap tolerance: a host-side tool can run silently for minutes. */
         private const val READ_TIMEOUT_MS = 300_000
-        private const val MAX_ATTEMPTS = 4
-        private const val RETRY_DELAY_MS = 20_000
         private const val STOP_CHECK_SLICE_MS = 500
     }
 }

@@ -31,10 +31,10 @@
     <string name="md_chat_title_attachments">Review the attached files</string>
     <string name="md_reason_user_not_found">User not found. Check the API key and provider account.</string>
     <string name="md_reason_key_rejected">The provider rejected the saved API key.</string>
-    <string name="md_reason_hermes_host_key_rejected">The Hermes host rejected the gateway key. Check the key saved in Agent → Hermes host.</string>
-    <string name="md_reason_hermes_host_no_url">No Hermes host URL is saved. Add one in Agent → Hermes host.</string>
-    <string name="md_reason_hermes_host_no_key">No Hermes host gateway key is saved. Add one in Agent → Hermes host.</string>
-    <string name="md_reason_hermes_host_unreachable">Could not reach the Hermes host. Check the host URL in Agent → Hermes host and that the host is running.</string>
+    <string name="md_reason_hermes_host_key_rejected">The Hermes host rejected the gateway key.</string>
+    <string name="md_reason_hermes_host_no_url">No Hermes host URL is configured.</string>
+    <string name="md_reason_hermes_host_no_key">No Hermes host gateway key is configured.</string>
+    <string name="md_reason_hermes_host_unreachable">Could not reach Hermes on its computer. It may be waking up — wait a few seconds and try again.</string>
     <string name="md_reason_hermes_host_still_waking">The Hermes host is still waking up. Free hosts sleep when idle — wait a minute, then send again.</string>
     <string name="md_reason_hermes_host_dropped">The connection to the Hermes host dropped before the reply finished.</string>
     <string name="md_reason_verification_failed">Runtime verification failed. Nothing unverified was executed.</string>

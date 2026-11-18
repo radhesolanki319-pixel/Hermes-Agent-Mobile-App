@@ -1,5 +1,6 @@
 package com.jarves.mh.runtime
 
+import java.net.UnknownHostException
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -341,22 +342,115 @@ class HermesRemoteClientTest {
         val config = preconnectResolve(configured = true, storedRemote = false)
         assertFalse(config.remote)
         assertEquals("", config.baseUrl)
-        // A later remote pick is likewise the user's, down to the URL.
-        val remote = preconnectResolve(configured = true, storedRemote = true, storedUrl = "https://my.host.example")
+        // A later remote pick on the baked gateway's own host is likewise
+        // the user's, down to the URL (v28: only a FOREIGN host is stale).
+        val remote = preconnectResolve(
+            configured = true,
+            storedRemote = true,
+            storedUrl = "https://hermes-gateway-l14d.onrender.com/",
+        )
         assertTrue(remote.remote)
-        assertEquals("https://my.host.example", remote.baseUrl)
+        assertEquals("https://hermes-gateway-l14d.onrender.com/", remote.baseUrl)
     }
 
     @Test
     fun preconnectRespectsChoicesStoredBeforeTheFlagExisted() {
-        // Pre-v26 installs have no configured flag; a stored remote mode
-        // or URL is the trace of the user's choice and stands verbatim.
-        val config = preconnectResolve(storedRemote = true, storedUrl = "https://old.host.example/")
-        assertTrue(config.remote)
-        assertEquals("https://old.host.example/", config.baseUrl)
+        // Pre-v26 installs have no configured flag; a stored URL trace
+        // with remote mode OFF is the user's local choice and stands
+        // verbatim (the v28 stale-URL guard judges remote configs only).
         val urlOnly = preconnectResolve(storedUrl = "https://old.host.example")
         assertFalse(urlOnly.remote)
         assertEquals("https://old.host.example", urlOnly.baseUrl)
+    }
+
+    // ── Stale stored-URL guard (v28) ──────────────────────────────────────
+
+    @Test
+    fun staleStoredUrlOnAForeignHostFallsBackToTheBakedGateway() {
+        // A typo'd host-card-era URL (114d for l14d): the card is gone, so
+        // the user can never see or fix it — the baked connection wins.
+        val config = preconnectResolve(
+            configured = true,
+            storedRemote = true,
+            storedUrl = "https://hermes-gateway-114d.onrender.com",
+        )
+        assertTrue(config.remote)
+        assertEquals(bakedGatewayUrl, config.baseUrl)
+        assertEquals(bakedGatewayKey, config.apiKey)
+        assertTrue(
+            HermesGatewayPreconnect.isStaleRemoteUrl(
+                storedRemote = true,
+                storedUrl = "https://hermes-gateway-114d.onrender.com",
+                bakedUrl = bakedGatewayUrl,
+                bakedKey = bakedGatewayKey,
+            ),
+        )
+    }
+
+    @Test
+    fun staleGuardKeepsAStoredKeyWinningOverTheBakedKey() {
+        // The guard replaces only the URL; key resolution is unchanged.
+        val config = preconnectResolve(
+            configured = true,
+            storedRemote = true,
+            storedUrl = "https://dead.example.com",
+            storedKey = "user-key",
+        )
+        assertTrue(config.remote)
+        assertEquals(bakedGatewayUrl, config.baseUrl)
+        assertEquals("user-key", config.apiKey)
+    }
+
+    @Test
+    fun staleGuardLeavesSameHostStoredUrlsStanding() {
+        // Same host in any scheme/port/path shape (after normalization)
+        // is the user's own gateway config, not a stale leftover.
+        val stored = "http://hermes-gateway-l14d.onrender.com:8443/custom/base"
+        val config = preconnectResolve(configured = true, storedRemote = true, storedUrl = stored)
+        assertTrue(config.remote)
+        assertEquals(stored, config.baseUrl)
+        assertFalse(
+            HermesGatewayPreconnect.isStaleRemoteUrl(
+                storedRemote = true,
+                storedUrl = stored,
+                bakedUrl = bakedGatewayUrl,
+                bakedKey = bakedGatewayKey,
+            ),
+        )
+        // A scheme-less paste of the same host stands too.
+        val bare = preconnectResolve(configured = true, storedRemote = true, storedUrl = "hermes-gateway-l14d.onrender.com")
+        assertEquals("hermes-gateway-l14d.onrender.com", bare.baseUrl)
+    }
+
+    @Test
+    fun staleGuardLeavesBlankStoredUrlBehaviourUnchanged() {
+        // Remote mode with no URL at all: not judged by the guard; the
+        // stored config comes back exactly as before v28.
+        val config = preconnectResolve(configured = true, storedRemote = true, storedUrl = "")
+        assertTrue(config.remote)
+        assertEquals("", config.baseUrl)
+        assertFalse(
+            HermesGatewayPreconnect.isStaleRemoteUrl(
+                storedRemote = true,
+                storedUrl = "",
+                bakedUrl = bakedGatewayUrl,
+                bakedKey = bakedGatewayKey,
+            ),
+        )
+    }
+
+    @Test
+    fun staleGuardNeedsALiveBakedConnection() {
+        // Keyless build: no baked connection to fall back to, so even a
+        // foreign stored URL stands (pre-v28 behaviour verbatim).
+        val config = preconnectResolve(
+            configured = true,
+            storedRemote = true,
+            storedUrl = "https://old.host.example",
+            bakedKey = "",
+        )
+        assertTrue(config.remote)
+        assertEquals("https://old.host.example", config.baseUrl)
     }
 
     @Test
@@ -392,5 +486,75 @@ class HermesRemoteClientTest {
                 assertFalse("'$message' must not contain '$trigger'", lower.contains(trigger))
             }
         }
+    }
+
+    @Test
+    fun failureMessagesDoNotPointAtTheRemovedHostCard() {
+        // v27 removed the Agent → Hermes host card (the gateway is
+        // pre-connected from inside the app), so no failure reason may
+        // send the user there any more.
+        val messages = listOf(
+            HermesRemoteMessages.KEY_REJECTED,
+            HermesRemoteMessages.NO_URL,
+            HermesRemoteMessages.NO_KEY,
+            HermesRemoteMessages.UNREACHABLE,
+            HermesRemoteMessages.STILL_WAKING,
+            HermesRemoteMessages.DROPPED,
+            HermesRemoteMessages.PROBE_OK,
+        )
+        messages.forEach { message ->
+            assertFalse("'$message' must not point at a settings surface", message.contains("Agent →"))
+        }
+    }
+
+    // ── Cold-start retry policy (v28) ─────────────────────────────────────
+
+    @Test
+    fun coldStartRetryScheduleIsTwoRetriesThenStop() {
+        assertEquals(2, HermesColdStartRetry.MAX_RETRIES)
+        assertEquals(3, HermesColdStartRetry.MAX_ATTEMPTS)
+        // 15s before the first retry, 30s before the second, then no
+        // further attempt — a sleeping host gets ~45s of grace on top of
+        // the attempt time itself.
+        assertEquals(15_000L, HermesColdStartRetry.delayAfterAttemptMs(1))
+        assertEquals(30_000L, HermesColdStartRetry.delayAfterAttemptMs(2))
+        assertNull(HermesColdStartRetry.delayAfterAttemptMs(3))
+        assertNull(HermesColdStartRetry.delayAfterAttemptMs(4))
+        assertNull(HermesColdStartRetry.delayAfterAttemptMs(0))
+    }
+
+    // ── Unreachable diagnostics (v28) ─────────────────────────────────────
+
+    @Test
+    fun unreachableDetailCarriesHostAndRootCause() {
+        val detail = HermesRemoteMessages.unreachableDetail(
+            host = "hermes-gateway-l14d.onrender.com",
+            error = UnknownHostException("Unable to resolve host \"hermes-gateway-l14d.onrender.com\""),
+        )
+        assertTrue(detail.startsWith(HermesRemoteMessages.UNREACHABLE))
+        assertTrue(detail.contains("Host: hermes-gateway-l14d.onrender.com."))
+        assertTrue(detail.contains("UnknownHostException"))
+        assertTrue(detail.contains("Unable to resolve host"))
+    }
+
+    @Test
+    fun unreachableDetailWithoutAnErrorStillNamesTheHost() {
+        val detail = HermesRemoteMessages.unreachableDetail("hermes.example.com", null)
+        assertTrue(detail.startsWith(HermesRemoteMessages.UNREACHABLE))
+        assertTrue(detail.contains("Host: hermes.example.com."))
+        assertFalse(detail.contains("Exception"))
+    }
+
+    @Test
+    fun coldStartRetryOnlyForPreResponseNetworkFailures() {
+        // Network-level failure (connect timeout, reset, no HTTP
+        // response) before anything was delivered: replayable.
+        assertTrue(HermesColdStartRetry.isReplayable(networkLevelFailure = true, deliveredEvents = 0))
+        // An HTTP response arrived — a real answer from an awake host,
+        // never replayed whatever its status.
+        assertFalse(HermesColdStartRetry.isReplayable(networkLevelFailure = false, deliveredEvents = 0))
+        // Output already reached the user: replaying would duplicate it.
+        assertFalse(HermesColdStartRetry.isReplayable(networkLevelFailure = true, deliveredEvents = 1))
+        assertFalse(HermesColdStartRetry.isReplayable(networkLevelFailure = false, deliveredEvents = 3))
     }
 }
