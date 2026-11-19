@@ -47,7 +47,7 @@ enum class ProviderKind(
         "FreeLLM Render Server (107 Models)",
         ProviderProtocol.ANTHROPIC_GATEWAY,
         "https://freellmapi-backup.onrender.com/v1",
-        "claude-haiku-4.5",
+        "auto",
         false,
     ),
 }
