@@ -388,9 +388,9 @@ class AppPreferences(private val context: Context) {
             ProviderKind.valueOf(preferences.getString("${sourcePrefix}kind", null).orEmpty())
         }.getOrNull()
         val kind = when {
-            agent == null -> storedKind ?: ProviderKind.ANTHROPIC
+            agent == null -> storedKind ?: ProviderKind.CUSTOM
             storedKind != null && storedKind in providersForAgent(agent) -> storedKind
-            else -> ProviderKind.ANTHROPIC
+            else -> ProviderKind.CUSTOM
         }
         val useStoredValues = storedKind == kind
         val savedModel = if (useStoredValues) {
@@ -418,7 +418,7 @@ class AppPreferences(private val context: Context) {
                 kind.defaultBaseUrl
             },
             model = model,
-            hasSecret = vault.contains(ProviderKeys.canonicalForKind(kind)),
+            hasSecret = vault.contains(ProviderKeys.canonicalForKind(kind)) || (kind == ProviderKind.CUSTOM && FreeLlmPreconnect.hasBakedKey()),
             openRouterProviderOrder = if (useStoredValues) {
                 preferences.getString("${sourcePrefix}openrouter_order", "").orEmpty()
             } else {

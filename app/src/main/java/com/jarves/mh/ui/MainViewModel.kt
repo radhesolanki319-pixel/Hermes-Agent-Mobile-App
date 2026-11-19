@@ -454,7 +454,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      */
     private fun resolvedApiKey(kind: ProviderKind): String? {
         val pool = ProviderKeys.canonicalForKind(kind)
-        return FreeLlmPreconnect.resolveKey(pool, vault.get(pool), BuildConfig.FREELLM_KEY)
+        return FreeLlmPreconnect.resolveKey(
+            pool,
+            vault.get(pool),
+            BuildConfig.FREELLM_KEY.ifBlank { FreeLlmPreconnect.DEFAULT_FREELLM_KEY },
+        )
     }
 
     private val claudeRuntime = ClaudeRuntimeBridge(application) { profile ->
@@ -2365,13 +2369,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      * disables the seeding permanently — nothing is ever overridden.
      */
     private fun seedFreeLlmDefaultsIfFresh() {
-        if (BuildConfig.FREELLM_KEY.isBlank()) return
+        val bakedKey = BuildConfig.FREELLM_KEY.ifBlank { FreeLlmPreconnect.DEFAULT_FREELLM_KEY }
+        if (bakedKey.isBlank()) return
         val anyStoredProviderKey =
             (ProviderKind.entries.map { ProviderKeys.canonicalForKind(it) } + HERMES_SETUP_VAULT_ID)
                 .distinct()
                 .any { pool -> vault.credentials(pool).isNotEmpty() }
         val shouldSeed = FreeLlmPreconnect.shouldSeedFreshDefault(
-            bakedKey = BuildConfig.FREELLM_KEY,
+            bakedKey = bakedKey,
             alreadySeeded = preferences.freellmDefaultSeeded,
             hasHermesProfile = preferences.hasAgentProfile(AgentKind.HERMES),
             hasClaudeProfile = preferences.hasAgentProfile(AgentKind.CLAUDE_CODE),
@@ -2381,7 +2386,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         )
         preferences.freellmDefaultSeeded = true
         if (!shouldSeed) return
-        val endpoint = BuildConfig.FREELLM_BASE_URL
+        val endpoint = BuildConfig.FREELLM_BASE_URL.ifBlank { FreeLlmPreconnect.DEFAULT_FREELLM_URL }
         preferences.saveProvider(FreeLlmPreconnect.profileFor(AgentKind.HERMES, endpoint), AgentKind.HERMES)
         preferences.saveProvider(FreeLlmPreconnect.profileFor(AgentKind.CLAUDE_CODE, endpoint), AgentKind.CLAUDE_CODE)
         // The initial state snapshot predates the seeding; refresh the

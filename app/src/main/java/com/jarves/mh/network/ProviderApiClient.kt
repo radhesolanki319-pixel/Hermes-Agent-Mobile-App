@@ -223,8 +223,16 @@ class ProviderApiClient(private val context: Context? = null) {
         val withoutAnthropic = base.removeSuffix("/anthropic")
         val candidates = when (protocol) {
             ProviderProtocol.OPENROUTER -> listOf("$base/v1/models")
-            ProviderProtocol.OPENAI_CHAT, ProviderProtocol.OPENAI_RESPONSES -> listOf("$base/models")
-            else -> listOf("$base/v1/models", "$base/models", "$withoutAnthropic/models", "$withoutAnthropic/v1/models")
+            ProviderProtocol.OPENAI_CHAT, ProviderProtocol.OPENAI_RESPONSES -> listOf(
+                if (base.endsWith("/v1")) "$base/models" else "$base/v1/models",
+                "$base/models",
+            )
+            else -> listOf(
+                if (base.endsWith("/v1")) "$base/models" else "$base/v1/models",
+                "$base/models",
+                "$withoutAnthropic/models",
+                "$withoutAnthropic/v1/models",
+            )
         }
         return candidates.distinct()
     }

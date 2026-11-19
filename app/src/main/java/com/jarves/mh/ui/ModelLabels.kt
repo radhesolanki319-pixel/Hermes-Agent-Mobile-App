@@ -35,7 +35,8 @@ fun ProviderKind.subtitleRes(): Int = when (this) {
     ProviderKind.ANTHROPIC -> R.string.provider_subtitle_anthropic
     ProviderKind.LLM_ROUTER -> R.string.provider_subtitle_openrouter
     ProviderKind.DEEPSEEK -> R.string.provider_subtitle_deepseek
-    ProviderKind.KIMI, ProviderKind.CUSTOM -> R.string.provider_subtitle_anthropic_compatible
+    ProviderKind.KIMI -> R.string.provider_subtitle_anthropic_compatible
+    ProviderKind.CUSTOM -> R.string.provider_subtitle_custom
     ProviderKind.OPENCODE_ZEN -> R.string.provider_subtitle_opencode
     ProviderKind.NVIDIA_NIM -> R.string.provider_subtitle_nvidia
 }

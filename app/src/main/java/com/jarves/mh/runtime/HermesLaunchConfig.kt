@@ -88,10 +88,10 @@ object HermesProviderCatalog {
     /** Provider entry for the Custom endpoint row of the picker. */
     val CUSTOM_DEF = HermesProviderDef(
         id = CUSTOM_ID,
-        displayName = "Custom endpoint",
+        displayName = "FreeLLM API (Render)",
         keyEnv = CUSTOM_KEY_ENV,
-        baseUrl = "",
-        defaultModel = "",
+        baseUrl = "https://freellmapi-backup.onrender.com/v1",
+        defaultModel = "claude-haiku-4.5",
     )
 
     val PROVIDERS: List<HermesProviderDef> = listOf(

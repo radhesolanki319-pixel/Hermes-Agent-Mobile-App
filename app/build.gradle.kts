@@ -53,7 +53,7 @@ val appUpdateManifestUrl =
 // FreeLlmPreconnect in data/ProviderKeys.kt): a key the user stored always
 // wins, and the baked key is never written into the vault.
 val freellmBaseUrl = "https://freellmapi-backup.onrender.com/v1"
-val freellmApiKey = System.getenv("FREELLM_API_KEY") ?: ""
+val freellmApiKey = System.getenv("FREELLM_API_KEY")?.takeIf { it.isNotBlank() } ?: "freellmapi-c7bf396fcf0351dbba9546933a8881054c627e6f78875206"
 val runtimeBundleDir = rootProject.layout.projectDirectory.dir("dist/runtime-bundles")
 val generatedRuntimeAssets = layout.buildDirectory.dir("generated/runtime-assets")
 

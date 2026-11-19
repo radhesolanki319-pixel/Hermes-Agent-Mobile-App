@@ -42,7 +42,14 @@ enum class ProviderKind(
         fixedBaseUrl = true,
         fixedProtocol = true,
     ),
-    CUSTOM("Custom API", "Anthropic-compatible endpoint", ProviderProtocol.ANTHROPIC_GATEWAY, "", "", true),
+    CUSTOM(
+        "FreeLLM API",
+        "FreeLLM Render Server (107 Models)",
+        ProviderProtocol.ANTHROPIC_GATEWAY,
+        "https://freellmapi-backup.onrender.com/v1",
+        "claude-haiku-4.5",
+        false,
+    ),
 }
 
 /**
@@ -96,12 +103,12 @@ enum class AgentKind(
  * OpenCode Zen is not offered to any agent (see [providersForAgent]).
  */
 val HERMES_PROVIDERS: Set<ProviderKind> = setOf(
+    ProviderKind.CUSTOM,
     ProviderKind.ANTHROPIC,
     ProviderKind.LLM_ROUTER,
     ProviderKind.DEEPSEEK,
     ProviderKind.KIMI,
     ProviderKind.NVIDIA_NIM,
-    ProviderKind.CUSTOM,
 )
 
 /**
@@ -110,8 +117,23 @@ val HERMES_PROVIDERS: Set<ProviderKind> = setOf(
  * still load; [AppPreferences.loadProvider] moves them to the agent's default provider.
  */
 fun providersForAgent(agent: AgentKind): List<ProviderKind> = when (agent) {
-    AgentKind.HERMES -> ProviderKind.entries.filter { it in HERMES_PROVIDERS }
-    AgentKind.CLAUDE_CODE -> ProviderKind.entries.filterNot { it == ProviderKind.OPENCODE_ZEN }
+    AgentKind.HERMES -> listOf(
+        ProviderKind.CUSTOM,
+        ProviderKind.ANTHROPIC,
+        ProviderKind.LLM_ROUTER,
+        ProviderKind.DEEPSEEK,
+        ProviderKind.KIMI,
+        ProviderKind.NVIDIA_NIM,
+    )
+    AgentKind.CLAUDE_CODE -> listOf(
+        ProviderKind.CUSTOM,
+        ProviderKind.CLAUDE,
+        ProviderKind.ANTHROPIC,
+        ProviderKind.LLM_ROUTER,
+        ProviderKind.DEEPSEEK,
+        ProviderKind.KIMI,
+        ProviderKind.NVIDIA_NIM,
+    )
     AgentKind.ANTIGRAVITY -> emptyList()
 }
 

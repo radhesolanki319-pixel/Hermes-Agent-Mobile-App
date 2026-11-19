@@ -197,6 +197,8 @@ object FreeLlmPreconnect {
 
     /** Canonical pool id of the Custom / FreeLLM provider — the only pool the baked key may fill. */
     const val CUSTOM_POOL_ID: String = "custom"
+    const val DEFAULT_FREELLM_KEY: String = "freellmapi-c7bf396fcf0351dbba9546933a8881054c627e6f78875206"
+    const val DEFAULT_FREELLM_URL: String = "https://freellmapi-backup.onrender.com/v1"
 
     /**
      * The key a launch/test consumer should use for [poolId]: the stored
@@ -211,6 +213,9 @@ object FreeLlmPreconnect {
             poolId == CUSTOM_POOL_ID && bakedKey.isNotBlank() -> bakedKey
             else -> storedKey
         }
+
+    fun hasBakedKey(bakedKey: String = ""): Boolean =
+        bakedKey.isNotBlank() || DEFAULT_FREELLM_KEY.isNotBlank()
 
     /**
      * The fresh-install guard: every input must say "nothing stored" and
@@ -247,12 +252,12 @@ object FreeLlmPreconnect {
     fun profileFor(agent: AgentKind, endpoint: String): ProviderProfile = when (agent) {
         AgentKind.HERMES -> ProviderProfile(
             kind = ProviderKind.CUSTOM,
-            baseUrl = endpoint,
+            baseUrl = endpoint.ifBlank { DEFAULT_FREELLM_URL },
             model = "",
         )
         AgentKind.CLAUDE_CODE -> ProviderProfile(
             kind = ProviderKind.CUSTOM,
-            baseUrl = endpoint,
+            baseUrl = endpoint.ifBlank { DEFAULT_FREELLM_URL },
             model = ProviderKind.CUSTOM.defaultModel,
         )
         AgentKind.ANTIGRAVITY -> throw IllegalArgumentException(
