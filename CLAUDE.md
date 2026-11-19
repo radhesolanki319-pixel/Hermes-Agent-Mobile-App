@@ -70,7 +70,7 @@ Boss can update the app directly inside the phone with a single tap, without usi
 
 ## 4. Hermes Speed & Latency Rules
 - **Model Mandate**: Always pass a concrete model (default: `claude-haiku-4.5`) for `ProviderKind.CUSTOM`. NEVER pass an empty model string to FreeLLM API, otherwise FreeLLM retries across all fallback providers for 45 seconds and returns HTTP 400.
-- **Warm Server Timing**: `START_WAIT_BUDGET_MS` must remain low (8,000ms / 8s) so if the in-guest gateway server doesn't respond quickly, the turn immediately falls back to CLI without freezing the chat for a minute.
+- **Warm Server Timing (CRITICAL)**: `START_WAIT_BUDGET_MS` must be at least 15,000ms (15s). NEVER reduce it to 3s or lower! Python + FastAPI + Uvicorn inside PRoot takes ~5-7s to initialize and bind port 8642. Cutting it to 3s kills the server before it binds, permanently disabling real-time SSE streaming and forcing cold 40s CLI fallback turns. Once the warm server is up, subsequent turns respond in <1s with instant live token streaming.
 - **Anti-Narration Prompt**: Hermes must NEVER recite "running inside <project> directory on your phone" or narrate that the workspace is empty. Greetings must be concise and natural.
 - **Strict Hinglish**: When Boss communicates in Hinglish, Hermes must strictly reply in Roman Hinglish.
 
