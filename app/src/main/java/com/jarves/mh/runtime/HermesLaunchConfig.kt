@@ -200,7 +200,15 @@ object HermesProfileRoute {
      * catalog's curated default for a blank model — an app-chosen
      * model, which is exactly what the user forbade.
      */
-    fun modelFor(profile: ProviderProfile): String = profile.model.trim()
+    fun modelFor(profile: ProviderProfile): String {
+        val trimmed = profile.model.trim()
+        if (trimmed.isNotBlank()) return trimmed
+        return if (profile.kind == ProviderKind.CUSTOM) {
+            HermesProviderCatalog.CUSTOM_DEF.defaultModel
+        } else {
+            ""
+        }
+    }
 }
 
 /**

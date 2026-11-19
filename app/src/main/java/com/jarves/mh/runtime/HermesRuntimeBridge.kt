@@ -439,8 +439,11 @@ internal object HermesConfigFiles {
         // Unset model (v24): no `default:` line at all — Hermes's own
         // resolution decides; an empty `default: ''` would be a value
         // the app chose, and a stale one would override Hermes.
-        if (model.isNotBlank()) {
-            add("  default: ${quote(model)}")
+        val effectiveModel = model.ifBlank {
+            if (route.custom) HermesProviderCatalog.CUSTOM_DEF.defaultModel else ""
+        }
+        if (effectiveModel.isNotBlank()) {
+            add("  default: ${quote(effectiveModel)}")
         }
         if (!route.custom && route.baseUrl.isNotBlank()) {
             add("  base_url: ${quote(route.baseUrl)}")
@@ -473,8 +476,11 @@ internal object HermesConfigFiles {
             section.inlineValue -> Unit
             else -> {
                 var current = setChildLine(lines, section, indent = 2, key = "provider", "  provider: ${quote(route.provider)}")
-                current = if (model.isNotBlank()) {
-                    setChildLine(lines, current, indent = 2, key = "default", "  default: ${quote(model)}")
+                val effectiveModel = model.ifBlank {
+                    if (route.custom) HermesProviderCatalog.CUSTOM_DEF.defaultModel else ""
+                }
+                current = if (effectiveModel.isNotBlank()) {
+                    setChildLine(lines, current, indent = 2, key = "default", "  default: ${quote(effectiveModel)}")
                 } else {
                     // Unset model (v24): withdraw the app-owned
                     // `default` line entirely — leaving a previous
@@ -1099,9 +1105,12 @@ class HermesRuntimeBridge(
             add(route.provider)
             // Unset model (v24): no `-m` at all — an empty argument
             // would still count as "set" for Hermes's resolution.
-            if (model.isNotBlank()) {
+            val effectiveModel = model.ifBlank {
+                if (route.custom) HermesProviderCatalog.CUSTOM_DEF.defaultModel else ""
+            }
+            if (effectiveModel.isNotBlank()) {
                 add("-m")
-                add(model)
+                add(effectiveModel)
             }
             add("-t")
             add(HERMES_TOOLSETS)
