@@ -28,6 +28,9 @@
 Mobile Harness has a built-in **Self-Update / In-App Update System** (`com.jarves.mh.update.GitHubReleaseUpdater` & `AppUpdater`).
 Boss can update the app directly inside the phone with a single tap, without using Termux or ADB.
 
+> [!IMPORTANT]
+> **ZERO DIRECT PHONE INSTALLS MANDATE**: Never install APK on Boss's phone directly using ADB (`adb install`, `pm install`, etc.). Always publish GitHub Release so Boss can update effortlessly from inside the app via the 1-tap in-app update dialog. Always kill ADB server immediately.
+
 ### How to Release an Update:
 1. **Bump Version**:
    In `app/build.gradle.kts`:
