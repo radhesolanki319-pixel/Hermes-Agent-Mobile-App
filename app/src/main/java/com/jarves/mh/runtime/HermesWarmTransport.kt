@@ -377,7 +377,26 @@ internal class HermesStreamAssembler {
         val lt = pending.lastIndexOf('<')
         if (lt >= 0) {
             val tail = pending.substring(lt)
-            if ("<think>".startsWith(tail) || "</think>".startsWith(tail)) {
+            // Truncate a trailing partial think tag so it does not leak as answer
+            // text before the tag completes and the collector classifies it as reasoning.
+            // Matches the think tag variants recognized by HermesQuietOutput:
+            // <think>, <thinking>, <reasoning>, <thought>, <REASONING_SCRATCHPAD>
+            // and their closing tags. Check for complete tags, partial tags, and
+            // common prefixes to prevent leakage of half-typed tags.
+            val isThinkTagPrefix = tail.startsWith("<think") || tail.startsWith("<thinking")
+                || tail.startsWith("<reasoning") || tail.startsWith("<thought")
+                || tail.startsWith("<reasoning_scratchpad")
+                || tail.startsWith("</think") || tail.startsWith("</thinking")
+                || tail.startsWith("</reasoning") || tail.startsWith("</thought")
+                || tail.startsWith("</reasoning_scratchpad")
+            // Also check if the tail IS a prefix of a think tag (e.g., "<thi", "</th")
+            val isPartialThinkTag = "<think".startsWith(tail) || "<thinking".startsWith(tail)
+                || "<reasoning".startsWith(tail) || "<thought".startsWith(tail)
+                || "<reasoning_scratchpad".startsWith(tail)
+                || "</think".startsWith(tail) || "</thinking".startsWith(tail)
+                || "</reasoning".startsWith(tail) || "</thought".startsWith(tail)
+                || "</reasoning_scratchpad".startsWith(tail)
+            if (isThinkTagPrefix || isPartialThinkTag) {
                 pending = pending.substring(0, lt)
             }
         }

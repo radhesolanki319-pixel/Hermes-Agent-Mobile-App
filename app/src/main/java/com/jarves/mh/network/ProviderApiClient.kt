@@ -186,6 +186,7 @@ class ProviderApiClient(private val context: Context? = null) {
                 readTimeout = readTimeoutMs
                 setRequestProperty("Accept", "application/json")
                 setRequestProperty("Content-Type", "application/json")
+                setRequestProperty("User-Agent", "Hermes-Agent-App")
                 if (apiKey.isNotBlank()) {
                     setRequestProperty("Authorization", "Bearer $apiKey")
                 }

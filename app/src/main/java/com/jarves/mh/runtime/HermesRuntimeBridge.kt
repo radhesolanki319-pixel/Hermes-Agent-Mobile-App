@@ -1018,13 +1018,15 @@ class HermesRuntimeBridge(
                 emitCompletedOnce(sessionId)
             }
             is HermesWarmTurnOutcome.Failed -> {
+                // If the server created a new session, save it. Otherwise clear the old
+                // resume id so the next message starts fresh (the failed session cannot
+                // be resumed). Do both: new ID wins, otherwise clear.
                 if (!outcome.sessionId.isNullOrBlank()) {
                     saveConversationId(projectId, outcome.sessionId)
+                } else if (resumeId != null) {
+                    saveConversationId(projectId, "")
                 }
                 if (userStopRequested) throw HermesSessionException("Stopped by user")
-                // A session Hermes no longer knows fails every resume;
-                // forget the stored id so the next message starts fresh.
-                if (resumeId != null) saveConversationId(projectId, "")
                 val providerError = ProviderRuntimeErrorDetector.detect(outcome.errorText)
                 error(
                     HermesQuietOutput.failureMessage(
@@ -1198,9 +1200,14 @@ class HermesRuntimeBridge(
                 emitCompletedOnce(sessionId)
             }
             else -> {
-                // A session Hermes no longer knows fails every resume;
-                // forget the stored id so the next message starts fresh.
-                if (resumeId != null) saveConversationId(projectId, "")
+                // If the CLI created a new session, save it. Otherwise clear the old
+                // resume id so the next message starts fresh (the failed session cannot
+                // be resumed). Do both: new ID wins, otherwise clear.
+                if (!outcome.sessionId.isNullOrBlank()) {
+                    saveConversationId(projectId, outcome.sessionId)
+                } else if (resumeId != null) {
+                    saveConversationId(projectId, "")
+                }
                 error(HermesQuietOutput.failureMessage(outcome, exit, providerError))
             }
         }

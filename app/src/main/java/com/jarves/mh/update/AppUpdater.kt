@@ -45,6 +45,7 @@ class AppUpdater(
             connection.readTimeout = 10_000
             connection.instanceFollowRedirects = true
             connection.setRequestProperty("Accept", "application/json")
+            connection.setRequestProperty("User-Agent", "Hermes-Agent-App-Updater")
             val code = connection.responseCode
             if (code !in 200..299) return null
             val body = connection.inputStream.bufferedReader().use { it.readText() }
@@ -78,6 +79,8 @@ class AppUpdater(
             connection.connectTimeout = 15_000
             connection.readTimeout = 30_000
             connection.instanceFollowRedirects = true
+            // GitHub release asset downloads require a User-Agent header
+            connection.setRequestProperty("User-Agent", "Hermes-Agent-App-Updater")
             val code = connection.responseCode
             check(code in 200..299) { str(R.string.rt_update_download_failed, code) }
             val total = connection.contentLengthLong.takeIf { it > 0 } ?: info.sizeBytes

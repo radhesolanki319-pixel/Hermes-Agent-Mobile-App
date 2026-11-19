@@ -75,6 +75,8 @@ class GitHubReleaseUpdater {
             connection.readTimeout = 10_000
             connection.instanceFollowRedirects = true
             connection.setRequestProperty("Accept", "application/vnd.github+json")
+            // GitHub API requires a User-Agent header; without it, requests may be rejected with 403.
+            connection.setRequestProperty("User-Agent", "Hermes-Agent-App-Updater")
             if (connection.responseCode !in 200..299) return null
             val body = connection.inputStream.bufferedReader().use { it.readText() }
             GitHubReleaseUpdate.parseLatestRelease(body, installedVersionCode)
