@@ -82,3 +82,36 @@ Boss can update the app directly inside the phone with a single tap, without usi
 3. **Strict Roman Hinglish**: Always communicate with Boss in clean Roman Hinglish. Zero pure English, zero Devanagari script.
 4. **Address User**: Always address user as **Boss** (Radhe Solanki).
 5. **No Unauthorized Changes**: Never modify system properties (`setprop`), `settings put`, or package configurations without Boss's explicit prior approval.
+
+---
+
+## 6. Multi-Agent Coordination Protocol (Antigravity & Claude Code)
+Both **Antigravity** and **Claude Code** work on the Mobile Harness repository concurrently. To prevent race conditions, version conflicts, overwritten commits, or mismatched versionCodes, both agents MUST follow this strict protocol:
+
+1. **Always Pull Before Touching Code**:
+   Before modifying any files or creating a new commit, always run:
+   ```bash
+   git pull --rebase origin main
+   ```
+   This ensures you incorporate changes made by the other agent.
+
+2. **Check Uncommitted Work & Active State**:
+   Before starting work, verify `git status`. If there are uncommitted changes, inspect who is working on them and integrate them cleanly. Never clobber each other's work.
+
+3. **Strict Version Code Sequencing (Never Duplicate or Downgrade)**:
+   Before publishing a release or bumping `versionCode`, ALWAYS query the highest existing release on GitHub:
+   ```bash
+   gh release list --repo radhesolanki319-pixel/Mobile-Harness --limit 3
+   ```
+   - Extract the highest release tag `v<X>`.
+   - The new release MUST be `versionCode = X + 1` (strictly incremented).
+   - NEVER create a release with a tag or `versionCode` <= existing latest release tag, otherwise the Android in-app updater will either ignore it or throw a downgrade conflict.
+
+4. **Coordinate Work Before Release (Atomic Packaging)**:
+   If Claude or Antigravity has pending commits on `main` that have not yet been packaged into a release (e.g. Claude pushed speed optimizations in commit A, and Antigravity made FreeLLM updates in commit B):
+   - Combine and integrate both changes together.
+   - Bump `versionCode` once to cover both sets of enhancements.
+   - Publish a single unified GitHub Release containing all contributions with comprehensive release notes.
+
+5. **Zero Direct Phone Installs**:
+   Both agents are strictly prohibited from installing APKs directly on Boss's phone using ADB. Releases are delivered strictly through GitHub Releases → In-App 1-tap update. Always execute `adb kill-server`.
