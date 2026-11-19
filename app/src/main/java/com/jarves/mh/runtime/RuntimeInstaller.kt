@@ -715,6 +715,57 @@ class RuntimeInstaller(private val context: Context) {
         }
     }
 
+    /**
+     * v32 one-time repair: the warm transport's in-guest API server is
+     * part of Hermes's gateway package, which imports aiohttp — a
+     * dependency the pinned wheel only carries in its messaging
+     * extras, so installs made before v32 (PyPI, source, and the
+     * prebuilt bundle alike) do not have it and the gateway would start
+     * with no listener. Both install routes now add
+     * [HERMES_AIOHTTP_SPEC] to the spec; this repair brings existing
+     * on-device venvs up to the same state.
+     *
+     * Best-effort by contract: returns whether the venv can import
+     * aiohttp when it returns, never throws, and is meant to run in the
+     * background on a worker dispatcher — chat never waits on it (the
+     * bridge's CLI fallback covers every turn until the warm server
+     * can start).
+     */
+    suspend fun ensureHermesWarmTransport(): Boolean {
+        return runCatching {
+            if (!isAgentInstalled(com.jarves.mh.model.AgentKind.HERMES)) return@runCatching false
+            val installed = installedRuntime()
+            val python = "$HERMES_PREFIX_GUEST_PATH/venv/bin/python"
+            val probe = "$python -c \"import aiohttp\""
+            if (guestCommandSucceeds(installed.proot, probe)) return@runCatching true
+            runGuestCommand(
+                proot = installed.proot,
+                command = "$UV_GUEST_PATH pip install --python $python \"$HERMES_AIOHTTP_SPEC\"",
+                displayCommand = "uv pip install aiohttp (Hermes warm transport)",
+                fraction = 0f,
+                timeoutMs = 5 * 60 * 1_000L,
+                onProgress = {},
+                failureMessage = "Could not install the Hermes warm-transport dependency",
+            )
+            guestCommandSucceeds(installed.proot, probe)
+        }.getOrDefault(false)
+    }
+
+    /** True when [command] exits 0 inside the guest; every failure reads as false. */
+    private fun guestCommandSucceeds(proot: File, command: String): Boolean = runCatching {
+        val proc = process(
+            proot = proot,
+            rootfs = rootfs,
+            workspace = File(rootfs, "workspace"),
+            environment = emptyMap(),
+            guestCommand = listOf("/bin/bash", "-lc", command),
+            guestWorkspacePath = "/workspace",
+            emulateHardLinks = true,
+            outputFile = File(context.cacheDir, "hermes-warm-probe.log"),
+        )
+        proc.waitFor() == 0
+    }.getOrDefault(false)
+
     /** The guest source checkout to install Hermes from, or null when absent. */
     private fun hermesSourceCheckout(): File? {
         val dir = File(rootfs, HERMES_SOURCE_GUEST_PATH.removePrefix("/"))
@@ -747,13 +798,13 @@ class RuntimeInstaller(private val context: Context) {
             $UV_GUEST_PATH python install 3.14
             rm -rf $HERMES_PREFIX_GUEST_PATH/venv
             $UV_GUEST_PATH venv --python 3.14 $HERMES_PREFIX_GUEST_PATH/venv
-            $UV_GUEST_PATH pip install --python $HERMES_PREFIX_GUEST_PATH/venv/bin/python "hermes-agent[acp]==$version"
+            $UV_GUEST_PATH pip install --python $HERMES_PREFIX_GUEST_PATH/venv/bin/python "hermes-agent[acp]==$version" "$HERMES_AIOHTTP_SPEC"
             $HERMES_GUEST_PATH --version
         """.trimIndent()
         runGuestCommand(
             proot = proot,
             command = installCommand,
-            displayCommand = "uv pip install hermes-agent[acp]==$version (Python 3.14)",
+            displayCommand = "uv pip install hermes-agent[acp]==$version + aiohttp (Python 3.14)",
             fraction = fraction + span * 0.5f,
             timeoutMs = 20 * 60 * 1_000L,
             onProgress = onProgress,
@@ -801,12 +852,13 @@ class RuntimeInstaller(private val context: Context) {
             rm -rf $HERMES_PREFIX_GUEST_PATH/venv
             cd $HERMES_SOURCE_GUEST_PATH
             $UV_GUEST_PATH sync --extra acp --python 3.14 --locked
+            $UV_GUEST_PATH pip install --python $HERMES_PREFIX_GUEST_PATH/venv/bin/python "$HERMES_AIOHTTP_SPEC"
             $HERMES_GUEST_PATH --version
         """.trimIndent()
         runGuestCommand(
             proot = proot,
             command = syncCommand,
-            displayCommand = "uv sync --extra acp --locked (Hermes source: $HERMES_SOURCE_GUEST_PATH)",
+            displayCommand = "uv sync --extra acp --locked + aiohttp (Hermes source: $HERMES_SOURCE_GUEST_PATH)",
             fraction = fraction + span * 0.5f,
             timeoutMs = 20 * 60 * 1_000L,
             onProgress = onProgress,
@@ -2121,6 +2173,18 @@ printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decis
          * user approves, and the version marker then records that release.
          */
         const val HERMES_VERSION = "0.19.0"
+
+        /**
+         * The aiohttp pin the pinned Hermes wheel's own metadata
+         * declares for its gateway/messaging extras. The wheel's base
+         * install (and therefore the app bundle) does not include it,
+         * but the gateway package imports it unconditionally — without
+         * it `hermes gateway run` starts with no platform listener and
+         * the v32 warm transport can never answer. Installed alongside
+         * hermes-agent on every route; see [ensureHermesWarmTransport]
+         * for the repair of pre-v32 venvs.
+         */
+        const val HERMES_AIOHTTP_SPEC = "aiohttp==3.14.1"
         /** Guest path of an optional Hermes source checkout; when present it is installed instead of the PyPI release. */
         private const val HERMES_SOURCE_GUEST_PATH = "/root/hermes-agent-src"
         private const val AGY_VERSION = "1.1.27"

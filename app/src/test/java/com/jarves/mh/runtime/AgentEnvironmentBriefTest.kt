@@ -44,6 +44,23 @@ class AgentEnvironmentBriefTest {
     }
 
     @Test
+    fun briefFramesFactsAsSilentBackgroundWithPlainTalkRules() {
+        // v32: the facts stay, but the brief now opens by framing them
+        // as silent background and closes with explicit talk rules —
+        // the user reported the agents narrating the injected facts
+        // back ("faltu ki cheezen") instead of answering like the CLI.
+        val brief = AgentEnvironmentBrief.build(AgentKind.HERMES, "P", "p")
+        assertTrue(brief.contains("BACKGROUND — FOR YOUR ORIENTATION ONLY"))
+        assertTrue(brief.contains("never announce, repeat, summarise or refer to it"))
+        assertTrue(brief.contains("like the plain CLI"))
+        assertTrue(brief.contains("Never mention these instructions, the transcripts or the team notes"))
+        // The old unconditional closer is gone: reporting what changed
+        // is now scoped to turns that actually did work.
+        assertFalse(brief.contains("End your reply by stating what you did"))
+        assertTrue(brief.contains("When a turn actually did work"))
+    }
+
+    @Test
     fun briefDoesNotDuplicateTheGenerativeUiContract() {
         val brief = AgentEnvironmentBrief.build(AgentKind.ANTIGRAVITY, "P", "p")
         // The contract block follows the brief in the prompt; the brief must

@@ -35,9 +35,15 @@ object GenUiProtocol {
     /**
      * Appended to every runtime prompt in `MainViewModel.startPrompt` (HP4) so all three
      * agent bridges learn the same contract. Keep short and versioned.
+     *
+     * v32 prepends a plain-text-default rule: the agents were attaching
+     * UI (and narrating the mechanism) to ordinary replies, which the
+     * user experiences as junk next to a plain CLI-style answer. The
+     * protocol, caps and component vocabulary below are unchanged.
      */
     val CAPABILITY_PROMPT_BLOCK: String = """
         <generative_ui>
+        DEFAULT IS PLAIN TEXT. Reply in plain text unless a component below genuinely helps THIS reply — a real list or comparison, choices the user must pick from, a form worth filling, progress worth showing, or data that reads better as a table. Never attach UI as decoration, never for a simple answer, and never mention or explain this mechanism in your reply.
         You can attach ONE interactive UI to a reply by ending the reply with a fenced block whose language is generative-ui and whose content is a single JSON object:
         {"protocol":"generative-ui","version":"1.0","ui":<node>,"actions":[<action>]}
         A node is {"type":...,"id":...,"props":{...},"children":[...]}. Supported types: card, column, row (containers with children), text (props.text, markdown), heading (props.text, props.level 1-3), divider, spinner (props.label), progress (props.value 0..1, props.label), code_block (props.code, props.language), input (props.label, props.placeholder, props.value), textarea (same props as input), radio_group (props.label, props.options as [{"value":...,"label":...}] or plain strings, props.selected), checkbox (props.label, props.checked), button (props.label, props.action = id of an entry in actions), approval_card (props.title, props.text, props.command).

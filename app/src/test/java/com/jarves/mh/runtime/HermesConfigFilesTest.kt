@@ -58,6 +58,28 @@ class HermesConfigFilesTest {
     }
 
     @Test
+    fun freshConfigRegistersTheWarmTransportToolsets() {
+        // v32: the warm transport's api_server platform gets Hermes's
+        // own HTTP composite (hermes-api-server) plus the same unlock
+        // extras as the CLI platform, so a warm turn has the same tools
+        // as a one-shot turn. The line lands after cli/acp (insertion
+        // order keeps the long-standing cli/acp pin above intact).
+        val config = HermesConfigFiles.freshConfig(anthropicRoute, "claude-sonnet-4")
+        assertTrue(
+            config.contains(
+                "  api_server: [hermes-api-server, x_search, video, video_gen, kanban, spotify]\n",
+            ),
+        )
+        // Merging into an existing config registers it too (every
+        // pre-v32 device config gains the platform on its next turn).
+        val merged = HermesConfigFiles.mergedConfig(config, anthropicRoute, "claude-sonnet-4")
+        assertTrue(merged.contains("  api_server: [hermes-api-server, x_search, video, video_gen, kanban, spotify]\n"))
+        // And the merge is a fixed point: merging its own output
+        // changes nothing (the bridge skips the write when unchanged).
+        assertEquals(merged, HermesConfigFiles.mergedConfig(merged, anthropicRoute, "claude-sonnet-4"))
+    }
+
+    @Test
     fun freshConfigCarriesActivationPassUnlocks() {
         val config = HermesConfigFiles.freshConfig(anthropicRoute, "claude-sonnet-4")
         // Posture pinned away from "focus", stop-time verification on.

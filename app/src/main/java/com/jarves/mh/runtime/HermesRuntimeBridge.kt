@@ -231,6 +231,18 @@ internal object HermesConfigFiles {
         "video", "video_gen", "x_search",
     )
 
+    /**
+     * Base composite for the warm transport's platform (v32): Hermes's
+     * own designed toolset for its API server — the full HTTP-accessible
+     * set (terminal, files, web, browser, memory, delegation, cron,
+     * skills), minus the interactive-UI tools (clarify, send_message)
+     * that have no one to answer them over HTTP and that Hermes itself
+     * leaves out of this surface. The fixed full-power extras ride along
+     * exactly like the cli list's, so the warm agent's reach matches the
+     * CLI agent's apart from that one by-design exclusion.
+     */
+    private val API_SERVER_BASE_TOOLSET = "hermes-api-server"
+
     /** .env names the app owns (the Hermes provider catalog's key envs); any other line is user state. */
     private val APP_ENV_KEYS: List<String> = HermesProviderCatalog.ALL_KEY_ENVS
 
@@ -560,14 +572,18 @@ internal object HermesConfigFiles {
 
     /**
      * `platform_toolsets` is app-owned policy, like the model route:
-     * the app promises full power, so the cli/acp lists are rewritten
-     * on every launch — as a union with what is already there, so a
-     * toolset the user added by hand stays enabled. Lists for other
-     * platforms (telegram, …) are user state and are never touched.
+     * the app promises full power, so the cli/acp/api_server lists are
+     * rewritten on every launch — as a union with what is already
+     * there, so a toolset the user added by hand stays enabled. Lists
+     * for other platforms (telegram, …) are user state and are never
+     * touched. The api_server list (v32) is what the warm transport's
+     * in-guest API server resolves its tools from.
      */
     private fun ensurePlatformToolsets(lines: MutableList<String>, options: HermesConfigOptions) {
-        // acp first: a missing child is inserted directly under the
-        // section header, so this order leaves cli above acp.
+        // api_server first, then acp: a missing child is inserted
+        // directly under the section header, so this order leaves the
+        // children reading cli, acp, api_server.
+        setPlatformToolsets(lines, "api_server", (listOf(API_SERVER_BASE_TOOLSET) + options.cliToolsets).distinct())
         setPlatformToolsets(lines, "acp", ACP_TOOLSETS)
         setPlatformToolsets(lines, "cli", (listOf(CLI_BASE_TOOLSET) + options.cliToolsets).distinct())
     }
@@ -747,22 +763,41 @@ internal fun hermesLaunchEnvironment(route: HermesRoute, secret: String): Map<St
 )
 
 /**
- * [RuntimeBridge] driving Nous Research's Hermes Agent in one-shot mode:
- * `hermes chat -q <prompt> -Q` per message (Hermes 0.19.0's quiet
- * automation transport — see [HermesQuietOutput] for why this replaced
- * the stream-json launch and for the verified output contract).
+ * [RuntimeBridge] driving Nous Research's Hermes Agent, with two
+ * transports over the same install, config and session store:
  *
- * The context prompt travels as a single argv entry: the launcher spawns
- * an argv array (never a shell), so the only limit is the kernel's
- * 128 KiB per-argument exec cap, which [buildHermesPrompt] stays under
- * by shedding the oldest history first. Continuity across messages uses
- * Hermes's own session store: the run prints its real session id in a
- * `session_id:` trailer, the bridge persists it per project chat, and
- * later messages pass it back with `--resume`.
+ *  - WARM (v32, preferred): a persistent in-guest API server
+ *    (`hermes gateway run` with only its api_server platform enabled —
+ *    see [HermesWarmServer] / [HermesWarmTransport]) serves the turn
+ *    over loopback SSE, so the reply streams into the chat and the
+ *    per-turn process spawn + Python/Hermes startup is paid once per
+ *    server lifetime instead of once per message. Continuity uses the
+ *    same session store as the CLI: the stored id rides in the
+ *    `X-Hermes-Session-Id` header and the server loads its history
+ *    from the shared `state.db`.
+ *  - ONE-SHOT (fallback, the pre-v32 path): `hermes chat -q <prompt>
+ *    -Q` per message (Hermes 0.19.0's quiet automation transport — see
+ *    [HermesQuietOutput] for why this replaced the stream-json launch
+ *    and for the verified output contract). Every warm failure that
+ *    delivered nothing hands the turn to this path
+ *    ([HermesWarmFallback]), so a broken warm server can never make
+ *    Hermes unusable.
  *
- * Approvals are config-only in this mode: the generated config.yaml sets a
- * deterministic one-shot approval policy and the run is launched with
- * `--yolo`. There is no interactive approval channel until the ACP phase.
+ * The context prompt travels as a single argv entry on the one-shot
+ * path (and as the single user message on the warm path): the launcher
+ * spawns an argv array (never a shell), so the only limit is the
+ * kernel's 128 KiB per-argument exec cap, which [buildHermesPrompt]
+ * stays under by shedding the oldest history first. Continuity across
+ * messages uses Hermes's own session store: a one-shot run prints its
+ * real session id in a `session_id:` trailer, the bridge persists it
+ * per project chat, and later messages pass it back with `--resume`
+ * (or the warm path's header).
+ *
+ * Approvals are config-only in both modes: the generated config.yaml
+ * sets a deterministic approval policy (`approvals.mode: "off"`, which
+ * the gateway honours the same way) and the one-shot run is launched
+ * with `--yolo`. There is no interactive approval channel until the
+ * ACP phase.
  */
 class HermesRuntimeBridge(
     private val context: Context,
@@ -772,6 +807,8 @@ class HermesRuntimeBridge(
 ) : RuntimeBridge {
     private val installer = RuntimeInstaller(context)
     private val checkpoints = WorkspaceCheckpoints(context.filesDir, context)
+    private val warmServer = HermesWarmServerManager(context)
+    private val warmClient = HermesWarmChatClient()
     private val eventBus = MutableSharedFlow<RuntimeEvent>(extraBufferCapacity = 64)
     override val events: Flow<RuntimeEvent> = eventBus
     private val finishedSessions = ConcurrentHashMap.newKeySet<String>()
@@ -832,6 +869,7 @@ class HermesRuntimeBridge(
         runCatching {
             RuntimeTaskController.stopAction = {
                 userStopRequested = true
+                warmClient.disconnect()
                 val running = activeProcess
                 if (running != null) {
                     Thread {
@@ -852,126 +890,43 @@ class HermesRuntimeBridge(
             writeHermesConfig(installed.rootfs, route, model, secret, settings.options)
             val environment = hermesLaunchEnvironment(route, secret)
             val guestWorkspacePath = "/workspace/$projectSlug"
-            // Hermes 0.19.0's one-shot transport is `-q` (the prompt travels
-            // as one argv entry — the launcher spawns an argv array, never a
-            // shell, so no quoting hazard) in quiet mode `-Q`. The prompt is
-            // byte-capped below the kernel's 128 KiB per-argument exec limit;
-            // see buildHermesPrompt.
             val resumeId = conversationId(projectId)?.takeIf(String::isNotBlank)
-            val contextPrompt = buildHermesPrompt(prompt, conversationHistory, guestWorkspacePath, projectKind, resumed = resumeId != null)
-            val command = buildList {
-                add(RuntimeInstaller.HERMES_GUEST_PATH)
-                add("chat")
-                add("-q")
-                add(contextPrompt)
-                add("-Q")
-                add("--provider")
-                add(route.provider)
-                // Unset model (v24): no `-m` at all — an empty argument
-                // would still count as "set" for Hermes's resolution.
-                if (model.isNotBlank()) {
-                    add("-m")
-                    add(model)
-                }
-                add("-t")
-                add(HERMES_TOOLSETS)
-                add("--yolo")
-                if (resumeId != null) {
-                    add("--resume")
-                    add(resumeId)
-                    add("--no-restore-cwd")
-                }
-            }
-            Log.d("HermesBridge", "Route: ${route.provider}, Model: $model, Resume: ${resumeId != null}")
-            val process = installer.process(
-                installed.proot,
-                installed.rootfs,
-                workspace,
-                environment,
-                command,
+            // v32: the warm transport (persistent in-guest API server,
+            // streamed replies) takes the turn when it can. It returns
+            // false only when the attempt delivered nothing and the
+            // one-shot CLI path should run the turn instead — the warm
+            // server is an optimisation, never a dependency.
+            val warmHandled = runWarmTurnIfPossible(
+                sessionId = sessionId,
+                projectId = projectId,
+                projectKind = projectKind,
+                prompt = prompt,
+                conversationHistory = conversationHistory,
+                installed = installed,
+                workspace = workspace,
                 guestWorkspacePath = guestWorkspacePath,
-                // Hermes saves files and its session database through atomic
-                // renames; PRoot's hard-link emulation would dangle them.
-                emulateHardLinks = false,
+                route = route,
+                model = model,
+                secret = secret,
+                resumeId = resumeId,
+                before = before,
             )
-            activeProcess = process
-            if (userStopRequested) process.destroy()
-            pushForegroundProgress(R.string.rt_bridge_working, "Hermes Agent")
-            val nativeProcess = process as? NativeSpawnProcess
-                ?: error("Unsupported Android runtime process")
-            var outputOffset = 0L
-            val pendingOutput = StringBuilder()
-            val output = HermesQuietOutput.Collector()
-            var providerError: String? = null
-
-            fun handleLine(line: String) {
-                if (providerError == null && line.isNotBlank()) {
-                    providerError = ProviderRuntimeErrorDetector.detect(line)
-                }
-                output.accept(line)
-            }
-
-            // Quiet mode prints nothing until the turn ends, so this loop
-            // only drains the merged capture into the classifier; the
-            // outcome is decided from the process exit code below.
-            while (process.isAlive || nativeProcess.outputFile.length() > outputOffset) {
-                val available = nativeProcess.outputFile.length() - outputOffset
-                if (available <= 0) {
-                    delay(50)
-                    continue
-                }
-                val bytes = ByteArray(minOf(available, 16L * 1024).toInt())
-                val count = RandomAccessFile(nativeProcess.outputFile, "r").use { file ->
-                    file.seek(outputOffset)
-                    file.read(bytes)
-                }
-                if (count <= 0) continue
-                outputOffset += count
-                pendingOutput.append(bytes.decodeToString(0, count))
-                var newline = pendingOutput.indexOf("\n")
-                while (newline >= 0) {
-                    val line = pendingOutput.substring(0, newline).trimEnd('\r')
-                    pendingOutput.delete(0, newline + 1)
-                    handleLine(line)
-                    newline = pendingOutput.indexOf("\n")
-                }
-            }
-            pendingOutput.toString().takeIf(String::isNotEmpty)?.let { handleLine(it) }
-            val exit = process.waitFor()
-            Log.d("HermesBridge", "Hermes process exited with code $exit")
-            val changed = checkpoints.changedFiles(workspace, before)
-            if (changed.isNotEmpty()) {
-                Log.d("HermesBridge", "Changed files: $changed")
-                checkpoints.saveChangedPaths(projectId, changed)
-                val details = checkpoints.buildChangeDetails(projectId, workspace, checkpoints.readChangedPaths(projectId))
-                eventBus.emit(RuntimeEvent.FilesChanged(sessionId, details))
-            } else if (!File(checkpoints.checkpointDir(projectId), "changes.json").isFile) {
-                acceptLastChanges(projectId)
-            }
-            // Quiet mode's outcome contract: the process exit code decides
-            // (0 = turn completed, 1 = turn/credentials/init failed, 130 =
-            // interrupted), the `session_id:` trailer carries the real
-            // session id, and a failed turn leaves its explanation in the
-            // output — HermesQuietOutput.failureMessage surfaces it, so a
-            // failure never again degrades to a bare exit code.
-            val outcome = output.finish()
-            if (!outcome.sessionId.isNullOrBlank()) {
-                saveConversationId(projectId, outcome.sessionId)
-            }
-            when {
-                userStopRequested -> throw HermesSessionException("Stopped by user")
-                exit == 0 -> {
-                    if (outcome.responseText.isNotBlank()) {
-                        eventBus.emit(RuntimeEvent.AssistantDelta(sessionId, outcome.responseText))
-                    }
-                    emitCompletedOnce(sessionId)
-                }
-                else -> {
-                    // A session Hermes no longer knows fails every resume;
-                    // forget the stored id so the next message starts fresh.
-                    if (resumeId != null) saveConversationId(projectId, "")
-                    error(HermesQuietOutput.failureMessage(outcome, exit, providerError))
-                }
+            if (!warmHandled) {
+                runCliTurn(
+                    sessionId = sessionId,
+                    projectId = projectId,
+                    projectKind = projectKind,
+                    prompt = prompt,
+                    conversationHistory = conversationHistory,
+                    installed = installed,
+                    workspace = workspace,
+                    guestWorkspacePath = guestWorkspacePath,
+                    environment = environment,
+                    route = route,
+                    model = model,
+                    resumeId = resumeId,
+                    before = before,
+                )
             }
         }.onFailure { error ->
             Log.e("HermesBridge", "Session failed", error)
@@ -983,15 +938,296 @@ class HermesRuntimeBridge(
         sessionId
     }
 
+    /**
+     * The v32 warm transport: serves the turn from the persistent
+     * in-guest API server, streaming reply text into the chat as it is
+     * generated. Returns true when the warm attempt OWNED the turn
+     * (completed, failed after answering, or stopped); false means the
+     * attempt delivered nothing and the caller runs the one-shot CLI
+     * path for the same turn ([HermesWarmFallback]).
+     *
+     * Finalisation mirrors the CLI path exactly: changed files are
+     * reported from the same checkpoint diff, the session id the server
+     * echoes replaces the stored one, a failed resume clears the stored
+     * id, and a failure reason is shaped by the same
+     * [HermesQuietOutput.failureMessage] + provider-error detection, so
+     * downstream handling (failure bubbles, key rotation) cannot tell
+     * the transports apart.
+     */
+    private suspend fun runWarmTurnIfPossible(
+        sessionId: String,
+        projectId: String,
+        projectKind: ProjectKind,
+        prompt: String,
+        conversationHistory: List<ChatMessage>,
+        installed: InstalledRuntime,
+        workspace: File,
+        guestWorkspacePath: String,
+        route: HermesRoute,
+        model: String,
+        secret: String,
+        resumeId: String?,
+        before: Map<String, String>,
+    ): Boolean {
+        val launch = HermesWarmLaunch(
+            fingerprint = HermesWarmFingerprint.of(guestWorkspacePath, route, secret),
+            proot = installed.proot,
+            rootfs = installed.rootfs,
+            workspace = workspace,
+            guestWorkspacePath = guestWorkspacePath,
+            environment = warmServerEnvironment(route, secret, guestWorkspacePath),
+        )
+        if (!warmServer.ensure(launch)) return false
+        // The stored id means "resume" only if the server's own session
+        // store still holds it; the probe keeps the warm path honest
+        // where the CLI would fail the resume and clear the id.
+        val probe = if (resumeId != null) warmServer.probeSession(resumeId) else HermesSessionProbe.MISSING
+        val plan = HermesSessionPlanner.plan(resumeId, probe)
+        val contextPrompt = buildHermesPrompt(
+            prompt, conversationHistory, guestWorkspacePath, projectKind,
+            resumed = plan is HermesSessionPlan.Resume,
+        )
+        pushForegroundProgress(R.string.rt_bridge_working, "Hermes Agent")
+        val outcome = warmClient.streamTurn(
+            apiKey = warmServer.serverKey(),
+            model = model,
+            prompt = contextPrompt,
+            plan = plan,
+            isStopped = { userStopRequested },
+            onTextDelta = { delta -> eventBus.emit(RuntimeEvent.AssistantDelta(sessionId, delta)) },
+            onToolActivity = { label -> pushForegroundProgress(label) },
+        )
+        if (HermesWarmFallback.shouldUseCli(outcome)) {
+            Log.d("HermesBridge", "Warm turn delivered nothing; the CLI path takes this turn")
+            return false
+        }
+        warmServer.markUsed()
+        reportChangedFiles(sessionId, projectId, workspace, before)
+        when (outcome) {
+            is HermesWarmTurnOutcome.Completed -> {
+                if (!outcome.sessionId.isNullOrBlank()) {
+                    saveConversationId(projectId, outcome.sessionId)
+                }
+                if (userStopRequested) throw HermesSessionException("Stopped by user")
+                emitCompletedOnce(sessionId)
+            }
+            is HermesWarmTurnOutcome.Failed -> {
+                if (!outcome.sessionId.isNullOrBlank()) {
+                    saveConversationId(projectId, outcome.sessionId)
+                }
+                if (userStopRequested) throw HermesSessionException("Stopped by user")
+                // A session Hermes no longer knows fails every resume;
+                // forget the stored id so the next message starts fresh.
+                if (resumeId != null) saveConversationId(projectId, "")
+                val providerError = ProviderRuntimeErrorDetector.detect(outcome.errorText)
+                error(
+                    HermesQuietOutput.failureMessage(
+                        HermesQuietOutput.Outcome(
+                            responseText = "",
+                            sessionId = outcome.sessionId,
+                            errorText = outcome.errorText,
+                            usageError = null,
+                            tracebackTail = null,
+                        ),
+                        exitCode = 1,
+                        providerError = providerError,
+                    ),
+                )
+            }
+            HermesWarmTurnOutcome.Stopped -> throw HermesSessionException("Stopped by user")
+            HermesWarmTurnOutcome.Unavailable -> return false // Unreachable: shouldUseCli handled it above.
+        }
+        return true
+    }
+
+    /**
+     * The environment the warm server process runs with: the launch
+     * environment the CLI turns use, minus the CLI-session presence
+     * marker (the gateway establishes its own session presence; the
+     * marker is how the *CLI* claims a session, and the launch env's
+     * own notes warn against misclassifying gateway sessions), plus
+     * the API server's enablement and the project workspace as its
+     * terminal working directory (the gateway resolves TERMINAL_CWD at
+     * startup, which is why the workspace is part of the server's
+     * [HermesWarmFingerprint]).
+     */
+    private fun warmServerEnvironment(
+        route: HermesRoute,
+        secret: String,
+        guestWorkspacePath: String,
+    ): Map<String, String> =
+        hermesLaunchEnvironment(route, secret) - "HERMES_INTERACTIVE" + mapOf(
+            "API_SERVER_ENABLED" to "1",
+            "API_SERVER_KEY" to warmServer.serverKey(),
+            "API_SERVER_HOST" to HermesWarmEndpoint.HOST,
+            "API_SERVER_PORT" to HermesWarmEndpoint.PORT.toString(),
+            "TERMINAL_CWD" to guestWorkspacePath,
+        )
+
+    /**
+     * The pre-v32 transport: Hermes 0.19.0's one-shot quiet mode
+     * (`hermes chat -q <prompt> -Q` — the prompt travels as one argv
+     * entry; the launcher spawns an argv array, never a shell, so no
+     * quoting hazard). The prompt is byte-capped below the kernel's
+     * 128 KiB per-argument exec limit; see buildHermesPrompt. Kept
+     * verbatim as the fallback for every turn the warm transport cannot
+     * serve.
+     */
+    private suspend fun runCliTurn(
+        sessionId: String,
+        projectId: String,
+        projectKind: ProjectKind,
+        prompt: String,
+        conversationHistory: List<ChatMessage>,
+        installed: InstalledRuntime,
+        workspace: File,
+        guestWorkspacePath: String,
+        environment: Map<String, String>,
+        route: HermesRoute,
+        model: String,
+        resumeId: String?,
+        before: Map<String, String>,
+    ) {
+        val contextPrompt = buildHermesPrompt(prompt, conversationHistory, guestWorkspacePath, projectKind, resumed = resumeId != null)
+        val command = buildList {
+            add(RuntimeInstaller.HERMES_GUEST_PATH)
+            add("chat")
+            add("-q")
+            add(contextPrompt)
+            add("-Q")
+            add("--provider")
+            add(route.provider)
+            // Unset model (v24): no `-m` at all — an empty argument
+            // would still count as "set" for Hermes's resolution.
+            if (model.isNotBlank()) {
+                add("-m")
+                add(model)
+            }
+            add("-t")
+            add(HERMES_TOOLSETS)
+            add("--yolo")
+            if (resumeId != null) {
+                add("--resume")
+                add(resumeId)
+                add("--no-restore-cwd")
+            }
+        }
+        Log.d("HermesBridge", "Route: ${route.provider}, Model: $model, Resume: ${resumeId != null}")
+        val process = installer.process(
+            installed.proot,
+            installed.rootfs,
+            workspace,
+            environment,
+            command,
+            guestWorkspacePath = guestWorkspacePath,
+            // Hermes saves files and its session database through atomic
+            // renames; PRoot's hard-link emulation would dangle them.
+            emulateHardLinks = false,
+        )
+        activeProcess = process
+        if (userStopRequested) process.destroy()
+        pushForegroundProgress(R.string.rt_bridge_working, "Hermes Agent")
+        val nativeProcess = process as? NativeSpawnProcess
+            ?: error("Unsupported Android runtime process")
+        var outputOffset = 0L
+        val pendingOutput = StringBuilder()
+        val output = HermesQuietOutput.Collector()
+        var providerError: String? = null
+
+        fun handleLine(line: String) {
+            if (providerError == null && line.isNotBlank()) {
+                providerError = ProviderRuntimeErrorDetector.detect(line)
+            }
+            output.accept(line)
+        }
+
+        // Quiet mode prints nothing until the turn ends, so this loop
+        // only drains the merged capture into the classifier; the
+        // outcome is decided from the process exit code below.
+        while (process.isAlive || nativeProcess.outputFile.length() > outputOffset) {
+            val available = nativeProcess.outputFile.length() - outputOffset
+            if (available <= 0) {
+                delay(50)
+                continue
+            }
+            val bytes = ByteArray(minOf(available, 16L * 1024).toInt())
+            val count = RandomAccessFile(nativeProcess.outputFile, "r").use { file ->
+                file.seek(outputOffset)
+                file.read(bytes)
+            }
+            if (count <= 0) continue
+            outputOffset += count
+            pendingOutput.append(bytes.decodeToString(0, count))
+            var newline = pendingOutput.indexOf("\n")
+            while (newline >= 0) {
+                val line = pendingOutput.substring(0, newline).trimEnd('\r')
+                pendingOutput.delete(0, newline + 1)
+                handleLine(line)
+                newline = pendingOutput.indexOf("\n")
+            }
+        }
+        pendingOutput.toString().takeIf(String::isNotEmpty)?.let { handleLine(it) }
+        val exit = process.waitFor()
+        Log.d("HermesBridge", "Hermes process exited with code $exit")
+        reportChangedFiles(sessionId, projectId, workspace, before)
+        // Quiet mode's outcome contract: the process exit code decides
+        // (0 = turn completed, 1 = turn/credentials/init failed, 130 =
+        // interrupted), the `session_id:` trailer carries the real
+        // session id, and a failed turn leaves its explanation in the
+        // output — HermesQuietOutput.failureMessage surfaces it, so a
+        // failure never again degrades to a bare exit code.
+        val outcome = output.finish()
+        if (!outcome.sessionId.isNullOrBlank()) {
+            saveConversationId(projectId, outcome.sessionId)
+        }
+        when {
+            userStopRequested -> throw HermesSessionException("Stopped by user")
+            exit == 0 -> {
+                if (outcome.responseText.isNotBlank()) {
+                    eventBus.emit(RuntimeEvent.AssistantDelta(sessionId, outcome.responseText))
+                }
+                emitCompletedOnce(sessionId)
+            }
+            else -> {
+                // A session Hermes no longer knows fails every resume;
+                // forget the stored id so the next message starts fresh.
+                if (resumeId != null) saveConversationId(projectId, "")
+                error(HermesQuietOutput.failureMessage(outcome, exit, providerError))
+            }
+        }
+    }
+
+    /** Reports the turn's workspace changes (either transport) from the pre-turn snapshot. */
+    private suspend fun reportChangedFiles(
+        sessionId: String,
+        projectId: String,
+        workspace: File,
+        before: Map<String, String>,
+    ) {
+        val changed = checkpoints.changedFiles(workspace, before)
+        if (changed.isNotEmpty()) {
+            Log.d("HermesBridge", "Changed files: $changed")
+            checkpoints.saveChangedPaths(projectId, changed)
+            val details = checkpoints.buildChangeDetails(projectId, workspace, checkpoints.readChangedPaths(projectId))
+            eventBus.emit(RuntimeEvent.FilesChanged(sessionId, details))
+        } else if (!File(checkpoints.checkpointDir(projectId), "changes.json").isFile) {
+            acceptLastChanges(projectId)
+        }
+    }
+
     override suspend fun respondToApproval(request: ToolRequest, approved: Boolean) {
-        // One-shot runs expose no approval channel; the generated config.yaml
-        // carries the deterministic approval policy for this mode. Interactive
+        // Neither transport exposes an approval channel to the app; the generated config.yaml
+        // carries the deterministic approval policy for both modes. Interactive
         // approvals arrive with the ACP driver in a later phase.
     }
 
     override suspend fun stopSession(sessionId: String) = withContext(Dispatchers.IO) {
         if (activeSessionId == sessionId) {
             userStopRequested = true
+            // A warm turn has no per-turn process to kill (the shared
+            // server must survive for the next turn); severing the
+            // in-flight request is its stop.
+            warmClient.disconnect()
             activeProcess?.destroy()
             delay(500)
             if (activeProcess?.isAlive == true) activeProcess?.destroyForcibly()
@@ -1096,16 +1332,20 @@ class HermesRuntimeBridge(
         File(home, "memories").mkdirs()
         val configFile = File(home, "config.yaml")
         val existingConfig = configFile.takeIf(File::isFile)?.readText()
-        configFile.writeText(
-            if (existingConfig.isNullOrBlank()) {
-                HermesConfigFiles.freshConfig(route, model, options)
-            } else {
-                HermesConfigFiles.mergedConfig(existingConfig, route, model, options)
-            },
-        )
+        val newConfig = if (existingConfig.isNullOrBlank()) {
+            HermesConfigFiles.freshConfig(route, model, options)
+        } else {
+            HermesConfigFiles.mergedConfig(existingConfig, route, model, options)
+        }
+        // The merge is stable (merging a merged file changes nothing),
+        // so after the first launch the computed text equals the file
+        // on disk launch after launch: skip the rewrite entirely
+        // instead of touching both files on every turn (v32 latency).
+        if (newConfig != existingConfig) configFile.writeText(newConfig)
         val envFile = File(home, ".env")
         val existingEnv = envFile.takeIf(File::isFile)?.readText().orEmpty()
-        envFile.writeText(HermesConfigFiles.mergedEnv(existingEnv, route, secret))
+        val newEnv = HermesConfigFiles.mergedEnv(existingEnv, route, secret)
+        if (newEnv != existingEnv) envFile.writeText(newEnv)
     }
 
     /**

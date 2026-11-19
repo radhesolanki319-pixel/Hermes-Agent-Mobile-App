@@ -2186,6 +2186,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         seedHermesProfileIfNeeded()
         clearSeededVirtualHermesModelIfNeeded()
         migrateHermesToEmbeddedOnlyIfNeeded()
+        repairHermesWarmTransportIfNeeded()
         seedFreeLlmDefaultsIfFresh()
         viewModelScope.launch { RuntimeSetupController.snapshot.collect(::onSetupSnapshot) }
         viewModelScope.launch { claudeRuntime.events.collect(::onRuntimeEvent) }
@@ -2284,6 +2285,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      * resolves embedded); this migration simply makes the stored state
      * itself tell the same truth.
      */
+    /**
+     * v32 one-time repair, backgrounded: venvs installed before v32
+     * lack the aiohttp package the warm transport's in-guest API
+     * server needs (see RuntimeInstaller.ensureHermesWarmTransport).
+     * The flag is set only when the repair verifies, so a failed or
+     * offline attempt retries on a later launch. Chat never waits on
+     * this — until it lands, Hermes turns simply use the CLI path.
+     */
+    private fun repairHermesWarmTransportIfNeeded() {
+        if (preferences.hermesWarmTransportRepaired) return
+        viewModelScope.launch(Dispatchers.IO) {
+            val repaired = runCatching {
+                installer.isAgentInstalled(AgentKind.HERMES) && installer.ensureHermesWarmTransport()
+            }.getOrDefault(false)
+            if (repaired) preferences.hermesWarmTransportRepaired = true
+        }
+    }
+
     private fun migrateHermesToEmbeddedOnlyIfNeeded() {
         if (!HermesEmbeddedOnly.shouldMigrateEmbeddedOnly(preferences.hermesEmbeddedOnlyMigrated)) return
         preferences.hermesEmbeddedOnlyMigrated = true

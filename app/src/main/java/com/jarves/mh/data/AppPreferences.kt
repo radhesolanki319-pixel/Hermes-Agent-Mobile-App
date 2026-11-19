@@ -190,6 +190,18 @@ class AppPreferences(private val context: Context) {
         set(value) { preferences.edit().putBoolean("hermes_embedded_only_v31", value).apply() }
 
     /**
+     * v32: true once the warm-transport dependency repair
+     * (RuntimeInstaller.ensureHermesWarmTransport) has landed aiohttp
+     * in the on-device Hermes venv. Set only on success, so a failed
+     * or offline attempt retries on a later launch; fresh v32+
+     * installs set it on their first probe without downloading
+     * anything (the package is already in their install spec).
+     */
+    var hermesWarmTransportRepaired: Boolean
+        get() = preferences.getBoolean("hermes_warm_transport_v32", false)
+        set(value) { preferences.edit().putBoolean("hermes_warm_transport_v32", value).apply() }
+
+    /**
      * Gateway session ids for remote Hermes, keyed per project chat like
      * [loadAgentConversation] but in their own namespace: an id minted by
      * the gateway host means nothing to the embedded Hermes and vice versa.
