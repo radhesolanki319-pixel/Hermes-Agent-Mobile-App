@@ -16,9 +16,10 @@ import org.junit.Test
 class VirtualModelsTest {
 
     @Test
-    fun pinnedOptionsAreFusionThenAuto() {
-        assertEquals(listOf("fusion", "auto"), VirtualModels.PINNED.map { it.id })
-        assertEquals(listOf("Fusion", "Auto"), VirtualModels.PINNED.map { it.label })
+    fun pinnedOptionsAreAutoFusionAutoThenFusion() {
+        assertEquals(listOf("auto-fusion", "auto", "fusion"), VirtualModels.PINNED.map { it.id })
+        assertEquals(listOf("Auto-Fusion (Smart)", "Auto (Fastest SOTA)", "Fusion (Multi-Model)"), VirtualModels.PINNED.map { it.label })
+        assertTrue(VirtualModels.isVirtual("auto-fusion"))
         assertTrue(VirtualModels.isVirtual("fusion"))
         assertTrue(VirtualModels.isVirtual("auto"))
         assertFalse(VirtualModels.isVirtual("claude-sonnet-4-6"))
@@ -37,6 +38,14 @@ class VirtualModelsTest {
         assertEquals("https://freellmapi-backup.onrender.com/v1", bound.baseUrl)
         assertEquals("https://freellmapi-backup.onrender.com/v1", bound.resolvedBaseUrl)
         assertEquals("fusion", bound.model)
+    }
+
+    @Test
+    fun bindAutoFusionSetsTheLiteralAutoFusionModel() {
+        val bound = VirtualModels.bind(ProviderProfile(ProviderKind.ANTHROPIC), VirtualModels.AUTO_FUSION_ID)
+        assertEquals(ProviderKind.CUSTOM, bound.kind)
+        assertEquals(VirtualModels.FREELLM_BASE_URL, bound.baseUrl)
+        assertEquals("auto-fusion", bound.model)
     }
 
     @Test

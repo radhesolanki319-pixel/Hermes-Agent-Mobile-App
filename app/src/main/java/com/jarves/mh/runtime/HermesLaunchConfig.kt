@@ -91,7 +91,7 @@ object HermesProviderCatalog {
         displayName = "FreeLLM API (Render)",
         keyEnv = CUSTOM_KEY_ENV,
         baseUrl = "https://freellmapi-backup.onrender.com/v1",
-        defaultModel = "auto",
+        defaultModel = "auto-fusion",
     )
 
     val PROVIDERS: List<HermesProviderDef> = listOf(

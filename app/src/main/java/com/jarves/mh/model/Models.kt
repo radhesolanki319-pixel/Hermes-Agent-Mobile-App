@@ -47,7 +47,7 @@ enum class ProviderKind(
         "FreeLLM Render Server (107 Models)",
         ProviderProtocol.ANTHROPIC_GATEWAY,
         "https://freellmapi-backup.onrender.com/v1",
-        "auto",
+        "auto-fusion",
         false,
     ),
 }
@@ -183,6 +183,7 @@ data class ProviderProfile(
  * without the user ever choosing it there.
  */
 object VirtualModels {
+    const val AUTO_FUSION_ID = "auto-fusion"
     const val FUSION_ID = "fusion"
     const val AUTO_ID = "auto"
 
@@ -191,15 +192,20 @@ object VirtualModels {
 
     data class Option(val id: String, val label: String)
 
-    /** Pinned at the top of every profile model list, Fusion first. */
-    val PINNED: List<Option> = listOf(Option(FUSION_ID, "Fusion"), Option(AUTO_ID, "Auto"))
+    /** Pinned at the top of every profile model list, Auto-Fusion first. */
+    val PINNED: List<Option> = listOf(
+        Option(AUTO_FUSION_ID, "Auto-Fusion (Smart)"),
+        Option(AUTO_ID, "Auto (Fastest SOTA)"),
+        Option(FUSION_ID, "Fusion (Multi-Model)")
+    )
 
-    fun isVirtual(modelId: String): Boolean = modelId == FUSION_ID || modelId == AUTO_ID
+    fun isVirtual(modelId: String): Boolean =
+        modelId == AUTO_FUSION_ID || modelId == FUSION_ID || modelId == AUTO_ID
 
     /**
      * Rebinds [profile] to the Custom/FreeLLM configuration a virtual-model
-     * pick requires. Any previous provider/base URL is replaced — `fusion`
-     * and `auto` resolve nowhere else — and the result is an ordinary,
+     * pick requires. Any previous provider/base URL is replaced — `auto-fusion`,
+     * `fusion` and `auto` resolve nowhere else — and the result is an ordinary,
      * fully editable Custom profile: no hidden state, no launch-time
      * rerouting.
      */
