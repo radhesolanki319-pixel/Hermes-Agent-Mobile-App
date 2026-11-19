@@ -1156,7 +1156,7 @@ class HermesRuntimeBridge(
         while (process.isAlive || nativeProcess.outputFile.length() > outputOffset) {
             val available = nativeProcess.outputFile.length() - outputOffset
             if (available <= 0) {
-                delay(50)
+                delay(10)
                 continue
             }
             val bytes = ByteArray(minOf(available, 16L * 1024).toInt())
@@ -1569,7 +1569,7 @@ class HermesRuntimeBridge(
 
     companion object {
         const val HERMES_HOME_GUEST_PATH = "/root/.hermes"
-        private const val FOREGROUND_PROGRESS_MIN_INTERVAL_MS = 750L
+        private const val FOREGROUND_PROGRESS_MIN_INTERVAL_MS = 100L
         private const val MAX_CONVERSATION_HISTORY_CHARACTERS = 160_000
         /** Byte budget for the `-q` prompt: under the kernel's 128 KiB per-argument exec cap, with headroom. */
         private const val MAX_HERMES_PROMPT_BYTES = 120_000

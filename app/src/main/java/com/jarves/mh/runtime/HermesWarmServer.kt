@@ -208,10 +208,9 @@ internal class HermesWarmServerManager(private val context: Context) {
 
     companion object {
         private const val TAG = "HermesWarmServer"
-        private const val HEALTH_TIMEOUT_MS = 5_000
-        private const val HEALTH_STABLE_MS = 2_000L
-        private const val STOP_GRACE_MS = 500L
-        private const val START_WAIT_BUDGET_MS = 120_000
+        private const val HEALTH_TIMEOUT_MS = 1_500
+        private const val HEALTH_STABLE_MS = 500L
+        private const val STOP_GRACE_MS = 200L
     }
 }
 
@@ -366,9 +365,9 @@ internal class HermesWarmChatClient {
 
     companion object {
         private const val TAG = "HermesWarmClient"
-        private const val CONNECT_TIMEOUT_MS = 5_000
+        private const val CONNECT_TIMEOUT_MS = 2_000
 
         /** Per-read gap tolerance: a server-side tool can run silently for minutes. */
-        private const val READ_TIMEOUT_MS = 300_000
+        private const val READ_TIMEOUT_MS = 120_000
     }
 }

@@ -451,15 +451,15 @@ internal object HermesWarmFallback {
 /** Timing policy for the warm server: start budget, failure cooldown, idle stop. */
 internal object HermesWarmTiming {
     /** How long a turn waits for a starting server before the CLI path takes the turn. */
-    const val START_WAIT_BUDGET_MS = 8_000L
+    const val START_WAIT_BUDGET_MS = 3_000L
 
     /** After a failed start, turns go straight to the CLI for this long instead of paying the wait again. */
-    const val FAILURE_COOLDOWN_MS = 1 * 60_000L
+    const val FAILURE_COOLDOWN_MS = 30_000L
 
     /** A warm server with no Hermes turn for this long is stopped; the next turn restarts it. */
-    const val IDLE_STOP_MS = 15 * 60_000L
+    const val IDLE_STOP_MS = 10 * 60_000L
 
-    const val HEALTH_POLL_INTERVAL_MS = 300L
+    const val HEALTH_POLL_INTERVAL_MS = 100L
 
     fun inCooldown(lastFailureAtMs: Long, nowMs: Long): Boolean =
         lastFailureAtMs > 0L && nowMs - lastFailureAtMs < FAILURE_COOLDOWN_MS
