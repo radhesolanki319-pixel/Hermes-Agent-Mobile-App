@@ -290,10 +290,11 @@ import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.Terminal
 
 private enum class RootScreen(@StringRes val labelRes: Int, val icon: ImageVector) {
-    CHAT(R.string.tab_chat, Icons.Default.Folder),
+    CHAT(R.string.tab_chat, Icons.Default.Chat),
     SETTINGS(R.string.tab_settings, Icons.Default.Settings),
 }
 private enum class WorkspaceTab(@StringRes val labelRes: Int, val icon: ImageVector) {
+    CHAT(R.string.tab_chat_tab, Icons.Default.AutoAwesome),
     FILES(R.string.tab_files, Icons.Default.Folder),
     TERMINAL(R.string.tab_terminal, Icons.Default.Terminal),
     CHANGES(R.string.tab_changes, Icons.Default.Code),
@@ -1595,11 +1596,13 @@ private fun AgentChoiceRow(
         AgentKind.HERMES -> Color(0xFF0F766E)
         AgentKind.CLAUDE_CODE -> Color(0xFFD97757)
         AgentKind.ANTIGRAVITY -> Color(0xFF4285F4)
+        AgentKind.NATIVE -> Color(0xFF2563EB)
     }
     val mark = when (agent) {
         AgentKind.HERMES -> "HA"
         AgentKind.CLAUDE_CODE -> "CC"
         AgentKind.ANTIGRAVITY -> "AG"
+        AgentKind.NATIVE -> "AA"
     }
     Row(
         modifier = Modifier
@@ -4089,14 +4092,15 @@ private fun WorkspaceScreen(
         chatListState.scrollBy(100_000f)
     }
 
-    // Custom saver: installs upgrading from <=v47 may restore the removed
-    // CHAT tab name — map anything unknown to FILES instead of crashing.
+    // Custom saver: installs that ran v48/v49 may restore a tab name that a
+    // future version removes again — map anything unknown to CHAT instead of
+    // crashing on restore.
     var selectedTab by rememberSaveable(
         stateSaver = Saver<WorkspaceTab, String>(
             save = { it.name },
-            restore = { name -> WorkspaceTab.entries.firstOrNull { it.name == name } ?: WorkspaceTab.FILES },
+            restore = { name -> WorkspaceTab.entries.firstOrNull { it.name == name } ?: WorkspaceTab.CHAT },
         ),
-    ) { mutableStateOf(WorkspaceTab.FILES) }
+    ) { mutableStateOf(WorkspaceTab.CHAT) }
     // Chat screen has no bottom tab bar (user direction, 2026-11-18): its workspace
     // sections live in this top-bar overflow menu instead.
     var sectionMenuOpen by remember { mutableStateOf(false) }
@@ -4107,11 +4111,11 @@ private fun WorkspaceScreen(
     // project. From a workspace section it returns to Chat; on Chat itself the
     // system default applies (leaves the app) unless work is running — running
     // work keeps going across tabs, so Back is consumed with a hint instead.
-    BackHandler(enabled = selectedTab != WorkspaceTab.FILES) {
-        selectedTab = WorkspaceTab.FILES
+    BackHandler(enabled = selectedTab != WorkspaceTab.CHAT) {
+        selectedTab = WorkspaceTab.CHAT
     }
     val workRunning = state.isRunning || state.projectTerminalRunning || state.androidBuildRunning
-    BackHandler(enabled = selectedTab == WorkspaceTab.FILES && workRunning) {
+    BackHandler(enabled = selectedTab == WorkspaceTab.CHAT && workRunning) {
         Toast.makeText(context, context.getString(R.string.ws_back_task_running), Toast.LENGTH_LONG).show()
     }
     var showAndroidBuild by rememberSaveable { mutableStateOf(false) }
@@ -4178,8 +4182,26 @@ private fun WorkspaceScreen(
         return
     }
 
-    // Agents removed (v48): the chat switcher and agent switcher dialogs are
-    // gone with the chat surface; project switching lives in the top-bar menu.
+    if (showChats) {
+        ChatSwitcherDialog(
+            // v50: chats belong to the built-in agent now; the list shows the
+            // active agent's chats inside this project.
+            chats = state.projectChats.filter { it.agentKind == state.agentKind },
+            activeChatId = state.activeChatId,
+            switchingEnabled = !state.isRunning,
+            onDismiss = { showChats = false },
+            onCreate = {
+                onCreateChat()
+                showChats = false
+                selectedTab = WorkspaceTab.CHAT
+            },
+            onSwitch = { chatId ->
+                onSwitchChat(chatId)
+                showChats = false
+                selectedTab = WorkspaceTab.CHAT
+            },
+        )
+    }
     if (showDeleteCurrentProject) {
         // The same confirmation the project switcher sheet's card menu
         // used (v22: the sheet is gone, the menu item lives in the chat
@@ -4241,6 +4263,15 @@ private fun WorkspaceScreen(
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                             )
+                            // v50: one built-in agent — the subtitle names the
+                            // provider profile it will answer from + the chat.
+                            Text(
+                                "${state.provider.kind.localizedTitle()} · ${activeChat?.localizedTitle() ?: stringResource(R.string.tab_chat_tab)}",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
                         }
                     }
                 },
@@ -4254,6 +4285,7 @@ private fun WorkspaceScreen(
                             else Icon(Icons.Default.PlayArrow, stringResource(R.string.ws_build_run_android))
                         }
                     }
+                    IconButton(onClick = { showChats = true }) { Icon(Icons.Default.History, stringResource(R.string.ws_project_chats)) }
                         Box {
                             IconButton(onClick = { sectionMenuOpen = true }) {
                                 Icon(Icons.Default.MoreVert, stringResource(R.string.more_options))
@@ -4333,7 +4365,7 @@ private fun WorkspaceScreen(
             // Hidden on the Chat tab: the chat screen's sections moved to the top-bar
             // 3-dot menu and the composer sits at the very bottom. Other sections keep
             // the bar, which is also their way back to Chat.
-            if (!keyboardVisible) NavigationBar(containerColor = MaterialTheme.colorScheme.background) {
+            if (!keyboardVisible && selectedTab != WorkspaceTab.CHAT) NavigationBar(containerColor = MaterialTheme.colorScheme.background) {
                 WorkspaceTab.entries.filter { it != WorkspaceTab.CHANGES }.forEach { tab ->
                     NavigationBarItem(
                         selected = selectedTab == tab,
@@ -4360,6 +4392,46 @@ private fun WorkspaceScreen(
     ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding)) {
             when (selectedTab) {
+                WorkspaceTab.CHAT -> ChatTab(
+                    state.messages,
+                    state.pendingApproval,
+                    state.liveProcess,
+                    state.isRunning,
+                    onSend,
+                    onStop,
+                    onApproval,
+                    listState = chatListState,
+                    taskStartedAtMillis = state.workSegmentStartedAtMillis ?: state.taskStartedAtMillis,
+                    taskFinishedAtMillis = state.taskFinishedAtMillis,
+                    thinkingActive = state.liveThinking,
+                    agentKind = state.agentKind,
+                    pendingAttachments = state.pendingAttachments,
+                    onAttach = {
+                        attachmentLauncher.launch(arrayOf("image/*", "text/*", "application/json", "application/xml"))
+                    },
+                    onTakePhoto = {
+                        runCatching {
+                            val uri = createCameraPhotoUri(context)
+                            pendingPhotoUri = uri.toString()
+                            takePhotoLauncher.launch(uri)
+                        }.onFailure {
+                            pendingPhotoUri = null
+                            Toast.makeText(context, context.getString(R.string.chat_camera_unavailable), Toast.LENGTH_LONG).show()
+                        }
+                    },
+                    genUiStates = state.genUiStates,
+                    onGenUiAction = onGenUiAction,
+                    onRemoveAttachment = onRemoveAttachment,
+                    onOpenAttachment = onOpenAttachment,
+                    onRunInTerminal = { command ->
+                        selectedTab = WorkspaceTab.TERMINAL
+                        onTerminalOpened()
+                        onTerminalPrepare(command)
+                    },
+                    queuedFollowUps = state.queuedFollowUps,
+                    onSteerFollowUp = onSteerFollowUp,
+                    onRemoveFollowUp = onRemoveFollowUp,
+                )
                 WorkspaceTab.FILES -> FilesTab(
                     files = state.workspaceFiles,
                     loading = state.filesLoading,

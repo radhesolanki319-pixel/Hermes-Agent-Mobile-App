@@ -80,17 +80,26 @@ enum class AgentKind(
         "Google's official coding agent · Google account",
         "39.9 MB",
     ),
+    NATIVE(
+        "native",
+        "App Agent",
+        "Built-in agent · runs in the app, no install",
+        "Built-in",
+    ),
     ;
 
     companion object {
         /**
          * Resolves a persisted agent id. Unknown ids — including agents removed
          * in later versions (e.g. the retired DeepSeek Harness, "deepseek-harness")
-         * — fall back to the default agent instead of failing.
+         * — fall back to the default agent instead of failing. Since v50 the
+         * default is the built-in [NATIVE] agent: the external CLI agents were
+         * removed in v48, and MainViewModel migrates the active agent to
+         * NATIVE regardless of what was stored.
          */
         fun fromStored(value: String?): AgentKind = entries.firstOrNull {
             it.stableId == value || it.name == value
-        } ?: HERMES
+        } ?: NATIVE
     }
 }
 
@@ -135,6 +144,14 @@ fun providersForAgent(agent: AgentKind): List<ProviderKind> = when (agent) {
         ProviderKind.NVIDIA_NIM,
     )
     AgentKind.ANTIGRAVITY -> emptyList()
+    AgentKind.NATIVE -> listOf(
+        ProviderKind.CUSTOM,
+        ProviderKind.ANTHROPIC,
+        ProviderKind.LLM_ROUTER,
+        ProviderKind.DEEPSEEK,
+        ProviderKind.KIMI,
+        ProviderKind.NVIDIA_NIM,
+    )
 }
 
 data class ProviderProfile(

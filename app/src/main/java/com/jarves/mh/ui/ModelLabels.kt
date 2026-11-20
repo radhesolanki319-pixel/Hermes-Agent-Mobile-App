@@ -46,6 +46,7 @@ fun AgentKind.titleRes(): Int = when (this) {
     AgentKind.HERMES -> R.string.agent_title_hermes
     AgentKind.CLAUDE_CODE -> R.string.agent_title_claude
     AgentKind.ANTIGRAVITY -> R.string.agent_title_antigravity
+    AgentKind.NATIVE -> R.string.agent_title_native
 }
 
 @StringRes
@@ -53,6 +54,7 @@ fun AgentKind.subtitleRes(): Int = when (this) {
     AgentKind.HERMES -> R.string.agent_subtitle_hermes
     AgentKind.CLAUDE_CODE -> R.string.agent_subtitle_claude
     AgentKind.ANTIGRAVITY -> R.string.agent_subtitle_antigravity
+    AgentKind.NATIVE -> R.string.agent_subtitle_native
 }
 
 @StringRes

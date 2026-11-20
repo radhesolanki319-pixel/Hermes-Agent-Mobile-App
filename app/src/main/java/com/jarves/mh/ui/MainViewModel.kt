@@ -466,6 +466,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val claudeRuntime = ClaudeRuntimeBridge(application) { profile ->
         resolvedApiKey(profile.kind)
     }
+    private val nativeRuntime = com.jarves.mh.runtime.NativeRuntimeBridge(application) { profile ->
+        resolvedApiKey(profile.kind)
+    }
     private val installer = RuntimeInstaller(application)
     private val antigravityRuntime = AntigravityRuntimeBridge(
         application,
@@ -507,7 +510,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _state.value.activeChatId?.let { preferences.saveAgentConversation(AgentKind.HERMES, projectId, it, id) }
         },
     )
-    private val agentRegistry = AgentRegistry.builtIns(hermesRuntime, claudeRuntime, antigravityRuntime)
+    private val agentRegistry = AgentRegistry.builtIns(hermesRuntime, claudeRuntime, antigravityRuntime, nativeRuntime)
     private fun activeRuntime(): com.jarves.mh.runtime.RuntimeBridge = agentRegistry.require(_state.value.agentKind).runtime
     private val providerApi = ProviderApiClient(application)
     private fun appUpdater(): AppUpdater = AppUpdater(
@@ -542,7 +545,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     // Writes are drained into a per-chat batch below so rapid activity frames do not
     // serialize hundreds of obsolete snapshots.
     private val transcriptWrites = Channel<TranscriptWrite>(Channel.UNLIMITED)
-    private val initialAgentKind = AgentKind.fromStored(preferences.agentKind)
+    // v50: the external CLI agents were removed in v48; the one active agent
+    // is the built-in NATIVE agent. Whatever was stored before migrates here,
+    // unconditionally — the old kinds can no longer run a turn.
+    private val initialAgentKind = AgentKind.NATIVE.also {
+        if (preferences.agentKind != it.stableId) preferences.agentKind = it.stableId
+    }
     private val initialPrimaryAgentKind = preferences.primaryAgentKind
         .takeIf(String::isNotBlank)
         ?.let(AgentKind::fromStored)
@@ -671,6 +679,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         viewModelScope.launch { antigravityRuntime.events.collect(::onRuntimeEvent) }
         viewModelScope.launch { hermesRuntime.events.collect(::onRuntimeEvent) }
+        viewModelScope.launch { nativeRuntime.events.collect(::onRuntimeEvent) }
         viewModelScope.launch {
             antigravityAuthController.state.collect { auth ->
                 _state.update { it.copy(antigravityAuth = auth) }
@@ -2187,6 +2196,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         claudeRuntime.configureProjectRoot(projectId, rootPath)
         antigravityRuntime.configureProjectRoot(projectId, rootPath)
         hermesRuntime.configureProjectRoot(projectId, rootPath)
+        nativeRuntime.configureProjectRoot(projectId, rootPath)
     }
 
     init {

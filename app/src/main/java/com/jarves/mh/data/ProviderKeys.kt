@@ -263,5 +263,10 @@ object FreeLlmPreconnect {
         AgentKind.ANTIGRAVITY -> throw IllegalArgumentException(
             "Antigravity has no provider profile to seed",
         )
+        AgentKind.NATIVE -> ProviderProfile(
+            kind = ProviderKind.CUSTOM,
+            baseUrl = endpoint.ifBlank { DEFAULT_FREELLM_URL },
+            model = ProviderKind.CUSTOM.defaultModel,
+        )
     }
 }

@@ -246,6 +246,7 @@ class RuntimeInstaller(private val context: Context) {
                 com.jarves.mh.model.AgentKind.CLAUDE_CODE -> ensureClaudeInstalled(proot, 0.985f, onProgress)
                 com.jarves.mh.model.AgentKind.ANTIGRAVITY -> ensureAgyInstalled(proot, 0.985f, onProgress)
                 com.jarves.mh.model.AgentKind.HERMES -> ensureHermesInstalled(proot, 0.985f, onProgress)
+                com.jarves.mh.model.AgentKind.NATIVE -> Unit
             }
         }
         onProgress(RuntimeInstallProgress(str(R.string.rt_install_setup_complete), 1f))
@@ -266,6 +267,8 @@ class RuntimeInstaller(private val context: Context) {
             com.jarves.mh.model.AgentKind.CLAUDE_CODE -> ensureClaudeInstalled(runtime.proot, 0.05f, onProgress)
             com.jarves.mh.model.AgentKind.ANTIGRAVITY -> ensureAgyInstalled(runtime.proot, 0.05f, onProgress)
             com.jarves.mh.model.AgentKind.HERMES -> ensureHermesInstalled(runtime.proot, 0.05f, onProgress)
+            // The built-in agent ships inside the app — nothing to install.
+            com.jarves.mh.model.AgentKind.NATIVE -> Unit
         }
         onProgress(RuntimeInstallProgress(str(R.string.rt_install_ready, agent.localizedTitle(context)), 1f))
     }
@@ -283,6 +286,8 @@ class RuntimeInstaller(private val context: Context) {
             com.jarves.mh.model.AgentKind.HERMES -> isInstalled() &&
                 File(rootfs, HERMES_GUEST_PATH.removePrefix("/")).canExecute() &&
                 !hermesMarker.readTextOrNull().isNullOrBlank()
+            // Built into the app: available whenever the core runtime is.
+            com.jarves.mh.model.AgentKind.NATIVE -> isInstalled()
         }
     }
 

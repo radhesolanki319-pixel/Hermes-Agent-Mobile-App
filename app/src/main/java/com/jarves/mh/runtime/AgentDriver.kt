@@ -45,8 +45,20 @@ class AgentRegistry(drivers: List<AgentDriver>) {
             hermes: RuntimeBridge,
             claude: RuntimeBridge,
             antigravity: RuntimeBridge,
+            native: RuntimeBridge,
         ) = AgentRegistry(
             listOf(
+                BuiltInAgentDriver(
+                    AgentKind.NATIVE,
+                    native,
+                    setOf(
+                        AgentCapability.API_KEY,
+                        AgentCapability.PROVIDER_PICKER,
+                        AgentCapability.MODEL_PICKER,
+                        AgentCapability.RESUME,
+                        AgentCapability.INTERACTIVE_APPROVALS,
+                    ),
+                ),
                 BuiltInAgentDriver(
                     AgentKind.HERMES,
                     hermes,
