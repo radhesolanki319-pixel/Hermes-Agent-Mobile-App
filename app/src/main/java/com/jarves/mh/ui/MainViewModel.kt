@@ -2447,8 +2447,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             !installed && setupSnapshot.status == RuntimeSetupStatus.ERROR -> onSetupSnapshot(setupSnapshot)
             !installed -> _state.update { it.copy(startupStage = StartupStage.SETUP_REQUIRED, startupProgress = 0f) }
             !preferences.onboardingComplete -> {
+                // Agents removed (v48): no provider/model onboarding stage —
+                // once the core runtime is installed the workspace is ready.
                 preferences.runtimeSetupComplete = true
-                _state.update { it.copy(startupStage = StartupStage.MODEL_SETUP, startupProgress = 1f) }
+                preferences.onboardingComplete = true
+                _state.update { it.copy(onboardingComplete = true, startupProgress = 1f) }
+                initializeRuntime()
             }
             else -> initializeRuntime()
         }

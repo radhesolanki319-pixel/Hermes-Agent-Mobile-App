@@ -155,7 +155,7 @@ class RuntimeInstaller(private val context: Context) {
 
     suspend fun ensureInstalled(
         selectedStacks: Set<DevStack> = emptySet(),
-        agent: com.jarves.mh.model.AgentKind = com.jarves.mh.model.AgentKind.HERMES,
+        agent: com.jarves.mh.model.AgentKind? = null,
         onProgress: suspend (RuntimeInstallProgress) -> Unit,
     ): InstalledRuntime {
         require(
@@ -238,10 +238,15 @@ class RuntimeInstaller(private val context: Context) {
             applyStack(proot, stack, from, from + slice, onProgress)
         }
 
-        when (agent) {
-            com.jarves.mh.model.AgentKind.CLAUDE_CODE -> ensureClaudeInstalled(proot, 0.985f, onProgress)
-            com.jarves.mh.model.AgentKind.ANTIGRAVITY -> ensureAgyInstalled(proot, 0.985f, onProgress)
-            com.jarves.mh.model.AgentKind.HERMES -> ensureHermesInstalled(proot, 0.985f, onProgress)
+        // Agents removed (v48): setup installs the core runtime only. The
+        // per-agent installers remain for the legacy on-demand path but are
+        // no longer invoked from setup.
+        if (agent != null) {
+            when (agent) {
+                com.jarves.mh.model.AgentKind.CLAUDE_CODE -> ensureClaudeInstalled(proot, 0.985f, onProgress)
+                com.jarves.mh.model.AgentKind.ANTIGRAVITY -> ensureAgyInstalled(proot, 0.985f, onProgress)
+                com.jarves.mh.model.AgentKind.HERMES -> ensureHermesInstalled(proot, 0.985f, onProgress)
+            }
         }
         onProgress(RuntimeInstallProgress(str(R.string.rt_install_setup_complete), 1f))
         return InstalledRuntime(proot, rootfs)

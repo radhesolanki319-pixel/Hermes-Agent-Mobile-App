@@ -192,6 +192,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -289,12 +290,10 @@ import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.Terminal
 
 private enum class RootScreen(@StringRes val labelRes: Int, val icon: ImageVector) {
-    CHAT(R.string.tab_chat, Icons.Default.Chat),
-    AGENT(R.string.tab_agent, Icons.Default.SmartToy),
+    CHAT(R.string.tab_chat, Icons.Default.Folder),
     SETTINGS(R.string.tab_settings, Icons.Default.Settings),
 }
 private enum class WorkspaceTab(@StringRes val labelRes: Int, val icon: ImageVector) {
-    CHAT(R.string.tab_chat, Icons.Default.AutoAwesome),
     FILES(R.string.tab_files, Icons.Default.Folder),
     TERMINAL(R.string.tab_terminal, Icons.Default.Terminal),
     CHANGES(R.string.tab_changes, Icons.Default.Code),
@@ -1385,41 +1384,6 @@ private fun RuntimeSetupPromptScreen(
                     }
                 }
 
-                Spacer(Modifier.height(18.dp))
-                Text(stringResource(R.string.runtime_setup_coding_agent_badge), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.9.sp)
-                Spacer(Modifier.height(8.dp))
-
-                Surface(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(18.dp),
-                    color = MaterialTheme.colorScheme.surface,
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                ) {
-                    Column {
-                        AgentKind.entries.forEachIndexed { index, agent ->
-                            AgentChoiceRow(
-                                agent = agent,
-                                title = stringResource(agent.titleRes()),
-                                subtitle = stringResource(agent.subtitleRes()),
-                                recommendedLabel = stringResource(R.string.agent_recommended),
-                                selected = selectedAgent == agent,
-                                onClick = { onSelectAgent(agent) },
-                            )
-                            if (index != AgentKind.entries.lastIndex) {
-                                HorizontalDivider(
-                                    modifier = Modifier.padding(start = 62.dp),
-                                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
-                                )
-                            }
-                        }
-                    }
-                }
-                Text(
-                    stringResource(R.string.runtime_setup_coding_agent_note),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    fontSize = 11.sp,
-                    modifier = Modifier.padding(top = 8.dp, start = 2.dp, end = 2.dp),
-                )
 
                 Spacer(Modifier.height(18.dp))
                 Text(stringResource(R.string.runtime_setup_optional_toolchains_badge), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.9.sp)
@@ -1451,7 +1415,7 @@ private fun RuntimeSetupPromptScreen(
                     Icon(Icons.Default.Storage, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(15.dp))
                     Spacer(Modifier.width(7.dp))
                     Text(
-                        toolchainDownloadSummary(selectedStacks, selectedAgent),
+                        toolchainDownloadSummary(selectedStacks),
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 11.sp,
                     )
@@ -1540,14 +1504,9 @@ private fun stackDownloadLabel(stack: DevStack): String = when {
 }
 
 @Composable
-private fun toolchainDownloadSummary(selected: Set<DevStack>, agent: AgentKind): String {
+private fun toolchainDownloadSummary(selected: Set<DevStack>): String {
     if (BuildConfig.OFFLINE_RUNTIME_BUNDLES) return stringResource(R.string.ws_bundles_included_offline)
     val total = CORE_RUNTIME_DOWNLOAD_MB +
-        when (agent) {
-            AgentKind.HERMES -> HERMES_RUNTIME_DOWNLOAD_MB
-            AgentKind.CLAUDE_CODE -> CLAUDE_RUNTIME_DOWNLOAD_MB
-            AgentKind.ANTIGRAVITY -> AGY_RUNTIME_DOWNLOAD_MB
-        } +
         (if (DevStack.PYTHON in selected) PYTHON_RUNTIME_DOWNLOAD_MB else 0) +
         (if (DevStack.ANDROID in selected) ANDROID_RUNTIME_DOWNLOAD_MB else 0)
     val laterPackages = selected.intersect(setOf(DevStack.CPP, DevStack.PHP))
@@ -2556,31 +2515,6 @@ private fun RootScreenHost(
                         CircularProgressIndicator()
                     }
                 }
-                RootScreen.AGENT -> AgentScreen(
-                    state = state,
-                    onSaveProvider = { agent, profile, key ->
-                        viewModel.updateProvider(agent, profile, key)
-                    },
-                    profileForAgent = viewModel::providerProfileFor,
-                    onDiscoverModels = viewModel::discoverModels,
-                    onValidateProvider = viewModel::validateProvider,
-                    onPing = viewModel::pingApi,
-                    getSavedApiKey = viewModel::getSavedApiKey,
-                    getSavedApiKeys = viewModel::getSavedApiKeys,
-                    onAddApiKey = viewModel::addApiKey,
-                    onActivateApiKey = viewModel::activateApiKey,
-                    onRemoveApiKey = viewModel::removeApiKey,
-                    onSelectAgent = viewModel::selectAgent,
-                    onInstallAgent = viewModel::installAgent,
-                    onCheckAgentUpdates = viewModel::checkAgentUpdates,
-                    onUpdateAgent = viewModel::updateAgent,
-                    onStartAntigravityLogin = viewModel::startAntigravityLogin,
-                    onSubmitAntigravityCode = viewModel::submitAntigravityCode,
-                    onLogoutAntigravity = viewModel::logoutAntigravity,
-                    onRefreshAntigravityModels = viewModel::refreshAntigravityModels,
-                    onSetAntigravityModel = viewModel::setAntigravityModel,
-                    onSetAntigravityEffort = viewModel::setAntigravityEffort,
-                )
                 RootScreen.SETTINGS -> SettingsScreen(
                     state = state,
                     showBackupDot = !state.backupFeatureSeen,
@@ -3951,7 +3885,6 @@ private fun ReadOnlyProjectScreen(
                     IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.tab_projects)) }
                 },
                 actions = {
-                    IconButton(onClick = { showChats = true }) { Icon(Icons.Default.History, stringResource(R.string.ws_project_chats)) }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
             )
@@ -4156,7 +4089,14 @@ private fun WorkspaceScreen(
         chatListState.scrollBy(100_000f)
     }
 
-    var selectedTab by rememberSaveable { mutableStateOf(WorkspaceTab.CHAT) }
+    // Custom saver: installs upgrading from <=v47 may restore the removed
+    // CHAT tab name — map anything unknown to FILES instead of crashing.
+    var selectedTab by rememberSaveable(
+        stateSaver = Saver<WorkspaceTab, String>(
+            save = { it.name },
+            restore = { name -> WorkspaceTab.entries.firstOrNull { it.name == name } ?: WorkspaceTab.FILES },
+        ),
+    ) { mutableStateOf(WorkspaceTab.FILES) }
     // Chat screen has no bottom tab bar (user direction, 2026-11-18): its workspace
     // sections live in this top-bar overflow menu instead.
     var sectionMenuOpen by remember { mutableStateOf(false) }
@@ -4167,11 +4107,11 @@ private fun WorkspaceScreen(
     // project. From a workspace section it returns to Chat; on Chat itself the
     // system default applies (leaves the app) unless work is running — running
     // work keeps going across tabs, so Back is consumed with a hint instead.
-    BackHandler(enabled = selectedTab != WorkspaceTab.CHAT) {
-        selectedTab = WorkspaceTab.CHAT
+    BackHandler(enabled = selectedTab != WorkspaceTab.FILES) {
+        selectedTab = WorkspaceTab.FILES
     }
     val workRunning = state.isRunning || state.projectTerminalRunning || state.androidBuildRunning
-    BackHandler(enabled = selectedTab == WorkspaceTab.CHAT && workRunning) {
+    BackHandler(enabled = selectedTab == WorkspaceTab.FILES && workRunning) {
         Toast.makeText(context, context.getString(R.string.ws_back_task_running), Toast.LENGTH_LONG).show()
     }
     var showAndroidBuild by rememberSaveable { mutableStateOf(false) }
@@ -4238,36 +4178,8 @@ private fun WorkspaceScreen(
         return
     }
 
-    if (showChats) {
-        ChatSwitcherDialog(
-            // v21: the chat list shows the active agent's own chats only —
-            // each agent has its own chats inside the project.
-            chats = state.projectChats.filter { it.agentKind == state.agentKind },
-            activeChatId = state.activeChatId,
-            switchingEnabled = !state.isRunning,
-            onDismiss = { showChats = false },
-            onCreate = {
-                onCreateChat()
-                showChats = false
-                selectedTab = WorkspaceTab.CHAT
-            },
-            onSwitch = { chatId ->
-                onSwitchChat(chatId)
-                showChats = false
-                selectedTab = WorkspaceTab.CHAT
-            },
-        )
-    }
-    if (showAgentSwitcher) {
-        AgentSwitchSheet(
-            selected = state.agentKind,
-            onSelect = { agent ->
-                onSelectAgent(agent)
-                showAgentSwitcher = false
-            },
-            onDismiss = { showAgentSwitcher = false },
-        )
-    }
+    // Agents removed (v48): the chat switcher and agent switcher dialogs are
+    // gone with the chat surface; project switching lives in the top-bar menu.
     if (showDeleteCurrentProject) {
         // The same confirmation the project switcher sheet's card menu
         // used (v22: the sheet is gone, the menu item lives in the chat
@@ -4329,44 +4241,6 @@ private fun WorkspaceScreen(
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                             )
-                            // Agent first so it always stays visible; a long chat title is cut with "…".
-                            Text(
-                                "${if (state.agentKind == AgentKind.ANTIGRAVITY) state.agentKind.localizedTitle() else state.provider.kind.localizedTitle()} · ${activeChat?.localizedTitle() ?: stringResource(R.string.tab_chat)}",
-                                fontSize = 11.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
-                        // Active agent, always visible in the header. Tapping
-                        // the chip opens the agent switcher; the switch goes
-                        // through the same selectAgent path as the Agent tab
-                        // and keeps this chat and its history untouched.
-                        Surface(
-                            shape = RoundedCornerShape(50),
-                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
-                            modifier = Modifier
-                                .padding(start = 10.dp)
-                                .clickable { showAgentSwitcher = true },
-                        ) {
-                            Row(
-                                Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Text(
-                                    state.agentKind.localizedTitle(),
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    maxLines = 1,
-                                )
-                                Spacer(Modifier.width(4.dp))
-                                Icon(
-                                    Icons.Default.SwapHoriz,
-                                    contentDescription = stringResource(R.string.agent_choose_title),
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.size(14.dp),
-                                )
-                            }
                         }
                     }
                 },
@@ -4380,8 +4254,6 @@ private fun WorkspaceScreen(
                             else Icon(Icons.Default.PlayArrow, stringResource(R.string.ws_build_run_android))
                         }
                     }
-                    IconButton(onClick = { showChats = true }) { Icon(Icons.Default.History, stringResource(R.string.ws_project_chats)) }
-                    if (selectedTab == WorkspaceTab.CHAT) {
                         Box {
                             IconButton(onClick = { sectionMenuOpen = true }) {
                                 Icon(Icons.Default.MoreVert, stringResource(R.string.more_options))
@@ -4452,7 +4324,6 @@ private fun WorkspaceScreen(
                                 }
                             }
                         }
-                    }
                     if (state.isRunning) CircularProgressIndicator(Modifier.padding(12.dp).size(20.dp), strokeWidth = 2.dp, color = PocketMuseBlue)
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
@@ -4462,7 +4333,7 @@ private fun WorkspaceScreen(
             // Hidden on the Chat tab: the chat screen's sections moved to the top-bar
             // 3-dot menu and the composer sits at the very bottom. Other sections keep
             // the bar, which is also their way back to Chat.
-            if (!keyboardVisible && selectedTab != WorkspaceTab.CHAT) NavigationBar(containerColor = MaterialTheme.colorScheme.background) {
+            if (!keyboardVisible) NavigationBar(containerColor = MaterialTheme.colorScheme.background) {
                 WorkspaceTab.entries.filter { it != WorkspaceTab.CHANGES }.forEach { tab ->
                     NavigationBarItem(
                         selected = selectedTab == tab,
@@ -4489,46 +4360,6 @@ private fun WorkspaceScreen(
     ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding)) {
             when (selectedTab) {
-                WorkspaceTab.CHAT -> ChatTab(
-                    state.messages,
-                    state.pendingApproval,
-                    state.liveProcess,
-                    state.isRunning,
-                    onSend,
-                    onStop,
-                    onApproval,
-                    listState = chatListState,
-                    taskStartedAtMillis = state.workSegmentStartedAtMillis ?: state.taskStartedAtMillis,
-                    taskFinishedAtMillis = state.taskFinishedAtMillis,
-                    thinkingActive = state.liveThinking,
-                    agentKind = state.agentKind,
-                    pendingAttachments = state.pendingAttachments,
-                    onAttach = {
-                        attachmentLauncher.launch(arrayOf("image/*", "text/*", "application/json", "application/xml"))
-                    },
-                    onTakePhoto = {
-                        runCatching {
-                            val uri = createCameraPhotoUri(context)
-                            pendingPhotoUri = uri.toString()
-                            takePhotoLauncher.launch(uri)
-                        }.onFailure {
-                            pendingPhotoUri = null
-                            Toast.makeText(context, context.getString(R.string.chat_camera_unavailable), Toast.LENGTH_LONG).show()
-                        }
-                    },
-                    genUiStates = state.genUiStates,
-                    onGenUiAction = onGenUiAction,
-                    onRemoveAttachment = onRemoveAttachment,
-                    onOpenAttachment = onOpenAttachment,
-                    onRunInTerminal = { command ->
-                        selectedTab = WorkspaceTab.TERMINAL
-                        onTerminalOpened()
-                        onTerminalPrepare(command)
-                    },
-                    queuedFollowUps = state.queuedFollowUps,
-                    onSteerFollowUp = onSteerFollowUp,
-                    onRemoveFollowUp = onRemoveFollowUp,
-                )
                 WorkspaceTab.FILES -> FilesTab(
                     files = state.workspaceFiles,
                     loading = state.filesLoading,

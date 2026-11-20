@@ -10,7 +10,7 @@
     <string name="ws_back_task_running">A task is running — it keeps running while you use other tabs. Tap Stop to end it.</string>
 
     <!-- Workspace Tabs -->
-    <string name="tab_chat">Chat</string>
+    <string name="tab_chat">Workspace</string>
     <string name="tab_files">Files</string>
     <string name="tab_terminal">Terminal</string>
     <string name="tab_changes">Changes</string>

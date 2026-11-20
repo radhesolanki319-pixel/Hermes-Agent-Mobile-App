@@ -266,13 +266,12 @@ class RuntimeSetupService : Service() {
             val stacks = intent?.getStringExtra(EXTRA_STACKS).orEmpty().split(',')
                 .mapNotNull { name -> runCatching { DevStack.valueOf(name) }.getOrNull() }
                 .toSet()
-            val agent = runCatching {
-                com.jarves.mh.model.AgentKind.valueOf(intent?.getStringExtra(EXTRA_AGENT).orEmpty())
-            }.getOrDefault(com.jarves.mh.model.AgentKind.HERMES)
+            // Agents removed (v48): setup installs the core runtime only;
+            // any EXTRA_AGENT extra from older callers is ignored.
             RuntimeSetupController.begin(this)
             installJob = scope.launch {
                 try {
-                    RuntimeInstaller(this@RuntimeSetupService).ensureInstalled(stacks, agent) { progress ->
+                    RuntimeInstaller(this@RuntimeSetupService).ensureInstalled(stacks, null) { progress ->
                         RuntimeSetupController.update(this@RuntimeSetupService, progress)
                         updateNotification(progress.event == RuntimeInstallEvent.COMMAND_COMPLETED)
                     }
