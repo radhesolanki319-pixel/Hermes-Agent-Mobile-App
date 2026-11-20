@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Log
 import androidx.core.content.ContextCompat
 import com.jarves.mh.R
+import com.jarves.mh.data.McpServersPrefs
 import com.jarves.mh.ui.AppStrings
 import com.jarves.mh.model.ChatMessage
 import com.jarves.mh.model.ChangeItem
@@ -72,6 +73,7 @@ class ClaudeRuntimeBridge(
     private val secretFor: (ProviderProfile) -> String?,
 ) : RuntimeBridge {
     private val installer = RuntimeInstaller(context)
+    private val mcpServersPrefs = McpServersPrefs(context)
     private val eventBus = MutableSharedFlow<RuntimeEvent>(extraBufferCapacity = 64)
     override val events: Flow<RuntimeEvent> = eventBus
     private val pending = ConcurrentHashMap<String, PendingPermission>()
@@ -84,7 +86,7 @@ class ClaudeRuntimeBridge(
     @Volatile private var userStopRequested: Boolean = false
     @Volatile private var activeProjectSlug: String? = null
     @Volatile private var taskStartedAtElapsedRealtime: Long = 0L
-    @Volatile private var lastForegroundProgressAt: Long = 0L
+    @Volatile private var lastForegroundProgressAt = 0L
     @Volatile private var foregroundResultPosted: Boolean = false
     private val streamedText = StringBuilder()
     private val streamedThinking = StringBuilder()
@@ -143,6 +145,7 @@ class ClaudeRuntimeBridge(
             val installed = installer.installedRuntime()
             installer.ensureSettingsAndHooks()
             val workspace = ensureWorkspace(projectId)
+            installer.seedMcpServersConfig(workspace, mcpServersPrefs)
             createCheckpoint(projectId, workspace)
             val before = snapshot(workspace)
             formatGateway = if (provider.kind.protocol in setOf(

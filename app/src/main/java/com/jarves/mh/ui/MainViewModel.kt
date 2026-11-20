@@ -63,6 +63,7 @@ import com.jarves.mh.network.ModelDiscoveryResult
 import com.jarves.mh.network.ProviderApiClient
 import com.jarves.mh.network.GitHubRepository
 import com.jarves.mh.runtime.ClaudeRuntimeBridge
+import com.jarves.mh.runtime.PhoneControlController
 import com.jarves.mh.runtime.AgentEnvironmentBrief
 import com.jarves.mh.runtime.AgentRegistry
 import com.jarves.mh.runtime.AgentTranscripts
@@ -75,6 +76,7 @@ import com.jarves.mh.runtime.HERMES_SETUP_VAULT_ID
 import com.jarves.mh.runtime.HermesConfigOptions
 import com.jarves.mh.runtime.HermesEmbeddedOnly
 import com.jarves.mh.runtime.HermesHostConfig
+import com.jarves.mh.data.McpServersPrefs
 import com.jarves.mh.runtime.HermesProfileRoute
 import com.jarves.mh.runtime.HermesProfileSeeding
 import com.jarves.mh.runtime.HermesProviderCatalog
@@ -476,6 +478,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _state.value.activeChatId?.let { preferences.saveAgentConversation(AgentKind.ANTIGRAVITY, projectId, it, id) }
         },
     )
+    private val mcpServersPrefs = McpServersPrefs(application)
+
     private val hermesRuntime = HermesRuntimeBridge(
         application,
         hermesSettings = {
@@ -2598,6 +2602,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             checkForAppUpdate()
             maybeAutoInstallHermes()
             autoUpdateHermesIfNeeded()
+            // Phone control (Shizuku): restore the bridge when the user
+            // left the feature enabled.
+            PhoneControlController.startIfEnabled(application)
         } else {
             showStartupError(result.exceptionOrNull() ?: IllegalStateException(str(R.string.vm_initialization_failed)))
         }

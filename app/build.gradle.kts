@@ -33,7 +33,15 @@ val runtimeReleaseBaseUrl =
 // installer verifies it against the bundle's pinned SHA-256). The offline
 // flavor still embeds it — see offlineRuntimeBundleFiles below.
 val hermesBundleBaseUrl =
-    "https://github.com/radhesolanki319-pixel/Mobile-Harness/releases/download/hermes-bundle-0.19.0"
+    "https://github.com/radhesolanki319-pixel/Mobile-Harness/releases/download/hermes-bundle-0.23.2"
+// The Core bundle follows the same pattern since v40: the Ubuntu 26.04
+// core is published as a release asset in the user's own repo (the
+// shared upstream runtime release still carries the old Ubuntu 20.04
+// core under the same file naming scheme, so the new core must NOT be
+// fetched from there). The offline flavor embeds the file from
+// dist/runtime-bundles when it is present at build time.
+val coreBundleBaseUrl =
+    "https://github.com/radhesolanki319-pixel/Mobile-Harness/releases/download/core-bundle-2026.11.1"
 val appUpdateManifestUrl =
     "https://github.com/techjarves/Mobile-Harness/releases/latest/download/mobile-harness-update.json"
 // v31: the v26 gateway pre-connect is REMOVED (Hermes is embedded only —
@@ -66,7 +74,7 @@ val generatedRuntimeAssets = layout.buildDirectory.dir("generated/runtime-assets
 // downloads the same archive once, at first Hermes install, from
 // hermesBundleBaseUrl — so online updates no longer re-download its ~52 MB.
 val agyBundleFile = runtimeBundleDir.file("pocketdev-agy-arm64-2026.09.1.tar.zst")
-val hermesBundleFile = runtimeBundleDir.file("pocketdev-hermes-arm64-0.19.0.tar.zst")
+val hermesBundleFile = runtimeBundleDir.file("pocketdev-hermes-arm64-0.23.2.tar.zst")
 val sharedBundleFiles = listOf(agyBundleFile)
 val prepareBundledAgentAssets = tasks.register<Sync>("prepareBundledAgentAssets") {
     onlyIf { sharedBundleFiles.any { it.asFile.isFile } }
@@ -75,7 +83,7 @@ val prepareBundledAgentAssets = tasks.register<Sync>("prepareBundledAgentAssets"
 }
 
 val offlineBundleFiles = listOf(
-    "pocketdev-core-arm64-2026.09.5.tar.zst",
+    "pocketdev-core-arm64-2026.11.1.tar.zst",
     "pocketdev-claude-arm64-2026.11.1.tar.zst",
     "pocketdev-python-arm64-2026.09.2.tar.zst",
     "pocketdev-android-arm64-2026.09.1.tar.zst",
@@ -139,8 +147,8 @@ android {
         targetSdk = if (playBuild) 36 else 28
         // Keep literal defaults so F-Droid's static manifest parser can detect
         // the tagged release. Gradle properties may still override Play builds.
-        versionCode = 39
-        versionName = "1.0.38"
+        versionCode = 40
+        versionName = "1.0.39"
         providers.gradleProperty("appVersionCode").orNull?.toIntOrNull()?.let { versionCode = it }
         providers.gradleProperty("appVersionName").orNull?.let { versionName = it }
 
@@ -152,6 +160,7 @@ android {
         buildConfigField("boolean", "IS_PLAY_BUILD", playBuild.toString())
         buildConfigField("String", "PRIVACY_POLICY_URL", buildConfigString(privacyPolicyUrl))
         buildConfigField("String", "HERMES_BUNDLE_BASE_URL", buildConfigString(hermesBundleBaseUrl))
+        buildConfigField("String", "CORE_BUNDLE_BASE_URL", buildConfigString(coreBundleBaseUrl))
 
         buildConfigField(
             "String",
@@ -267,6 +276,9 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     implementation("org.apache.commons:commons-compress:1.27.1")
     implementation("com.github.luben:zstd-jni:1.5.7-12@aar")
+    // Shizuku for phone control (Feature 2)
+    implementation("dev.rikka.shizuku:api:13.1.5")
+    implementation("dev.rikka.shizuku:provider:13.1.5")
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20250107")

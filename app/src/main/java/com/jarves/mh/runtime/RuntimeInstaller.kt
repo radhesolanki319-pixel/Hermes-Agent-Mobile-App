@@ -6,6 +6,8 @@ import android.system.Os
 import com.jarves.mh.BuildConfig
 import com.jarves.mh.R
 import com.jarves.mh.data.AppPreferences
+import com.jarves.mh.data.McpServerConfig
+import com.jarves.mh.data.McpServersPrefs
 import com.jarves.mh.ui.AppStrings
 import com.jarves.mh.ui.localizedLabel
 import com.jarves.mh.ui.localizedTitle
@@ -384,17 +386,20 @@ class RuntimeInstaller(private val context: Context) {
             }
             installed[com.jarves.mh.model.AgentKind.HERMES]?.let { current ->
                 // Upgrades are unlocked (user decision, 2026-11-17): advertise
-                // the newest release published on PyPI, not just the pinned
-                // first-install version. A source-checkout install records
+                // the newest stable release, not just the pinned first-install
+                // version. Since v0.23.2 Hermes publishes on GitHub only —
+                // PyPI is frozen at 0.19.0 — so the check reads the latest
+                // GitHub release tag (canary tags carry a "+" suffix and are
+                // never offered). A source-checkout install records
                 // "<checkout version>+src" as its version; the numeric part
-                // is the checkout's placeholder version, so a PyPI release is
-                // normally offered, and accepting it replaces the checkout
+                // is the checkout's placeholder version, so a stable release
+                // is normally offered, and accepting it replaces the checkout
                 // install with the released package.
                 runCatching {
-                    JSONObject(fetchText("https://pypi.org/pypi/hermes-agent/json"))
-                        .getJSONObject("info")
-                        .getString("version")
-                }.getOrNull()?.takeIf { isVersionNewer(it, current) }?.let { latest ->
+                    JSONObject(fetchText("https://api.github.com/repos/NousResearch/hermes-agent/releases/latest"))
+                        .getString("tag_name")
+                        .removePrefix("v")
+                }.getOrNull()?.takeIf { !it.contains("+") && isVersionNewer(it, current) }?.let { latest ->
                     put(com.jarves.mh.model.AgentKind.HERMES, AgentUpdateInfo(current, latest))
                 }
             }
@@ -479,12 +484,13 @@ class RuntimeInstaller(private val context: Context) {
     }
 
     /**
-     * Hermes updates install the exact PyPI release the user approved in the
-     * update prompt (upgrades unlocked 2026-11-17; only the first install is
-     * pinned). The reinstall rebuilds the venv from scratch; the uv-managed
-     * CPython and the agent's HERMES_HOME data (memory, skills, sessions)
-     * stay. The version marker is rewritten only after the new install
-     * verifies, so a failed update never claims a version that is not there.
+     * Hermes updates install the exact GitHub release the user approved in
+     * the update prompt (upgrades unlocked 2026-11-17; only the first
+     * install is pinned). The reinstall rebuilds the venv from scratch; the
+     * uv-managed CPython and the agent's HERMES_HOME data (memory, skills,
+     * sessions) stay. The version marker is rewritten only after the new
+     * install verifies, so a failed update never claims a version that is
+     * not there.
      */
     private suspend fun updateHermes(
         runtime: InstalledRuntime,
@@ -494,7 +500,7 @@ class RuntimeInstaller(private val context: Context) {
         require(isHermesReleaseVersion(expectedVersion)) {
             "Refusing to install an unrecognised Hermes release: $expectedVersion"
         }
-        installHermesFromPyPi(runtime.proot, expectedVersion, 0.05f, onProgress)
+        installHermesFromGitHubRelease(runtime.proot, expectedVersion, 0.05f, onProgress)
     }
 
     private fun fetchAgyManifest(): JSONObject = JSONObject(
@@ -648,8 +654,8 @@ class RuntimeInstaller(private val context: Context) {
      *   `hermes_cli` package), it is installed from source — see
      *   [installHermesFromSource]. This is the modification-unlocked route:
      *   the venv resolves its packages from the checkout itself, so edits
-     *   there take effect without a reinstall. Otherwise the pinned PyPI
-     *   release is installed — see [installHermesFromPyPi].
+     *   there take effect without a reinstall. Otherwise the pinned GitHub
+     *   release is installed — see [installHermesFromGitHubRelease].
      *
      * An already-installed Hermes is left untouched whatever version its
      * marker records — in particular an install that was upgraded past the
@@ -661,6 +667,14 @@ class RuntimeInstaller(private val context: Context) {
         onProgress: suspend (RuntimeInstallProgress) -> Unit,
     ) {
         if (isAgentInstalled(com.jarves.mh.model.AgentKind.HERMES)) return
+        // The version marker is the source of truth, and it lives outside
+        // /root — so after a core-rootfs swap (which preserves /root) a
+        // previous Hermes venv can outlive its marker. Every install route
+        // extracts or syncs OVER an existing tree, and a merged venv (two
+        // dist-infos, stale modules) is worse than a clean one: wipe any
+        // marker-less leftover first. Hermes's own data lives in
+        // /root/.hermes, which this never touches.
+        File(rootfs, HERMES_PREFIX_GUEST_PATH.removePrefix("/")).deleteRecursively()
         val bundled = try {
             installHermesFromBundle(proot, fraction, onProgress)
             true
@@ -677,7 +691,7 @@ class RuntimeInstaller(private val context: Context) {
         if (sourceCheckout != null) {
             installHermesFromSource(proot, sourceCheckout, fraction, onProgress)
         } else {
-            installHermesFromPyPi(proot, HERMES_VERSION, fraction, onProgress)
+            installHermesFromGitHubRelease(proot, HERMES_VERSION, fraction, onProgress)
         }
     }
 
@@ -775,15 +789,29 @@ class RuntimeInstaller(private val context: Context) {
     }
 
     /**
-     * PyPI route, mirroring what the Phase 0 spike verified end to end:
-     * pinned uv → uv-managed standalone CPython 3.14 (python-build-standalone;
-     * the guest's own Python 3.8/3.10 is too old for Hermes) → a dedicated
-     * venv under /root/.pocket-hermes → `uv pip install
-     * "hermes-agent[acp]==<version>"`. Used for the pinned first install and
-     * for updates to a user-approved newer release; the version marker is
-     * written only after the installed binary verifies.
+     * GitHub release route (v40; replaces the PyPI route — Hermes stopped
+     * publishing to PyPI after 0.19.0, and v0.23.2+ ships only as a GitHub
+     * release): pinned uv → uv-managed standalone CPython 3.14
+     * (python-build-standalone; the guest's own Python is too old for
+     * Hermes) → a dedicated venv under /root/.pocket-hermes → `uv pip
+     * install "hermes-agent[acp,mcp] @ <release tarball URL>"`. Three
+     * release-era details are handled in the install script:
+     *  - HERMES_NIX_BUILD=1 lifts upstream's setup.py block on wheel builds
+     *    (their supported escape hatch for packagers; the tarball is a
+     *    source archive, so uv must build it).
+     *  - The project's own dependency set is internally inconsistent on
+     *    pillow (browser-harness pins 12.3.0, Hermes pins 13.0.0); the
+     *    project's [tool.uv] override only applies to `uv sync`, so the
+     *    same override is passed explicitly with --overrides.
+     *  - The tarball's pyproject carries the placeholder version 0.0.0, so
+     *    the installed dist metadata under-reports; this route's marker
+     *    discipline (the marker is written by hand after the binary
+     *    verifies) is what the app reads, exactly as before.
+     * Used for the pinned first install and for updates to a user-approved
+     * newer release; the version marker is written only after the
+     * installed binary verifies.
      */
-    private suspend fun installHermesFromPyPi(
+    private suspend fun installHermesFromGitHubRelease(
         proot: File,
         version: String,
         fraction: Float,
@@ -795,16 +823,18 @@ class RuntimeInstaller(private val context: Context) {
         val installCommand = """
             set -e
             export UV_PYTHON_INSTALL_DIR=$HERMES_PREFIX_GUEST_PATH/python
+            export HERMES_NIX_BUILD=1
             $UV_GUEST_PATH python install 3.14
             rm -rf $HERMES_PREFIX_GUEST_PATH/venv
             $UV_GUEST_PATH venv --python 3.14 $HERMES_PREFIX_GUEST_PATH/venv
-            $UV_GUEST_PATH pip install --python $HERMES_PREFIX_GUEST_PATH/venv/bin/python "hermes-agent[acp]==$version" "$HERMES_AIOHTTP_SPEC"
+            printf 'pillow==13.0.0\n' > /tmp/hermes-overrides.txt
+            $UV_GUEST_PATH pip install --python $HERMES_PREFIX_GUEST_PATH/venv/bin/python --overrides /tmp/hermes-overrides.txt "hermes-agent[acp,mcp] @ https://github.com/NousResearch/hermes-agent/archive/refs/tags/v$version.tar.gz" "$HERMES_AIOHTTP_SPEC"
             $HERMES_GUEST_PATH --version
         """.trimIndent()
         runGuestCommand(
             proot = proot,
             command = installCommand,
-            displayCommand = "uv pip install hermes-agent[acp]==$version + aiohttp (Python 3.14)",
+            displayCommand = "uv pip install hermes-agent[acp,mcp] v$version (GitHub release) + aiohttp (Python 3.14)",
             fraction = fraction + span * 0.5f,
             timeoutMs = 20 * 60 * 1_000L,
             onProgress = onProgress,
@@ -1878,6 +1908,9 @@ printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decis
         )
         Os.chmod(hook.absolutePath, 0b111101101)
 
+        // Phone control (Shizuku): harness-host script and token file
+        seedPhoneControlFiles()
+
         val settingsContent = JSONObject()
             .put("disableAllHooks", false)
             .put(
@@ -1914,6 +1947,126 @@ printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decis
             target.writeText(settingsContent)
         }
         ensureWorkspaceTrust("/workspace")
+    }
+
+    /**
+     * Seeds phone control (Shizuku) helper files into the guest:
+     * - /usr/local/bin/harness-host: shell script that reads the token file and
+     *   sends commands to the app's localhost bridge at 127.0.0.1:37123
+     * - /opt/pocket/harness-host.token: the auth token (same as app's stored token)
+     *
+     * Called from ensureSettingsAndHooks so it's always in place when the runtime is ready.
+     */
+    private fun seedPhoneControlFiles() {
+        // harness-host script on guest PATH
+        val binDir = File(rootfs, "usr/local/bin").apply { mkdirs() }
+        val harnessHostScript = File(binDir, "harness-host")
+        harnessHostScript.writeText(
+            """#!/bin/bash
+# harness-host — run a command on the Android host outside the Ubuntu guest
+# Uses the Phone Control bridge at 127.0.0.1:37123 (requires Shizuku permission).
+# If phone control is not enabled or the bridge is not reachable, fails harmlessly.
+
+set -euo pipefail
+
+TOKEN_FILE="/opt/pocket/harness-host.token"
+BRIDGE_HOST="127.0.0.1"
+BRIDGE_PORT=37123
+
+# Check token file exists
+if [[ ! -f "$TOKEN_FILE" ]]; then
+    echo "Phone control not configured: token file missing at $TOKEN_FILE" >&2
+    exit 1
+fi
+
+TOKEN=$(cat "$TOKEN_FILE" 2>/dev/null | tr -d '[:space:]')
+if [[ -z "$TOKEN" ]]; then
+    echo "Phone control not configured: empty token" >&2
+    exit 1
+fi
+
+# Check we have a command
+if [[ $# -eq 0 ]]; then
+    echo "Usage: harness-host <command>" >&2
+    exit 1
+fi
+
+# Join all args as the command (preserving quoting for shell -c)
+CMD="$*"
+
+# Use bash /dev/tcp to connect to the bridge
+# Protocol: line 1 = token, line 2 = command, then read response until EOF
+exec 3<> /dev/tcp/$BRIDGE_HOST/$BRIDGE_PORT 2>/dev/null || {
+    echo "Phone control unavailable: cannot connect to bridge at $BRIDGE_HOST:$BRIDGE_PORT" >&2
+    echo "Make sure Phone Control (Shizuku) is enabled in Hermes Agent Settings." >&2
+    exit 1
+}
+
+# Send auth token
+echo "$TOKEN" >&3
+
+# Send command
+echo "$CMD" >&3
+
+# Close write side, read response
+exec 3>&-
+cat <&3
+exec 3<&-
+""",
+        )
+        Os.chmod(harnessHostScript.absolutePath, 0b111101101)
+
+        // Token file: always (re)write the app's current token so the
+        // guest copy can never drift from the value the bridge checks.
+        val pocketDir = File(rootfs, "opt/pocket").apply { mkdirs() }
+        val tokenFile = File(pocketDir, "harness-host.token")
+        tokenFile.writeText(AppPreferences(context).ensurePhoneControlToken())
+        Os.chmod(tokenFile.absolutePath, 0b110100100) // 0644
+    }
+
+    /**
+     * Seeds the MCP servers configuration (from app preferences) as
+     * `.mcp.json` at the workspace root, for Claude Code and any agent that
+     * reads the standard MCP config file format. [workspaceDir] is the
+     * project's HOST workspace directory — the one the bridges bind-mount
+     * into the guest at /workspace/<slug>; writing under the rootfs's own
+     * /workspace instead would be shadowed by that bind and never seen.
+     */
+    fun seedMcpServersConfig(workspaceDir: File, mcpServersPrefs: McpServersPrefs) {
+        val servers = mcpServersPrefs.getEnabled().filter { it.isValid() }
+        val mcpFile = File(workspaceDir, ".mcp.json")
+        if (servers.isEmpty()) {
+            // Nothing enabled: if the user deleted every server, remove a
+            // previously seeded file so the deleted servers stop loading;
+            // if they merely disabled everything, write an empty config.
+            if (mcpServersPrefs.getAll().isEmpty()) {
+                if (mcpFile.isFile) mcpFile.delete()
+            } else {
+                workspaceDir.mkdirs()
+                mcpFile.writeText(JSONObject().put("mcpServers", JSONObject()).toString(2))
+            }
+            return
+        }
+        workspaceDir.mkdirs()
+        val obj = JSONObject().put("mcpServers", JSONObject())
+        servers.forEach { server ->
+            val serverObj = JSONObject()
+            if (server.isStdio) {
+                server.command?.let { serverObj.put("command", it) }
+                if (server.args.isNotEmpty()) serverObj.put("args", server.args)
+                if (server.env.isNotEmpty()) serverObj.put("env", JSONObject(server.env))
+            } else if (server.isRemote) {
+                server.url?.let { serverObj.put("url", it) }
+                if (server.headers.isNotEmpty()) serverObj.put("headers", JSONObject(server.headers))
+                server.auth?.let { serverObj.put("auth", it) }
+                server.oauth?.let { serverObj.put("oauth", JSONObject(it)) }
+            }
+            if (!server.enabled) serverObj.put("enabled", false)
+            server.tools?.let { serverObj.put("tools", JSONObject(it)) }
+            server.connectTimeout?.let { serverObj.put("connect_timeout", it) }
+            obj.getJSONObject("mcpServers").put(server.name, serverObj)
+        }
+        mcpFile.writeText(obj.toString(2))
     }
 
     private fun ensureWorkspaceTrust(workspacePath: String) {
@@ -2164,15 +2317,15 @@ printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decis
         private const val HERMES_PREFIX_GUEST_PATH = "/root/.pocket-hermes"
         private const val UV_GUEST_PATH = "/root/.local/bin/uv"
         /** Pinned uv release; version, URL and SHA-256 are Hermes's own installer pins (`pm/lock.json`). */
-        private const val UV_VERSION = "0.13.5"
-        private const val UV_RELEASE_URL = "https://github.com/astral-sh/uv/releases/download/0.13.5/uv-aarch64-unknown-linux-gnu.tar.gz"
+        private const val UV_VERSION = "0.13.9"
+        private const val UV_RELEASE_URL = "https://github.com/astral-sh/uv/releases/download/0.13.9/uv-aarch64-unknown-linux-gnu.tar.gz"
         private const val UV_RELEASE_SHA256 = "4bb69cf95ed13f23713bb7bc09f241896ea0c75b7c557e615a20604b82f9c403"
         /**
          * Pinned Hermes release for the first install from PyPI (spike-verified).
          * Later upgrades are unlocked: they install the newest PyPI release the
          * user approves, and the version marker then records that release.
          */
-        const val HERMES_VERSION = "0.19.0"
+        const val HERMES_VERSION = "0.23.2"
 
         /**
          * The aiohttp pin the pinned Hermes wheel's own metadata
@@ -2184,25 +2337,25 @@ printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decis
          * hermes-agent on every route; see [ensureHermesWarmTransport]
          * for the repair of pre-v32 venvs.
          */
-        const val HERMES_AIOHTTP_SPEC = "aiohttp==3.14.1"
+        const val HERMES_AIOHTTP_SPEC = "aiohttp==3.14.5"
         /** Guest path of an optional Hermes source checkout; when present it is installed instead of the PyPI release. */
         private const val HERMES_SOURCE_GUEST_PATH = "/root/hermes-agent-src"
         private const val AGY_VERSION = "1.1.27"
         private const val AGY_RELEASE_URL = "https://storage.googleapis.com/antigravity-public/antigravity-cli/1.1.27-5211191891591168/linux-arm/cli_linux_arm64.tar.gz"
         private const val AGY_RELEASE_SHA512 = "ed45f6930785aa4b42f14e07ace1c9d91a94fb76e760f54acbd7d3d3951e1f957fd456a0dae2a3124dd9a3b689bf7afb7c9303a3e4ba95037fc10063424d9bf9"
         private const val GITHUB_CLI_VERSION = "2.100.0"
-        private const val GITHUB_CLI_RELEASE_URL = "https://github.com/cli/cli/releases/download/v2.100.0/gh_2.100.0_linux_arm64.tar.gz"
+        private const val GITHUB_CLI_RELEASE_URL = "https://github.com/cli/cli/releases/download/v2.105.0/gh_2.105.0_linux_arm64.tar.gz"
         private const val GITHUB_CLI_RELEASE_SHA256 = "ea4e7a581a32ccad6cc7923cb1576ac5859ba4b9a16ab22eb8f8a96e78e2e961"
         private const val LEGACY_README = "# Pocket Dev project\n\nThis project is managed locally on Android.\n"
         private const val LEGACY_INDEX = "<!doctype html><title>Pocket Dev</title><h1>Hello from Android</h1>\n"
-        private const val ROOTFS_VERSION = "ubuntu-20.04.5-arm64"
-        private const val ROOTFS_FILE = "ubuntu-base-20.04.5-base-arm64.tar.gz"
-        private const val ROOTFS_URL = "https://cdimage.ubuntu.com/ubuntu-base/releases/20.04/release/$ROOTFS_FILE"
-        private const val ROOTFS_SHA256 = "f9b999afb4c4b10193087ea8c11be36d688f19e609b05179b571f29357954b52"
-        private const val NODE_VERSION = "v24.19.0"
+        private const val ROOTFS_VERSION = "ubuntu-26.04.1-arm64"
+        private const val ROOTFS_FILE = "ubuntu-base-26.04.1-base-arm64.tar.gz"
+        private const val ROOTFS_URL = "https://cdimage.ubuntu.com/ubuntu-base/releases/26.04/release/$ROOTFS_FILE"
+        private const val ROOTFS_SHA256 = "5a1906794ced63a71a8119c3f211ef5f0bbe0a243001b4bbd41fdf80c5b219fd"
+        private const val NODE_VERSION = "v26.13.1"
         private const val LANGUAGE_TOOLS_VERSION = "node-v24.19.0-python3-v1"
-        private const val CORE_TOOLS_VERSION = "core-bundle-2026.09.5"
-        private const val LEGACY_CORE_TOOLS_VERSION = "core-bundle-2026.09.4"
+        private const val CORE_TOOLS_VERSION = "core-bundle-2026.11.1"
+        private const val LEGACY_CORE_TOOLS_VERSION = "core-bundle-2026.09.5"
         private const val SYSTEM_UPGRADE_VERSION = "ubuntu-maintenance-v1"
         private const val ANDROID_TOOLS_VERSION = "sdk36-build-tools35-gradle8.14.3-maven-2026.09"
         private const val ANDROID_ASSET_BASE = "https://appdevforall.org/dev-assets/debug"
@@ -2229,9 +2382,13 @@ printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decis
         private val CLAUDE_VERSION_PATTERN = Regex("[0-9]+\\.[0-9]+\\.[0-9]+")
         private val CORE_BUNDLE = RuntimeBundle(
             label = "Core",
-            fileName = "pocketdev-core-arm64-2026.09.5.tar.zst",
-            sha256 = "df0cf7251c74f82d424231e3804114a4ca66b16130eea9abab11e220dc7ac012",
-            compressedBytes = 72_185_773L,
+            fileName = "pocketdev-core-arm64-2026.11.1.tar.zst",
+            sha256 = "b682be31d26de9330f5e7f6f458e2c61dee3b09b34283b1a9ebf83d53549fe16",
+            compressedBytes = 84_584_526L,
+            // Ubuntu 26.04.1 core is published in the user's own repo (tag
+            // core-bundle-2026.11.1) — the upstream runtime release still
+            // carries the old 20.04 core under the shared base URL.
+            releaseBaseUrl = BuildConfig.CORE_BUNDLE_BASE_URL,
         )
         private const val CLAUDE_BUNDLED_VERSION = "2.1.316"
         private const val CLAUDE_GUEST_PATH = "/usr/local/bin/claude"
@@ -2261,11 +2418,11 @@ printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decis
         )
         private val HERMES_BUNDLE = RuntimeBundle(
             label = "Hermes Agent",
-            fileName = "pocketdev-hermes-arm64-0.19.0.tar.zst",
-            sha256 = "081addd1a8f4560e4738160dda135521f6631a48247211e2ec6aadda52d1752f",
-            compressedBytes = 51_983_819L,
+            fileName = "pocketdev-hermes-arm64-0.23.2.tar.zst",
+            sha256 = "867188964fac4af901415ea8b1cbd9d8531d91be68c9da00db1216ff04824842",
+            compressedBytes = 71_191_725L,
             // Published as a release asset in the user's repo (tag
-            // hermes-bundle-0.19.0), not under the upstream runtime release —
+            // hermes-bundle-0.23.2), not under the upstream runtime release —
             // the online flavor downloads it from here, SHA-256 verified.
             releaseBaseUrl = BuildConfig.HERMES_BUNDLE_BASE_URL,
         )

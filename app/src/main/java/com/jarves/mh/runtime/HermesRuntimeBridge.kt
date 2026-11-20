@@ -4,6 +4,8 @@ import android.content.Context
 import android.util.Log
 import androidx.core.content.ContextCompat
 import com.jarves.mh.R
+import com.jarves.mh.data.McpServerConfig
+import com.jarves.mh.data.McpServersPrefs
 import com.jarves.mh.ui.AppStrings
 import com.jarves.mh.model.ChangeItem
 import com.jarves.mh.model.ChatMessage
@@ -253,10 +255,12 @@ internal object HermesConfigFiles {
         route: HermesRoute,
         model: String,
         options: HermesConfigOptions = HermesConfigOptions.FULL_POWER,
+        mcpServers: List<McpServerConfig> = emptyList(),
     ): String {
         val lines = mutableListOf<String>()
         lines += modelSectionLines(route, model)
         if (route.custom) lines += customProviderSectionLines(route)
+        if (mcpServers.isNotEmpty()) lines += mcpServersSectionLines(mcpServers)
         for ((section, children) in freshSections(options)) {
             lines += "$section:"
             lines += children
@@ -276,6 +280,7 @@ internal object HermesConfigFiles {
         route: HermesRoute,
         model: String,
         options: HermesConfigOptions = HermesConfigOptions.FULL_POWER,
+        mcpServers: List<McpServerConfig> = emptyList(),
     ): String {
         val lines = existing.split("\n").toMutableList()
         // Drop the artefactual empty entry a trailing newline produces;
@@ -283,6 +288,7 @@ internal object HermesConfigFiles {
         if (lines.isNotEmpty() && lines.last().isEmpty()) lines.removeAt(lines.lastIndex)
         updateModelSection(lines, route, model)
         if (route.custom) updateCustomProviderSection(lines, route)
+        if (mcpServers.isNotEmpty()) updateMcpServersSection(lines, mcpServers)
         for ((section, children) in STATIC_SECTIONS) {
             ensureSectionKeys(lines, section, children)
         }
@@ -464,6 +470,82 @@ internal object HermesConfigFiles {
         "    api: ${quote(route.baseUrl)}",
         "    key_env: ${route.keyEnv}",
     )
+
+    /**
+     * Build the `mcp_servers:` section for Hermes config.yaml.
+     * Format matches hermes-agent 0.19.0's MCP config schema exactly.
+     */
+    private fun mcpServersSectionLines(servers: List<McpServerConfig>): List<String> {
+        val lines = mutableListOf<String>()
+        lines += "mcp_servers:"
+        for (server in servers) {
+            if (!server.isValid()) continue
+            // Quoted key: a free-text name with spaces/colons must not
+            // corrupt config.yaml (a parse error would fail every turn).
+            lines += "  ${quote(server.name)}:"
+            if (server.isStdio) {
+                server.command?.let { lines += "    command: ${quote(it)}" }
+                if (server.args.isNotEmpty()) {
+                    lines += "    args: [${server.args.map { quote(it) }.joinToString(", ")}]"
+                }
+                if (server.env.isNotEmpty()) {
+                    lines += "    env:"
+                    server.env.forEach { (k, v) -> lines += "      ${quote(k)}: ${quote(v)}" }
+                }
+            } else if (server.isRemote) {
+                server.url?.let { lines += "    url: ${quote(it)}" }
+                if (server.headers.isNotEmpty()) {
+                    lines += "    headers:"
+                    server.headers.forEach { (k, v) -> lines += "      ${quote(k)}: ${quote(v)}" }
+                }
+                server.auth?.let { lines += "    auth: ${quote(it)}" }
+                server.oauth?.let { o ->
+                    lines += "    oauth:"
+                    o.forEach { (k, v) ->
+                        val vStr = when (v) {
+                            is String -> quote(v)
+                            is List<*> -> "[${v.joinToString(", ") { it.toString() }}]"
+                            is Map<*, *> -> "{" + v.map { "${it.key}: ${it.value}" }.joinToString(", ") + "}"
+                            else -> v.toString()
+                        }
+                        lines += "      ${quote(k)}: $vStr"
+                    }
+                }
+            }
+            if (!server.enabled) lines += "    enabled: false"
+            server.tools?.let { t ->
+                lines += "    tools:"
+                t.forEach { (k, v) ->
+                    val vStr = when (v) {
+                        is List<*> -> "[${v.map { quote(it.toString()) }.joinToString(", ")}]"
+                        else -> quote(v.toString())
+                    }
+                    lines += "      ${quote(k)}: $vStr"
+                }
+            }
+            server.connectTimeout?.let { lines += "    connect_timeout: $it" }
+        }
+        return lines
+    }
+
+    /**
+     * Update or add the `mcp_servers:` section in an existing config.
+     */
+    private fun updateMcpServersSection(lines: MutableList<String>, servers: List<McpServerConfig>) {
+        val section = findSection(lines, "mcp_servers")
+        val validServers = servers.filter { it.isValid() }
+        when {
+            section == null -> {
+                if (validServers.isNotEmpty()) lines.addAll(mcpServersSectionLines(validServers))
+            }
+            section.inlineValue -> Unit // Flow-style section: left to Hermes.
+            else -> {
+                // Remove existing mcp_servers section entirely and re-add
+                for (i in section.endIndex - 1 downTo section.headerIndex) lines.removeAt(i)
+                if (validServers.isNotEmpty()) lines.addAll(section.headerIndex, mcpServersSectionLines(validServers))
+            }
+        }
+    }
 
     /** Provider key older builds wrote for the custom endpoint; superseded by [HermesProviderCatalog.CUSTOM_PROVIDER_KEY]. */
     private const val LEGACY_CUSTOM_PROVIDER_KEY = "mh-custom"
@@ -769,10 +851,17 @@ internal fun hermesLaunchEnvironment(route: HermesRoute, secret: String): Map<St
 )
 
 /**
- * [RuntimeBridge] driving Nous Research's Hermes Agent, with two
+ * [RuntimeBridge] driving Nous Research's Hermes Agent, with three
  * transports over the same install, config and session store:
  *
- *  - WARM (v32, preferred): a persistent in-guest API server
+ *  - DIRECT CLI (v40, primary): the chat talks to the Hermes Agent CLI
+ *    itself — `hermes chat -q <prompt> --format stream-json` per
+ *    message (the JSONL event protocol v0.23.2 added; see
+ *    [HermesStreamJsonCollector]). The reply streams into the chat as
+ *    it is generated, and the session id arrives in the protocol's own
+ *    init/result records. This is the connection the user directed
+ *    ("pura Hermes agent cli … direct app ki chat se connect ho").
+ *  - WARM (v32, first fallback): a persistent in-guest API server
  *    (`hermes gateway run` with only its api_server platform enabled —
  *    see [HermesWarmServer] / [HermesWarmTransport]) serves the turn
  *    over loopback SSE, so the reply streams into the chat and the
@@ -781,13 +870,12 @@ internal fun hermesLaunchEnvironment(route: HermesRoute, secret: String): Map<St
  *    same session store as the CLI: the stored id rides in the
  *    `X-Hermes-Session-Id` header and the server loads its history
  *    from the shared `state.db`.
- *  - ONE-SHOT (fallback, the pre-v32 path): `hermes chat -q <prompt>
- *    -Q` per message (Hermes 0.19.0's quiet automation transport — see
- *    [HermesQuietOutput] for why this replaced the stream-json launch
- *    and for the verified output contract). Every warm failure that
- *    delivered nothing hands the turn to this path
- *    ([HermesWarmFallback]), so a broken warm server can never make
- *    Hermes unusable.
+ *  - ONE-SHOT (final fallback, the pre-v32 path): `hermes chat -q
+ *    <prompt> -Q` per message (the quiet automation transport — see
+ *    [HermesQuietOutput] for the verified output contract). Every
+ *    transport failure that delivered nothing hands the turn to the
+ *    next path ([HermesWarmFallback]), so a broken transport can never
+ *    make Hermes unusable.
  *
  * The context prompt travels as a single argv entry on the one-shot
  * path (and as the single user message on the warm path): the launcher
@@ -893,16 +981,18 @@ class HermesRuntimeBridge(
             val workspace = checkpoints.ensureWorkspace(projectId)
             checkpoints.createCheckpoint(projectId, workspace)
             val before = checkpoints.snapshot(workspace)
-            writeHermesConfig(installed.rootfs, route, model, secret, settings.options)
+            writeHermesConfig(installed.rootfs, route, model, secret, settings.options, mcpServersPrefs.getEnabled())
             val environment = hermesLaunchEnvironment(route, secret)
             val guestWorkspacePath = "/workspace/$projectSlug"
             val resumeId = conversationId(projectId)?.takeIf(String::isNotBlank)
-            // v32: the warm transport (persistent in-guest API server,
-            // streamed replies) takes the turn when it can. It returns
-            // false only when the attempt delivered nothing and the
-            // one-shot CLI path should run the turn instead — the warm
-            // server is an optimisation, never a dependency.
-            val warmHandled = runWarmTurnIfPossible(
+            // v40: the DIRECT CLI transport (the full Hermes Agent CLI,
+            // `--format stream-json`) takes the turn first — the chat is
+            // connected to the CLI itself, as the user directed. It
+            // returns false only when the attempt delivered nothing at
+            // all; then the warm API server tries, and the quiet one-shot
+            // CLI path remains the final fallback, so no single broken
+            // transport can make Hermes unusable.
+            val directHandled = runDirectCliTurnIfPossible(
                 sessionId = sessionId,
                 projectId = projectId,
                 projectKind = projectKind,
@@ -911,14 +1001,30 @@ class HermesRuntimeBridge(
                 installed = installed,
                 workspace = workspace,
                 guestWorkspacePath = guestWorkspacePath,
+                environment = environment,
                 route = route,
                 model = model,
-                secret = secret,
                 resumeId = resumeId,
                 before = before,
             )
-            if (!warmHandled) {
-                runCliTurn(
+            if (!directHandled) {
+                val warmHandled = runWarmTurnIfPossible(
+                    sessionId = sessionId,
+                    projectId = projectId,
+                    projectKind = projectKind,
+                    prompt = prompt,
+                    conversationHistory = conversationHistory,
+                    installed = installed,
+                    workspace = workspace,
+                    guestWorkspacePath = guestWorkspacePath,
+                    route = route,
+                    model = model,
+                    secret = secret,
+                    resumeId = resumeId,
+                    before = before,
+                )
+                if (!warmHandled) {
+                    runCliTurn(
                     sessionId = sessionId,
                     projectId = projectId,
                     projectKind = projectKind,
@@ -933,6 +1039,7 @@ class HermesRuntimeBridge(
                     resumeId = resumeId,
                     before = before,
                 )
+                }
             }
         }.onFailure { error ->
             Log.e("HermesBridge", "Session failed", error)
@@ -942,6 +1049,195 @@ class HermesRuntimeBridge(
         activeSessionId = null
         RuntimeTaskController.stopAction = null
         sessionId
+    }
+
+    /**
+     * The v40 DIRECT CLI transport (user directive, 2026-11-19: "app ke
+     * ander pura ka pura Hermes agent cli install kare jo direct app ki
+     * chat se connect ho"): the chat talks to the Hermes Agent CLI
+     * itself — one `hermes chat -q <prompt> --format stream-json`
+     * process per turn, its JSONL event stream (see
+     * [HermesStreamJsonCollector]) feeding the chat live. Primary
+     * transport; returns false only when the attempt delivered nothing
+     * at all (a spawn failure, or a pre-0.23.2 CLI that rejects
+     * `--format`), in which case the warm API server and then the quiet
+     * one-shot path try the same turn. Finalisation mirrors the other
+     * transports: changed files from the same checkpoint diff, the
+     * session id the CLI reports replaces the stored one, a failed
+     * resume clears the stored id (a new id from the failed turn wins —
+     * the v39 discipline), and failures are shaped by
+     * [HermesQuietOutput.failureMessage].
+     */
+    private suspend fun runDirectCliTurnIfPossible(
+        sessionId: String,
+        projectId: String,
+        projectKind: ProjectKind,
+        prompt: String,
+        conversationHistory: List<ChatMessage>,
+        installed: InstalledRuntime,
+        workspace: File,
+        guestWorkspacePath: String,
+        environment: Map<String, String>,
+        route: HermesRoute,
+        model: String,
+        resumeId: String?,
+        before: Map<String, String>,
+    ): Boolean {
+        val contextPrompt = buildHermesPrompt(prompt, conversationHistory, guestWorkspacePath, projectKind, resumed = resumeId != null)
+        val command = buildList {
+            add(RuntimeInstaller.HERMES_GUEST_PATH)
+            add("chat")
+            add("-q")
+            add(contextPrompt)
+            add("--format")
+            add("stream-json")
+            add("--provider")
+            add(route.provider)
+            // Unset model (v24): no `-m` at all — Hermes decides. The
+            // custom-route default matches the other transports exactly.
+            val effectiveModel = model.ifBlank {
+                if (route.custom) HermesProviderCatalog.CUSTOM_DEF.defaultModel else ""
+            }
+            if (effectiveModel.isNotBlank()) {
+                add("-m")
+                add(effectiveModel)
+            }
+            add("-t")
+            add(HERMES_TOOLSETS)
+            add("--yolo")
+            if (resumeId != null) {
+                add("--resume")
+                add(resumeId)
+                add("--no-restore-cwd")
+            }
+        }
+        Log.d("HermesBridge", "Direct CLI route: ${route.provider}, Model: $model, Resume: ${resumeId != null}")
+        val process = try {
+            installer.process(
+                installed.proot,
+                installed.rootfs,
+                workspace,
+                environment,
+                command,
+                guestWorkspacePath = guestWorkspacePath,
+                // Hermes saves files and its session database through
+                // atomic renames; PRoot's hard-link emulation would
+                // dangle them (same as the one-shot path).
+                emulateHardLinks = false,
+            )
+        } catch (t: Throwable) {
+            Log.w("HermesBridge", "Direct CLI spawn failed; another transport takes this turn", t)
+            return false
+        }
+        activeProcess = process
+        if (userStopRequested) process.destroy()
+        pushForegroundProgress(R.string.rt_bridge_working, "Hermes Agent")
+        val nativeProcess = process as? NativeSpawnProcess
+        if (nativeProcess == null) {
+            process.destroy()
+            return false
+        }
+        val pendingDeltas = mutableListOf<String>()
+        val collector = HermesStreamJsonCollector(
+            onTextDelta = { delta -> pendingDeltas += delta },
+            onToolActivity = { name -> pushForegroundProgress(name) },
+        )
+        var providerError: String? = null
+        val errorTail = ArrayDeque<String>()
+        var outputOffset = 0L
+        val pendingOutput = StringBuilder()
+
+        suspend fun handleLine(line: String) {
+            if (!line.trimStart().startsWith("{")) {
+                if (providerError == null && line.isNotBlank()) {
+                    providerError = ProviderRuntimeErrorDetector.detect(line)
+                }
+                if (line.isNotBlank()) {
+                    errorTail.addLast(line)
+                    while (errorTail.size > 6) errorTail.removeFirst()
+                }
+            }
+            collector.accept(line)
+            while (pendingDeltas.isNotEmpty()) {
+                eventBus.emit(RuntimeEvent.AssistantDelta(sessionId, pendingDeltas.removeAt(0)))
+            }
+        }
+
+        // The capture is drained exactly like the one-shot path's; the
+        // difference is that protocol lines are classified as they
+        // arrive and text deltas reach the chat immediately.
+        while (process.isAlive || nativeProcess.outputFile.length() > outputOffset) {
+            val available = nativeProcess.outputFile.length() - outputOffset
+            if (available <= 0) {
+                delay(10)
+                continue
+            }
+            val bytes = ByteArray(minOf(available, 16L * 1024).toInt())
+            val count = RandomAccessFile(nativeProcess.outputFile, "r").use { file ->
+                file.seek(outputOffset)
+                file.read(bytes)
+            }
+            if (count <= 0) continue
+            outputOffset += count
+            pendingOutput.append(bytes.decodeToString(0, count))
+            var newline = pendingOutput.indexOf("\n")
+            while (newline >= 0) {
+                val line = pendingOutput.substring(0, newline).trimEnd('\r')
+                pendingOutput.delete(0, newline + 1)
+                handleLine(line)
+                newline = pendingOutput.indexOf("\n")
+            }
+        }
+        pendingOutput.toString().takeIf(String::isNotEmpty)?.let { handleLine(it) }
+        val exit = process.waitFor()
+        Log.d("HermesBridge", "Hermes direct CLI process exited with code $exit")
+        val outcome = collector.finish(exit)
+        // finish() can release one last delta (the result record's text).
+        while (pendingDeltas.isNotEmpty()) {
+            eventBus.emit(RuntimeEvent.AssistantDelta(sessionId, pendingDeltas.removeAt(0)))
+        }
+        if (!outcome.delivered) {
+            // Nothing protocol-shaped arrived — a CLI too old for
+            // --format, or one that died before init. Another transport
+            // takes the turn.
+            Log.d("HermesBridge", "Direct CLI delivered nothing; another transport takes this turn")
+            return false
+        }
+        reportChangedFiles(sessionId, projectId, workspace, before)
+        val completed = outcome.completed || (exit == 0 && outcome.responseText.isNotBlank())
+        when {
+            userStopRequested -> throw HermesSessionException("Stopped by user")
+            completed -> {
+                if (!outcome.sessionId.isNullOrBlank()) {
+                    saveConversationId(projectId, outcome.sessionId)
+                }
+                emitCompletedOnce(sessionId)
+            }
+            else -> {
+                // If the CLI created a new session, save it. Otherwise
+                // clear the old resume id so the next message starts
+                // fresh. Do both: new ID wins, otherwise clear.
+                if (!outcome.sessionId.isNullOrBlank()) {
+                    saveConversationId(projectId, outcome.sessionId)
+                } else if (resumeId != null) {
+                    saveConversationId(projectId, "")
+                }
+                error(
+                    HermesQuietOutput.failureMessage(
+                        HermesQuietOutput.Outcome(
+                            responseText = "",
+                            sessionId = outcome.sessionId,
+                            errorText = outcome.errorText ?: errorTail.joinToString("\n").takeIf(String::isNotBlank),
+                            usageError = null,
+                            tracebackTail = null,
+                        ),
+                        exitCode = outcome.exitCode,
+                        providerError = providerError,
+                    ),
+                )
+            }
+        }
+        return true
     }
 
     /**
@@ -1339,6 +1635,7 @@ class HermesRuntimeBridge(
         model: String,
         secret: String,
         options: HermesConfigOptions,
+        mcpServers: List<McpServerConfig> = emptyList(),
     ) {
         val home = File(rootfs, HERMES_HOME_GUEST_PATH.removePrefix("/")).apply { mkdirs() }
         // Hermes's learned skills and persistent memories live under
@@ -1349,9 +1646,9 @@ class HermesRuntimeBridge(
         val configFile = File(home, "config.yaml")
         val existingConfig = configFile.takeIf(File::isFile)?.readText()
         val newConfig = if (existingConfig.isNullOrBlank()) {
-            HermesConfigFiles.freshConfig(route, model, options)
+            HermesConfigFiles.freshConfig(route, model, options, mcpServers)
         } else {
-            HermesConfigFiles.mergedConfig(existingConfig, route, model, options)
+            HermesConfigFiles.mergedConfig(existingConfig, route, model, options, mcpServers)
         }
         // The merge is stable (merging a merged file changes nothing),
         // so after the first launch the computed text equals the file

@@ -63,8 +63,22 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths" />
         </provider>
+        <!-- Shizuku provider (API 13 integration): lets the Shizuku
+             server hand this app its binder. The class lives in the
+             rikka.shizuku provider artifact; the guard permission is
+             Android's cross-user permission, per Shizuku's docs. -->
+        <provider
+            android:name="rikka.shizuku.ShizukuProvider"
+            android:authorities="${applicationId}.shizuku"
+            android:enabled="true"
+            android:exported="true"
+            android:multiprocess="false"
+            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
         <receiver
             android:name=".runtime.AndroidAppInstallReceiver"
             android:exported="false" />
+        <!-- PhoneControlService is a Shizuku user service: Shizuku
+             instantiates it by component name in its own process, so it
+             is deliberately NOT declared as an Android service. -->
     </application>
 </manifest>

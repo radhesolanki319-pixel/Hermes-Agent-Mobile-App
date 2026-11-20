@@ -62,12 +62,14 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -92,6 +94,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.jarves.mh.BuildConfig
 import com.jarves.mh.data.ApiKeyInfo
+import com.jarves.mh.data.McpServerConfig
+import com.jarves.mh.data.McpServersPrefs
+import com.jarves.mh.runtime.PhoneControlController
+import rikka.shizuku.Shizuku
 import com.jarves.mh.model.AgentKind
 import com.jarves.mh.model.DevStack
 import com.jarves.mh.model.ProviderKind
@@ -110,7 +116,7 @@ import com.jarves.mh.ui.theme.AppThemeMode
 import com.jarves.mh.ui.theme.PocketOrange
 import kotlinx.coroutines.launch
 
-private enum class SettingsSection { PROJECT_IMPORT, APPEARANCE, LANGUAGE, TOOLS, RUNTIME, DIAGNOSTICS, BACKUP, UPDATE_CHANNEL }
+private enum class SettingsSection { PROJECT_IMPORT, APPEARANCE, LANGUAGE, TOOLS, RUNTIME, DIAGNOSTICS, BACKUP, UPDATE_CHANNEL, MCP_SERVERS, PHONE_CONTROL }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -517,6 +523,16 @@ fun SettingsScreen(
                         }
                     }
                 }
+            }
+
+            // MCP Servers section
+            item {
+                McpServersSection()
+            }
+
+            // Phone Control (Shizuku) section
+            item {
+                PhoneControlSection()
             }
 
             if (BuildConfig.DEBUG) {
@@ -1191,6 +1207,342 @@ private fun DebugUpdateChannelSection(
             Spacer(Modifier.height(6.dp))
             Text(
                 stringResource(R.string.st_current_url, initialUrl),
+                fontSize = 11.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+/**
+ * MCP servers the agents can use (Hermes `mcp_servers` in config.yaml,
+ * Claude Code `.mcp.json`): list with enable toggles + delete, and an
+ * add form for stdio (command + args) or remote (URL) servers. Stored
+ * through [McpServersPrefs]; the bridges read the enabled set when a
+ * session starts.
+ */
+@Composable
+private fun McpServersSection() {
+    val context = LocalContext.current
+    val prefs = remember { McpServersPrefs(context) }
+    var expanded by rememberSaveable { mutableStateOf(false) }
+    var servers by remember { mutableStateOf(prefs.getAll()) }
+    var newName by rememberSaveable { mutableStateOf("") }
+    var newCommand by rememberSaveable { mutableStateOf("") }
+    var newArgs by rememberSaveable { mutableStateOf("") }
+    var newEnv by rememberSaveable { mutableStateOf("") }
+    var newUrl by rememberSaveable { mutableStateOf("") }
+    var newHeaders by rememberSaveable { mutableStateOf("") }
+    var pendingDelete by remember { mutableStateOf<McpServerConfig?>(null) }
+
+    fun refresh() {
+        servers = prefs.getAll()
+    }
+
+    fun parseKeyValues(text: String, separator: Char): Map<String, String> =
+        text.lineSequence()
+            .map { it.trim() }
+            .filter { it.isNotEmpty() && it.contains(separator) }
+            .associate { line ->
+                line.substringBefore(separator).trim() to line.substringAfter(separator).trim()
+            }
+
+    val stdioValid = newName.isNotBlank() && newCommand.isNotBlank() && newUrl.isBlank()
+    val remoteValid = newName.isNotBlank() && newUrl.isNotBlank() && newCommand.isBlank()
+
+    SettingsAccordion(
+        title = stringResource(R.string.settings_mcp_servers),
+        subtitle = stringResource(R.string.settings_mcp_servers_desc),
+        icon = Icons.Default.Code,
+        expanded = expanded,
+        onClick = { expanded = !expanded },
+    ) {
+        if (servers.isEmpty()) {
+            Text(
+                stringResource(R.string.mcp_no_servers),
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        servers.forEach { server ->
+            Row(
+                Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(server.name, fontWeight = FontWeight.Medium)
+                    Text(
+                        server.command?.let { cmd ->
+                            (listOf(cmd) + server.args).joinToString(" ")
+                        } ?: server.url ?: "",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        stringResource(if (server.enabled) R.string.mcp_enabled else R.string.mcp_disabled),
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Switch(
+                    checked = server.enabled,
+                    onCheckedChange = {
+                        prefs.toggle(server.name)
+                        refresh()
+                    },
+                )
+                TextButton(onClick = { pendingDelete = server }) {
+                    Text(stringResource(R.string.mcp_delete))
+                }
+            }
+        }
+        Spacer(Modifier.height(12.dp))
+        Text(stringResource(R.string.mcp_add_server), fontWeight = FontWeight.SemiBold)
+        Spacer(Modifier.height(8.dp))
+        OutlinedTextField(
+            value = newName,
+            onValueChange = { newName = it },
+            label = { Text(stringResource(R.string.mcp_server_name)) },
+            placeholder = { Text(stringResource(R.string.mcp_server_name_hint)) },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Spacer(Modifier.height(8.dp))
+        OutlinedTextField(
+            value = newCommand,
+            onValueChange = { newCommand = it },
+            label = { Text(stringResource(R.string.mcp_command)) },
+            placeholder = { Text(stringResource(R.string.mcp_command_hint)) },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Spacer(Modifier.height(8.dp))
+        OutlinedTextField(
+            value = newArgs,
+            onValueChange = { newArgs = it },
+            label = { Text(stringResource(R.string.mcp_args)) },
+            placeholder = { Text(stringResource(R.string.mcp_args_hint)) },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Spacer(Modifier.height(8.dp))
+        OutlinedTextField(
+            value = newEnv,
+            onValueChange = { newEnv = it },
+            label = { Text(stringResource(R.string.mcp_env_entry)) },
+            placeholder = { Text(stringResource(R.string.mcp_env_entry_hint)) },
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Spacer(Modifier.height(8.dp))
+        OutlinedTextField(
+            value = newUrl,
+            onValueChange = { newUrl = it },
+            label = { Text(stringResource(R.string.mcp_url)) },
+            placeholder = { Text(stringResource(R.string.mcp_url_hint)) },
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Spacer(Modifier.height(8.dp))
+        OutlinedTextField(
+            value = newHeaders,
+            onValueChange = { newHeaders = it },
+            label = { Text(stringResource(R.string.mcp_header_entry)) },
+            placeholder = { Text(stringResource(R.string.mcp_header_entry_hint)) },
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Spacer(Modifier.height(8.dp))
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Button(
+                onClick = {
+                    prefs.upsert(
+                        McpServerConfig(
+                            name = newName.trim(),
+                            command = newCommand.trim(),
+                            args = newArgs.trim().split(Regex("\\s+")).filter { it.isNotEmpty() },
+                            env = parseKeyValues(newEnv, '='),
+                        ),
+                    )
+                    newName = ""
+                    newCommand = ""
+                    newArgs = ""
+                    newEnv = ""
+                    refresh()
+                },
+                enabled = stdioValid,
+                modifier = Modifier.weight(1f),
+            ) {
+                Text(stringResource(R.string.mcp_add_stdio))
+            }
+            Button(
+                onClick = {
+                    prefs.upsert(
+                        McpServerConfig(
+                            name = newName.trim(),
+                            url = newUrl.trim(),
+                            headers = parseKeyValues(newHeaders, ':'),
+                        ),
+                    )
+                    newName = ""
+                    newUrl = ""
+                    newHeaders = ""
+                    refresh()
+                },
+                enabled = remoteValid,
+                modifier = Modifier.weight(1f),
+            ) {
+                Text(stringResource(R.string.mcp_add_remote))
+            }
+        }
+        if (newName.isNotBlank() && !stdioValid && !remoteValid) {
+            Spacer(Modifier.height(6.dp))
+            Text(
+                stringResource(R.string.mcp_empty_field),
+                fontSize = 11.sp,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
+    }
+
+    pendingDelete?.let { server ->
+        AlertDialog(
+            onDismissRequest = { pendingDelete = null },
+            title = { Text(stringResource(R.string.mcp_delete)) },
+            text = { Text(stringResource(R.string.mcp_delete_confirm, server.name)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        prefs.remove(server.name)
+                        pendingDelete = null
+                        refresh()
+                    },
+                ) {
+                    Text(stringResource(R.string.mcp_delete))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDelete = null }) {
+                    Text(stringResource(android.R.string.cancel))
+                }
+            },
+        )
+    }
+}
+
+/**
+ * Phone control (Shizuku): status + permission + the enable toggle.
+ * All lifecycle work lives in [PhoneControlController]; this section
+ * only renders its state and forwards taps. The permission result
+ * listener refreshes the section the moment Shizuku answers, and
+ * completes the enable chain when the user had already toggled the
+ * feature on.
+ */
+@Composable
+private fun PhoneControlSection() {
+    val context = LocalContext.current
+    var expanded by rememberSaveable { mutableStateOf(false) }
+    var enabled by remember { mutableStateOf(PhoneControlController.isEnabled(context)) }
+    var status by remember { mutableStateOf(PhoneControlController.permissionStatus(context)) }
+    var active by remember { mutableStateOf(PhoneControlController.isActive(context)) }
+
+    fun refresh() {
+        enabled = PhoneControlController.isEnabled(context)
+        status = PhoneControlController.permissionStatus(context)
+        active = PhoneControlController.isActive(context)
+    }
+
+    DisposableEffect(Unit) {
+        val listener = Shizuku.OnRequestPermissionResultListener { _, grantResult ->
+            if (grantResult == android.content.pm.PackageManager.PERMISSION_GRANTED &&
+                PhoneControlController.isEnabled(context)
+            ) {
+                PhoneControlController.setEnabled(context, true) { refresh() }
+            } else {
+                refresh()
+            }
+        }
+        Shizuku.addRequestPermissionResultListener(listener)
+        onDispose { Shizuku.removeRequestPermissionResultListener(listener) }
+    }
+    LaunchedEffect(expanded) {
+        if (expanded) refresh()
+    }
+
+    SettingsAccordion(
+        title = stringResource(R.string.settings_phone_control),
+        subtitle = stringResource(R.string.settings_phone_control_desc),
+        icon = Icons.Default.PhoneAndroid,
+        expanded = expanded,
+        onClick = { expanded = !expanded },
+    ) {
+        when (status) {
+            -1 -> {
+                Text(
+                    stringResource(R.string.phone_control_not_installed),
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(8.dp))
+                OutlinedButton(
+                    onClick = {
+                        val intent = Intent(
+                            Intent.ACTION_VIEW,
+                            Uri.parse("https://play.google.com/store/apps/details?id=moe.shizuku.privileged.api"),
+                        )
+                        runCatching { context.startActivity(intent) }
+                    },
+                ) {
+                    Text(stringResource(R.string.phone_control_install_shizuku))
+                }
+            }
+            0 -> {
+                Text(
+                    stringResource(R.string.phone_control_permission_needed),
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(8.dp))
+                Button(onClick = { PhoneControlController.requestPermission(context) }) {
+                    Text(stringResource(R.string.phone_control_grant_permission))
+                }
+            }
+            else -> {
+                Text(
+                    stringResource(R.string.phone_control_ready),
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        Spacer(Modifier.height(12.dp))
+        Row(
+            Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(stringResource(R.string.phone_control_enable), fontWeight = FontWeight.Medium)
+                Text(
+                    stringResource(R.string.phone_control_enable_desc),
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Switch(
+                checked = enabled,
+                onCheckedChange = { checked ->
+                    PhoneControlController.setEnabled(context, checked) { refresh() }
+                },
+            )
+        }
+        if (enabled && active) {
+            Spacer(Modifier.height(6.dp))
+            Text(
+                stringResource(R.string.phone_control_bridge_started),
                 fontSize = 11.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

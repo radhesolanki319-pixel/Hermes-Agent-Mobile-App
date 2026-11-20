@@ -201,6 +201,31 @@ class AppPreferences(private val context: Context) {
         get() = preferences.getBoolean("hermes_warm_transport_v32", false)
         set(value) { preferences.edit().putBoolean("hermes_warm_transport_v32", value).apply() }
 
+    /** Phone control (Shizuku) bridge auth token — random per install. */
+    var phoneControlToken: String
+        get() = preferences.getString("phone_control_token", "") ?: ""
+        set(value) { preferences.edit().putString("phone_control_token", value).apply() }
+
+    /** Phone control (Shizuku) feature enabled flag. */
+    var phoneControlEnabled: Boolean
+        get() = preferences.getBoolean("phone_control_enabled", false)
+        set(value) { preferences.edit().putBoolean("phone_control_enabled", value).apply() }
+
+    /**
+     * The bridge auth token, generated once on first use. Single source
+     * of truth: the localhost bridge checks against this value and the
+     * installer seeds the same value into the guest's token file.
+     */
+    fun ensurePhoneControlToken(): String {
+        val existing = phoneControlToken
+        if (existing.isNotBlank()) return existing
+        val bytes = ByteArray(32)
+        java.security.SecureRandom().nextBytes(bytes)
+        val generated = bytes.joinToString("") { "%02x".format(it) }
+        phoneControlToken = generated
+        return generated
+    }
+
     /**
      * Gateway session ids for remote Hermes, keyed per project chat like
      * [loadAgentConversation] but in their own namespace: an id minted by

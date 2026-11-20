@@ -480,4 +480,49 @@
     <string name="genui_status_done">Done</string>
     <string name="genui_status_error">Error</string>
     <string name="genui_image_unavailable">Image unavailable</string>
+
+    <!-- MCP Servers -->
+    <string name="settings_mcp_servers">MCP Servers</string>
+    <string name="settings_mcp_servers_desc">Connect model context protocol servers to your agents</string>
+    <string name="mcp_add_server">Add MCP Server</string>
+    <string name="mcp_add_stdio">Add stdio server</string>
+    <string name="mcp_add_remote">Add remote server</string>
+    <string name="mcp_no_servers">No MCP servers configured</string>
+    <string name="mcp_server_name">Server name</string>
+    <string name="mcp_server_name_hint">e.g. github</string>
+    <string name="mcp_command">Command</string>
+    <string name="mcp_command_hint">e.g. npx</string>
+    <string name="mcp_args">Arguments</string>
+    <string name="mcp_args_hint">-y @modelcontextprotocol/server-github</string>
+    <string name="mcp_env">Environment variables</string>
+    <string name="mcp_env_key">KEY</string>
+    <string name="mcp_env_value">value</string>
+    <string name="mcp_url">URL</string>
+    <string name="mcp_url_hint">https://example.com/mcp</string>
+    <string name="mcp_headers">Headers</string>
+    <string name="mcp_header_key">Authorization</string>
+    <string name="mcp_header_value">Bearer token</string>
+    <string name="mcp_enabled">Enabled</string>
+    <string name="mcp_disabled">Disabled</string>
+    <string name="mcp_delete">Delete</string>
+    <string name="mcp_delete_confirm">Delete MCP server "%1$s"?</string>
+    <string name="mcp_empty_field">A name plus either a command or a URL is required</string>
+    <string name="mcp_env_entry">KEY=value</string>
+    <string name="mcp_env_entry_hint">GITHUB_TOKEN=ghp_…</string>
+    <string name="mcp_header_entry">Key: value</string>
+    <string name="mcp_header_entry_hint">Authorization: Bearer …</string>
+
+    <!-- Phone Control (Shizuku) -->
+    <string name="settings_phone_control">Phone control (Shizuku)</string>
+    <string name="settings_phone_control_desc">Run commands on your Android host from inside the Ubuntu guest</string>
+    <string name="phone_control_not_installed">Shizuku is not installed</string>
+    <string name="phone_control_permission_needed">Shizuku permission needed</string>
+    <string name="phone_control_ready">Phone control ready</string>
+    <string name="phone_control_grant_permission">Grant Shizuku permission</string>
+    <string name="phone_control_enable">Enable phone control</string>
+    <string name="phone_control_enable_desc">Allow agents to run commands on the host using harness-host</string>
+    <string name="phone_control_bridge_started">Phone control bridge started</string>
+    <string name="phone_control_bridge_stopped">Phone control bridge stopped</string>
+    <string name="phone_control_not_ready">Shizuku permission is not granted</string>
+    <string name="phone_control_install_shizuku">Install Shizuku</string>
 </resources>

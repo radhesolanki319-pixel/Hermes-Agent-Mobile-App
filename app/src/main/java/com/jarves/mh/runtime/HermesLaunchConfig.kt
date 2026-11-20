@@ -20,7 +20,10 @@ import com.jarves.mh.model.VirtualModels
  *
  * What remains in this file is launch knowledge, not a settings store:
  *
- *  - [HermesProviderCatalog]: Hermes 0.19.0's provider registry, kept
+ *  - [HermesProviderCatalog]: Hermes's provider registry (re-verified
+ *    against v0.23.2 for the v40 update — every id below exists in
+ *    0.23.2's registry or its model-provider plugins; upstream removed
+ *    "copilot", so it is gone here too), kept
  *    ONLY as mapping knowledge — the env var each provider's key is
  *    stored under in the guest `.env`, Hermes's own endpoint for the
  *    provider, and the curated first model `hermes model` pre-selects.
@@ -110,7 +113,6 @@ object HermesProviderCatalog {
         HermesProviderDef("minimax", "MiniMax", "MINIMAX_API_KEY", "https://api.minimax.io/anthropic", "MiniMax-M3"),
         HermesProviderDef("minimax-cn", "MiniMax (China)", "MINIMAX_CN_API_KEY", "https://api.minimaxi.com/anthropic", "MiniMax-M3"),
         HermesProviderDef("stepfun", "StepFun Step Plan", "STEPFUN_API_KEY", "https://api.stepfun.ai/step_plan/v1", "step-3.5-flash"),
-        HermesProviderDef("copilot", "GitHub Copilot", "COPILOT_GITHUB_TOKEN", "https://api.githubcopilot.com", "gpt-5.4"),
         HermesProviderDef("huggingface", "Hugging Face", "HF_TOKEN", "https://router.huggingface.co/v1", "moonshotai/Kimi-K2.5"),
         HermesProviderDef("xiaomi", "Xiaomi MiMo", "XIAOMI_API_KEY", "https://api.xiaomimimo.com/v1", "mimo-v2.5-pro"),
         HermesProviderDef("novita", "NovitaAI", "NOVITA_API_KEY", "https://api.novita.ai/openai/v1", "moonshotai/kimi-k2.5"),

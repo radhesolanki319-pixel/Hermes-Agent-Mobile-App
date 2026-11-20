@@ -4,16 +4,16 @@
   "minimumAndroidApi": 26,
   "bundles": {
     "core": {
-      "version": "2026.09.5",
-      "file": "pocketdev-core-arm64-2026.09.5.tar.zst",
-      "sha256": "df0cf7251c74f82d424231e3804114a4ca66b16130eea9abab11e220dc7ac012",
-      "compressedBytes": 72185773,
-      "uncompressedBytes": 369172480,
-      "base": "Ubuntu 20.04.5 ARM64",
+      "version": "2026.11.1",
+      "file": "pocketdev-core-arm64-2026.11.1.tar.zst",
+      "sha256": "b682be31d26de9330f5e7f6f458e2c61dee3b09b34283b1a9ebf83d53549fe16",
+      "compressedBytes": 84584526,
+      "uncompressedBytes": 456222720,
+      "base": "Ubuntu 26.04.1 ARM64",
       "includes": [
-        "Node.js 24.19.0",
-        "npm 11.17.0",
-        "Git 2.25.1",
+        "Node.js 26.13.1",
+        "npm 11.20.0",
+        "Git 2.53.0",
         "No coding agents",
         "No optional language stacks"
       ]
@@ -78,13 +78,14 @@
       ]
     },
     "hermes": {
-      "version": "0.19.0",
-      "file": "pocketdev-hermes-arm64-0.19.0.tar.zst",
-      "sha256": "081addd1a8f4560e4738160dda135521f6631a48247211e2ec6aadda52d1752f",
-      "compressedBytes": 51983819,
-      "uncompressedBytes": 223651840,
+      "version": "0.23.2",
+      "file": "pocketdev-hermes-arm64-0.23.2.tar.zst",
+      "sha256": "867188964fac4af901415ea8b1cbd9d8531d91be68c9da00db1216ff04824842",
+      "compressedBytes": 71191725,
+      "uncompressedBytes": 297840640,
       "includes": [
-        "Hermes Agent 0.19.0 (core + acp extras) ARM64",
+        "Hermes Agent 0.23.2 (acp + mcp extras) ARM64",
+        "aiohttp 3.14.5 (warm API-server transport)",
         "Standalone CPython 3.14.10 ARM64 (python-build-standalone)",
         "Prebuilt venv at /root/.pocket-hermes"
       ],
