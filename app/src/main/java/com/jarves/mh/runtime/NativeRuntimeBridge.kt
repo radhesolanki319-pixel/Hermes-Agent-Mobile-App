@@ -547,6 +547,9 @@ class NativeRuntimeBridge(
             "shell" -> args.optString("command").take(120)
             "read_file", "write_file", "edit_file", "list_dir" -> args.optString("path")
             "search_files" -> args.optString("query")
+            "http_fetch" -> args.optString("url").take(120)
+            "git_status" -> "git status"
+            "git_diff" -> args.optString("path").take(120)
             else -> call.name
         }
         eventBus.emit(RuntimeEvent.ToolStarted(sessionId, call.name, preview))
@@ -558,6 +561,9 @@ class NativeRuntimeBridge(
                 "list_dir" -> toolListDir(workspace, args)
                 "search_files" -> toolSearchFiles(workspace, args)
                 "shell" -> toolShell(sessionId, workspace, guestWorkspacePath, args)
+                "http_fetch" -> toolHttpFetch(args)
+                "git_status" -> runGuestShell(workspace, guestWorkspacePath, "git status --short --branch", 30)
+                "git_diff" -> toolGitDiff(workspace, guestWorkspacePath, args)
                 else -> "Error: unknown tool '${call.name}'."
             }
         }.getOrElse { "Error: ${it.message?.take(500) ?: it.javaClass.simpleName}" }
@@ -645,6 +651,85 @@ class NativeRuntimeBridge(
                 }
             }
         return if (hits.isEmpty()) "No matches for \"$query\"." else hits.joinToString("\n")
+    }
+
+    /**
+     * Phase 2 (ported from the VM Claude Code draft, hardened): fetch a URL
+     * and return readable text. The body read is capped so a huge page can
+     * not OOM the app, script/style blocks are stripped before tags, and
+     * literal private/loopback hosts are refused (light SSRF guard — the
+     * full per-hop validation is in the Phase 2 plan).
+     */
+    private suspend fun toolHttpFetch(args: JSONObject): String = withContext(Dispatchers.IO) {
+        val url = args.optString("url")
+        if (url.isBlank()) return@withContext "Error: 'url' is required."
+        val parsed = runCatching { URL(url) }.getOrElse { return@withContext "Error: invalid URL." }
+        if (parsed.protocol != "http" && parsed.protocol != "https") {
+            return@withContext "Error: only http/https URLs are supported."
+        }
+        val host = parsed.host.orEmpty().lowercase()
+        if (host == "localhost" || host == "127.0.0.1" || host == "::1" ||
+            host.startsWith("192.168.") || host.startsWith("10.") ||
+            Regex("""^172\.(1[6-9]|2\d|3[01])\.""").containsMatchIn(host)
+        ) {
+            return@withContext "Error: private/loopback addresses are not fetched."
+        }
+        val maxChars = args.optInt("max_chars", 12_000).coerceIn(500, 48_000)
+        val connection = (parsed.openConnection() as HttpURLConnection).apply {
+            requestMethod = "GET"
+            connectTimeout = 30_000
+            readTimeout = 30_000
+            instanceFollowRedirects = true
+            setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/120.0 Safari/537.36")
+            setRequestProperty("Accept", "text/html,application/json,text/plain,*/*")
+        }
+        try {
+            val code = connection.responseCode
+            if (code !in 200..299) return@withContext "Error: HTTP $code"
+            val raw = StringBuilder()
+            connection.inputStream.bufferedReader().use { reader ->
+                val buffer = CharArray(8192)
+                while (raw.length < maxChars * 4) {
+                    val read = reader.read(buffer)
+                    if (read < 0) break
+                    raw.append(buffer, 0, read)
+                }
+            }
+            val isHtml = connection.contentType?.contains("html", ignoreCase = true) == true ||
+                raw.startsWith("<!DOCTYPE", ignoreCase = true) || raw.startsWith("<html", ignoreCase = true)
+            val text = if (isHtml) {
+                raw.toString()
+                    .replace(Regex("(?is)<script.*?</script>"), " ")
+                    .replace(Regex("(?is)<style.*?</style>"), " ")
+                    .replace(Regex("<[^>]*>"), " ")
+                    .replace(Regex("\\s+"), " ")
+                    .trim()
+            } else {
+                raw.toString()
+            }
+            text.take(maxChars)
+        } finally {
+            runCatching { connection.disconnect() }
+        }
+    }
+
+    private suspend fun toolGitDiff(workspace: File, guestWorkspacePath: String, args: JSONObject): String {
+        val path = args.optString("path").trim()
+        // The path lands inside a bash -lc string: whitelist its characters
+        // and single-quote it so a model-supplied value can not inject
+        // extra commands.
+        val suffix = when {
+            path.isBlank() -> ""
+            path.contains("..") || !Regex("""^[A-Za-z0-9._/-]+$""").matches(path) ->
+                return "Error: invalid path for git_diff: $path"
+            else -> " -- '$path'"
+        }
+        return runGuestShell(
+            workspace,
+            guestWorkspacePath,
+            "git diff --stat$suffix; echo ---; git diff$suffix",
+            30,
+        )
     }
 
     private suspend fun toolShell(sessionId: String, workspace: File, guestWorkspacePath: String, args: JSONObject): String {
@@ -855,6 +940,33 @@ Rules:
                         .put("command", stringProp("The bash command to run"))
                         .put("timeout_sec", intProp("Timeout in seconds (default 120, max 600)")),
                     arrayOf("command"),
+                ),
+            )
+            put(
+                toolSchema(
+                    "http_fetch",
+                    "Fetch a URL over HTTP(S) and return readable text (HTML is stripped to text). Use for docs, changelogs, raw files. Private/loopback addresses are refused.",
+                    JSONObject()
+                        .put("url", stringProp("The URL to fetch (http or https)"))
+                        .put("max_chars", intProp("Max characters to return (default 12000)")),
+                    arrayOf("url"),
+                ),
+            )
+            put(
+                toolSchema(
+                    "git_status",
+                    "Show the git status of the workspace (branch + short status).",
+                    JSONObject(),
+                    arrayOf(),
+                ),
+            )
+            put(
+                toolSchema(
+                    "git_diff",
+                    "Show the git diff of the workspace: a stat summary followed by the full diff. Pass path to limit it to one file.",
+                    JSONObject()
+                        .put("path", stringProp("Optional file path to limit the diff to")),
+                    arrayOf(),
                 ),
             )
         }
