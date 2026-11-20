@@ -2429,13 +2429,13 @@ exec 3<&-
         private const val GITHUB_CLI_RELEASE_SHA256 = "b1278c75107423d818f1937fd92cafc9e5e9b606631568f68d7fb816f5885a02"
         private const val LEGACY_README = "# Pocket Dev project\n\nThis project is managed locally on Android.\n"
         private const val LEGACY_INDEX = "<!doctype html><title>Pocket Dev</title><h1>Hello from Android</h1>\n"
-        private const val ROOTFS_VERSION = "ubuntu-26.04.1-arm64"
+        private const val ROOTFS_VERSION = "ubuntu-26.04.1-arm64-gnu1"
         private const val ROOTFS_FILE = "ubuntu-base-26.04.1-base-arm64.tar.gz"
         private const val ROOTFS_URL = "https://cdimage.ubuntu.com/ubuntu-base/releases/26.04/release/$ROOTFS_FILE"
         private const val ROOTFS_SHA256 = "5a1906794ced63a71a8119c3f211ef5f0bbe0a243001b4bbd41fdf80c5b219fd"
         private const val NODE_VERSION = "v26.13.1"
         private const val LANGUAGE_TOOLS_VERSION = "node-v24.19.0-python3-v1"
-        private const val CORE_TOOLS_VERSION = "core-bundle-2026.11.2"
+        private const val CORE_TOOLS_VERSION = "core-bundle-2026.11.3"
         private const val LEGACY_CORE_TOOLS_VERSION = "core-bundle-2026.09.5"
         private const val SYSTEM_UPGRADE_VERSION = "ubuntu-maintenance-v1"
         private const val ANDROID_TOOLS_VERSION = "sdk36-build-tools35-gradle8.14.3-maven-2026.09"
@@ -2463,17 +2463,17 @@ exec 3<&-
         private val CLAUDE_VERSION_PATTERN = Regex("[0-9]+\\.[0-9]+\\.[0-9]+")
         private val CORE_BUNDLE = RuntimeBundle(
             label = "Core",
-            fileName = "pocketdev-core-arm64-2026.11.2.tar.zst",
-            sha256 = "b0146ea78d522ed82f345abcfb0579865dcf19b72c3834bb4b4a7ceaea5cd472",
-            compressedBytes = 101_844_813L,
+            fileName = "pocketdev-core-arm64-2026.11.3.tar.zst",
+            sha256 = "aac62add1b9603f0a74d6b4b9b631d21bc362efbc75d2d72184ede60b036999a",
+            compressedBytes = 84_586_832L,
             // Ubuntu 26.04.1 core is published in the user's own repo (tag
-            // core-bundle-2026.11.2) — the upstream runtime release still
+            // core-bundle-2026.11.3) — the upstream runtime release still
             // carries the old 20.04 core under the shared base URL.
-            // 2026.11.2 repacks 2026.11.1 with hardlinks converted to
-            // symlinks (Ubuntu 26.04's uutils coreutils ships /usr/bin/env
-            // as a hardlink chain; a hardlink copy extracted without the
-            // exec bit failed core validation on-device) and the
-            // Node.js entry points as relative symlinks.
+            // 2026.11.3 switches the guest coreutils from uutils to GNU
+            // (coreutils-from-gnu): Ubuntu's uutils build carries a patch
+            // that refuses to run when the resolved executable name differs
+            // from the applet name, which under PRoot breaks /usr/bin/env,
+            // cat, ls and the installer's agent verification.
             releaseBaseUrl = BuildConfig.CORE_BUNDLE_BASE_URL,
         )
         private const val CLAUDE_BUNDLED_VERSION = "2.1.316"
