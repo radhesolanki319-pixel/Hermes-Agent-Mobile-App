@@ -74,7 +74,7 @@ val generatedRuntimeAssets = layout.buildDirectory.dir("generated/runtime-assets
 // downloads the same archive once, at first Hermes install, from
 // hermesBundleBaseUrl — so online updates no longer re-download its ~52 MB.
 val agyBundleFile = runtimeBundleDir.file("pocketdev-agy-arm64-2026.09.1.tar.zst")
-val hermesBundleFile = runtimeBundleDir.file("pocketdev-hermes-arm64-0.23.2.tar.zst")
+val hermesBundleFile = runtimeBundleDir.file("pocketdev-hermes-arm64-0.23.3.tar.zst")
 val sharedBundleFiles = listOf(agyBundleFile)
 val prepareBundledAgentAssets = tasks.register<Sync>("prepareBundledAgentAssets") {
     onlyIf { sharedBundleFiles.any { it.asFile.isFile } }
@@ -147,8 +147,13 @@ android {
         targetSdk = if (playBuild) 36 else 28
         // Keep literal defaults so F-Droid's static manifest parser can detect
         // the tagged release. Gradle properties may still override Play builds.
+<<<<<<< HEAD
         versionCode = 54
         versionName = "1.0.53"
+=======
+        versionCode = 53
+        versionName = "1.0.52"
+>>>>>>> cce9c8e (v53: Update Hermes Agent to v0.23.3)
         providers.gradleProperty("appVersionCode").orNull?.toIntOrNull()?.let { versionCode = it }
         providers.gradleProperty("appVersionName").orNull?.let { versionName = it }
 
