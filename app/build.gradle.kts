@@ -41,7 +41,7 @@ val hermesBundleBaseUrl =
 // fetched from there). The offline flavor embeds the file from
 // dist/runtime-bundles when it is present at build time.
 val coreBundleBaseUrl =
-    "https://github.com/radhesolanki319-pixel/Mobile-Harness/releases/download/core-bundle-2026.11.1"
+    "https://github.com/radhesolanki319-pixel/Mobile-Harness/releases/download/core-bundle-2026.11.2"
 val appUpdateManifestUrl =
     "https://github.com/techjarves/Mobile-Harness/releases/latest/download/mobile-harness-update.json"
 // v31: the v26 gateway pre-connect is REMOVED (Hermes is embedded only —
@@ -83,7 +83,7 @@ val prepareBundledAgentAssets = tasks.register<Sync>("prepareBundledAgentAssets"
 }
 
 val offlineBundleFiles = listOf(
-    "pocketdev-core-arm64-2026.11.1.tar.zst",
+    "pocketdev-core-arm64-2026.11.2.tar.zst",
     "pocketdev-claude-arm64-2026.11.1.tar.zst",
     "pocketdev-python-arm64-2026.09.2.tar.zst",
     "pocketdev-android-arm64-2026.09.1.tar.zst",
@@ -147,8 +147,8 @@ android {
         targetSdk = if (playBuild) 36 else 28
         // Keep literal defaults so F-Droid's static manifest parser can detect
         // the tagged release. Gradle properties may still override Play builds.
-        versionCode = 41
-        versionName = "1.0.40"
+        versionCode = 42
+        versionName = "1.0.41"
         providers.gradleProperty("appVersionCode").orNull?.toIntOrNull()?.let { versionCode = it }
         providers.gradleProperty("appVersionName").orNull?.let { versionName = it }
 
