@@ -2437,13 +2437,13 @@ exec 3<&-
         private const val GITHUB_CLI_RELEASE_SHA256 = "b1278c75107423d818f1937fd92cafc9e5e9b606631568f68d7fb816f5885a02"
         private const val LEGACY_README = "# Pocket Dev project\n\nThis project is managed locally on Android.\n"
         private const val LEGACY_INDEX = "<!doctype html><title>Pocket Dev</title><h1>Hello from Android</h1>\n"
-        private const val ROOTFS_VERSION = "ubuntu-26.04.1-arm64-gnu1"
+        private const val ROOTFS_VERSION = "ubuntu-26.04.1-arm64-gnu2"
         private const val ROOTFS_FILE = "ubuntu-base-26.04.1-base-arm64.tar.gz"
         private const val ROOTFS_URL = "https://cdimage.ubuntu.com/ubuntu-base/releases/26.04/release/$ROOTFS_FILE"
         private const val ROOTFS_SHA256 = "5a1906794ced63a71a8119c3f211ef5f0bbe0a243001b4bbd41fdf80c5b219fd"
         private const val NODE_VERSION = "v26.13.1"
         private const val LANGUAGE_TOOLS_VERSION = "node-v24.19.0-python3-v1"
-        private const val CORE_TOOLS_VERSION = "core-bundle-2026.11.3"
+        private const val CORE_TOOLS_VERSION = "core-bundle-2026.11.4"
         private const val LEGACY_CORE_TOOLS_VERSION = "core-bundle-2026.09.5"
         private const val SYSTEM_UPGRADE_VERSION = "ubuntu-maintenance-v1"
         private const val ANDROID_TOOLS_VERSION = "sdk36-build-tools35-gradle8.14.3-maven-2026.09"
@@ -2471,9 +2471,9 @@ exec 3<&-
         private val CLAUDE_VERSION_PATTERN = Regex("[0-9]+\\.[0-9]+\\.[0-9]+")
         private val CORE_BUNDLE = RuntimeBundle(
             label = "Core",
-            fileName = "pocketdev-core-arm64-2026.11.3.tar.zst",
-            sha256 = "aac62add1b9603f0a74d6b4b9b631d21bc362efbc75d2d72184ede60b036999a",
-            compressedBytes = 84_586_832L,
+            fileName = "pocketdev-core-arm64-2026.11.4.tar.zst",
+            sha256 = "6c04f498fa152d8e74e0a515c111268cd6032dddb9b28cd66d16fcabd5281065",
+            compressedBytes = 84_593_164L,
             // Ubuntu 26.04.1 core is published in the user's own repo (tag
             // core-bundle-2026.11.3) — the upstream runtime release still
             // carries the old 20.04 core under the shared base URL.
