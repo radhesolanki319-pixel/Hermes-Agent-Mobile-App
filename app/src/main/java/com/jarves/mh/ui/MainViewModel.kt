@@ -998,6 +998,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 runCatching { claudeRuntime.stopActiveSession() }
                 runCatching { antigravityRuntime.stopActiveSession() }
                 runCatching { hermesRuntime.stopActiveSession() }
+                runCatching { nativeRuntime.stopActiveSession() }
             }
             if (!current.projectTerminalRunning) {
                 projectTerminalProcess?.takeIf(Process::isAlive)?.destroyForcibly()
@@ -3694,7 +3695,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      * simply proceed on the current agent, exactly as before v25.
      */
     private fun activateHermesForNewProject() {
-        if (_state.value.agentKind != AgentKind.HERMES) selectAgent(AgentKind.HERMES)
+        // v50: retargeted — a new project always opens on the one built-in
+        // agent (the v25 helper's original intent, Hermes is gone).
+        if (_state.value.agentKind != AgentKind.NATIVE) selectAgent(AgentKind.NATIVE)
     }
 
     fun createProject(name: String) {

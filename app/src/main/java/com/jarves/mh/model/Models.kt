@@ -442,6 +442,7 @@ val AgentKind.shortName: String
         AgentKind.HERMES -> "Hermes"
         AgentKind.CLAUDE_CODE -> "Claude Code"
         AgentKind.ANTIGRAVITY -> "Antigravity"
+        AgentKind.NATIVE -> "App Agent"
     }
 
 /**

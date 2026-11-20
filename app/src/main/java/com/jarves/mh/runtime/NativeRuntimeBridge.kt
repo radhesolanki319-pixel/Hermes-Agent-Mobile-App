@@ -76,13 +76,17 @@ class NativeRuntimeBridge(
         activeSessionId = sessionId
         stopRequested = false
         scope.launch {
-            runTurn(sessionId, projectId, prompt, conversationHistory, provider)
+            runTurn(sessionId, projectId, projectSlug, prompt, conversationHistory, provider)
         }
         return sessionId
     }
 
     override suspend fun respondToApproval(request: ToolRequest, approved: Boolean) {
-        pendingApprovals.remove(request.approvalId)?.complete(approved)
+        // Only surface the outcome when this tap actually resolved a pending
+        // request — a late tap after the approval timeout must not paint an
+        // "approved" row for a command that never ran.
+        val deferred = pendingApprovals.remove(request.approvalId) ?: return
+        deferred.complete(approved)
         eventBus.emit(
             if (approved) RuntimeEvent.ToolApproved(request.sessionId, request.approvalId)
             else RuntimeEvent.ToolRejected(request.sessionId, request.approvalId),
@@ -93,9 +97,17 @@ class NativeRuntimeBridge(
         if (activeSessionId != sessionId) return
         stopRequested = true
         runCatching { activeConnection?.disconnect() }
-        runCatching { activeProcess?.destroy() }
+        val process = activeProcess
+        runCatching { process?.destroy() }
         pendingApprovals.values.forEach { it.complete(false) }
         pendingApprovals.clear()
+        if (process != null) {
+            // Grace-then-force, mirroring the Hermes bridge: a guest process
+            // that defers SIGTERM must not keep writing to the workspace
+            // after the turn is reported stopped.
+            kotlinx.coroutines.delay(500)
+            if (process.isAlive) runCatching { process.destroyForcibly() }
+        }
         emitFailureOnce(sessionId, "Stopped by user")
     }
 
@@ -198,6 +210,7 @@ class NativeRuntimeBridge(
     private suspend fun runTurn(
         sessionId: String,
         projectId: String,
+        projectSlug: String,
         prompt: String,
         history: List<ChatMessage>,
         provider: ProviderProfile,
@@ -209,82 +222,96 @@ class NativeRuntimeBridge(
         }
         val before = runCatching { checkpoints.snapshot(workspace) }.getOrDefault(emptyMap())
         runCatching { checkpoints.createCheckpoint(projectId, workspace) }
+        // The terminal event is emitted ONLY at the very end: the view model
+        // drops every event that arrives after SessionCompleted/SessionFailed,
+        // so changed files must be reported first (the Hermes bridge orders
+        // it the same way).
+        var failure: String? = null
         try {
-            val endpoint = chatEndpoint(provider) ?: run {
-                emitFailureOnce(
-                    sessionId,
-                    "Yeh provider (protocol ${provider.kind.protocol}) abhi built-in agent ke saath supported nahi hai. " +
-                        "Settings me OpenAI-compatible provider chuno — FreeLLM API, OpenRouter, DeepSeek, Kimi ya NVIDIA.",
-                )
-                return
-            }
-            val key = secretFor(provider)?.takeIf { it.isNotBlank() }
-                ?: localServerPlaceholderKey(profile = provider)
-            val messages = buildMessages(prompt, history)
-            var iterations = 0
-            while (true) {
-                if (stopRequested) {
-                    emitFailureOnce(sessionId, "Stopped by user")
-                    return
-                }
-                if (++iterations > MAX_ITERATIONS) {
-                    emitFailureOnce(sessionId, "Agent $MAX_ITERATIONS steps ke baad ruk gaya (loop limit). Apna sawaal chhota karke phir bhejo.")
-                    return
-                }
-                val outcome = streamCompletion(sessionId, endpoint, key, provider, messages)
-                if (stopRequested) {
-                    emitFailureOnce(sessionId, "Stopped by user")
-                    return
-                }
-                val calls = outcome.toolCalls
-                if (calls.isEmpty()) {
-                    messages.add(assistantMessage(outcome.text, null))
-                    break
-                }
-                messages.add(assistantMessage(outcome.text, calls))
-                for (call in calls) {
+            val endpoint = chatEndpoint(provider)
+            if (endpoint == null) {
+                failure = "Yeh provider (protocol ${provider.kind.protocol}) abhi built-in agent ke saath supported nahi hai. " +
+                    "Settings me OpenAI-compatible provider chuno — FreeLLM API, OpenRouter, DeepSeek, Kimi ya NVIDIA."
+            } else {
+                val key = secretFor(provider)?.takeIf { it.isNotBlank() }
+                    ?: localServerPlaceholderKey(profile = provider)
+                val guestWorkspacePath = "/workspace/$projectSlug"
+                val messages = buildMessages(prompt, history, guestWorkspacePath)
+                var iterations = 0
+                var forcedFinalUsed = false
+                loop@ while (true) {
                     if (stopRequested) {
-                        emitFailureOnce(sessionId, "Stopped by user")
-                        return
+                        failure = "Stopped by user"
+                        break@loop
                     }
-                    val result = executeTool(sessionId, workspace, call)
-                    messages.add(
-                        JSONObject()
-                            .put("role", "tool")
-                            .put("tool_call_id", call.id)
-                            .put("content", result),
+                    iterations++
+                    // The last allowed round runs without tools so the turn
+                    // ends with a summary instead of a hard loop-limit cut.
+                    val finalRound = iterations >= MAX_ITERATIONS
+                    val outcome = streamCompletion(
+                        sessionId, endpoint, key, provider, messages,
+                        includeTools = !finalRound,
                     )
+                    if (stopRequested) {
+                        failure = "Stopped by user"
+                        break@loop
+                    }
+                    val calls = outcome.toolCalls
+                    if (calls.isEmpty()) break@loop
+                    messages.add(assistantMessage(outcome.text, calls))
+                    for (call in calls) {
+                        if (stopRequested) {
+                            failure = "Stopped by user"
+                            break@loop
+                        }
+                        val result = executeTool(sessionId, workspace, guestWorkspacePath, call)
+                        messages.add(
+                            JSONObject()
+                                .put("role", "tool")
+                                .put("tool_call_id", call.id)
+                                .put("content", result),
+                        )
+                    }
+                    if (finalRound) {
+                        if (forcedFinalUsed) break@loop
+                        // The model ignored the tools-off final round and
+                        // asked for tools anyway; they ran above — give it
+                        // exactly one more text-only round to summarize.
+                        forcedFinalUsed = true
+                    }
                 }
             }
-            emitCompletedOnce(sessionId)
         } catch (t: Throwable) {
-            if (stopRequested) emitFailureOnce(sessionId, "Stopped by user")
-            else emitFailureOnce(sessionId, friendlyError(t))
-        } finally {
-            runCatching {
-                val changed = checkpoints.changedFiles(workspace, before)
-                    .filterNot { checkpoints.isInternalRuntimePath(it) }
-                if (changed.isNotEmpty()) {
-                    checkpoints.saveChangedPaths(projectId, changed)
-                    eventBus.emit(
-                        RuntimeEvent.FilesChanged(
-                            sessionId,
-                            checkpoints.buildChangeDetails(projectId, workspace, changed),
-                        ),
-                    )
-                }
-            }
-            if (activeSessionId == sessionId) {
-                activeConnection = null
-                activeProcess = null
+            failure = if (stopRequested) "Stopped by user" else friendlyError(t)
+        }
+        runCatching {
+            val changed = checkpoints.changedFiles(workspace, before)
+                .filterNot { checkpoints.isInternalRuntimePath(it) }
+            if (changed.isNotEmpty()) {
+                checkpoints.saveChangedPaths(projectId, changed)
+                eventBus.emit(
+                    RuntimeEvent.FilesChanged(
+                        sessionId,
+                        checkpoints.buildChangeDetails(projectId, workspace, changed),
+                    ),
+                )
             }
         }
+        if (activeSessionId == sessionId) {
+            activeConnection = null
+            activeProcess = null
+        }
+        if (failure != null) emitFailureOnce(sessionId, failure)
+        else emitCompletedOnce(sessionId)
     }
 
-    private fun buildMessages(prompt: String, history: List<ChatMessage>): MutableList<JSONObject> {
+    private fun buildMessages(prompt: String, history: List<ChatMessage>, guestWorkspacePath: String): MutableList<JSONObject> {
         val messages = mutableListOf<JSONObject>()
-        messages.add(JSONObject().put("role", "system").put("content", SYSTEM_PROMPT))
-        history.recentWithinCharacterBudget(HISTORY_CHAR_BUDGET).forEach { message ->
+        messages.add(JSONObject().put("role", "system").put("content", systemPrompt(guestWorkspacePath)))
+        // MainViewModel's history already ends with the current user message;
+        // the (brief-augmented) prompt is appended separately below — drop
+        // the duplicate, like the other bridges do.
+        history.dropLast(1).recentWithinCharacterBudget(HISTORY_CHAR_BUDGET).forEach { message ->
             if (message.text.isBlank()) return@forEach
             messages.add(
                 JSONObject()
@@ -348,7 +375,7 @@ class NativeRuntimeBridge(
         }
     }
 
-    private class ToolCallAcc(val id: String, val name: String) {
+    private class ToolCallAcc(var id: String, var name: String) {
         val arguments = StringBuilder()
     }
 
@@ -364,13 +391,14 @@ class NativeRuntimeBridge(
         key: String,
         provider: ProviderProfile,
         messages: List<JSONObject>,
+        includeTools: Boolean = true,
     ): StreamOutcome {
         val body = JSONObject()
             .put("model", provider.model.ifBlank { provider.kind.defaultModel })
             .put("messages", JSONArray(messages))
-            .put("tools", TOOL_SCHEMAS)
             .put("stream", true)
             .put("max_tokens", MAX_TOKENS)
+        if (includeTools) body.put("tools", TOOL_SCHEMAS)
         val connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
             connectTimeout = CONNECT_TIMEOUT_MS
@@ -442,11 +470,26 @@ class NativeRuntimeBridge(
         val toolCalls = delta.optJSONArray("tool_calls") ?: return emitted
         for (i in 0 until toolCalls.length()) {
             val entry = toolCalls.optJSONObject(i) ?: continue
-            val index = entry.optInt("index", i)
             val fn = entry.optJSONObject("function")
-            val acc = calls.getOrPut(index) {
-                ToolCallAcc(entry.optString("id").ifBlank { "call_$index" }, fn?.optString("name", "").orEmpty())
+            val entryId = entry.optString("id", "")
+            // Providers that omit `index` send one call per chunk; when the
+            // current accumulator already holds a different call id, this
+            // chunk starts a NEW call instead of gluing arguments together.
+            val index = if (entry.has("index")) {
+                entry.optInt("index", i)
+            } else {
+                val last = calls.entries.lastOrNull()
+                if (last != null && entryId.isNotBlank() && last.value.id != entryId) calls.size
+                else last?.key ?: i
             }
+            val acc = calls.getOrPut(index) {
+                ToolCallAcc(entryId.ifBlank { "call_$index" }, fn?.optString("name", "").orEmpty())
+            }
+            // Adopt id/name from later chunks when the first chunk lacked
+            // them (or carried only a placeholder).
+            if (entryId.isNotBlank() && (acc.id.isBlank() || acc.id.startsWith("call_"))) acc.id = entryId
+            val name = fn?.optString("name", "").orEmpty()
+            if (name.isNotBlank()) acc.name = name
             val args = fn?.optString("arguments", "").orEmpty()
             if (args.isNotEmpty()) acc.arguments.append(args)
         }
@@ -495,7 +538,7 @@ class NativeRuntimeBridge(
     // Tools
     // ------------------------------------------------------------------
 
-    private suspend fun executeTool(sessionId: String, workspace: File, call: ToolCallAcc): String {
+    private suspend fun executeTool(sessionId: String, workspace: File, guestWorkspacePath: String, call: ToolCallAcc): String {
         val args = runCatching { JSONObject(call.arguments.toString().ifBlank { "{}" }) }
             .getOrElse {
                 return "Error: tool arguments were not valid JSON (${it.message}). Retry with a JSON object."
@@ -514,7 +557,7 @@ class NativeRuntimeBridge(
                 "edit_file" -> toolEditFile(workspace, args)
                 "list_dir" -> toolListDir(workspace, args)
                 "search_files" -> toolSearchFiles(workspace, args)
-                "shell" -> toolShell(sessionId, workspace, args)
+                "shell" -> toolShell(sessionId, workspace, guestWorkspacePath, args)
                 else -> "Error: unknown tool '${call.name}'."
             }
         }.getOrElse { "Error: ${it.message?.take(500) ?: it.javaClass.simpleName}" }
@@ -604,7 +647,7 @@ class NativeRuntimeBridge(
         return if (hits.isEmpty()) "No matches for \"$query\"." else hits.joinToString("\n")
     }
 
-    private suspend fun toolShell(sessionId: String, workspace: File, args: JSONObject): String {
+    private suspend fun toolShell(sessionId: String, workspace: File, guestWorkspacePath: String, args: JSONObject): String {
         val command = args.optString("command")
         if (command.isBlank()) return "Error: 'command' is required."
         if (isDestructive(command)) {
@@ -630,14 +673,16 @@ class NativeRuntimeBridge(
         }
         val timeoutSec = args.optInt("timeout_sec", DEFAULT_SHELL_TIMEOUT_SEC)
             .coerceIn(5, MAX_SHELL_TIMEOUT_SEC)
-        return runGuestShell(workspace, command, timeoutSec)
+        return runGuestShell(workspace, guestWorkspacePath, command, timeoutSec)
     }
 
     private fun isDestructive(command: String): Boolean =
         DESTRUCTIVE_PATTERNS.any { it.containsMatchIn(command) }
 
-    /** Runs a bash command inside the Ubuntu guest with /workspace = the project folder. */
-    private suspend fun runGuestShell(workspace: File, command: String, timeoutSec: Int): String =
+    /** Runs a bash command inside the Ubuntu guest; the project folder is
+     *  bind-mounted at [guestWorkspacePath] (/workspace/<slug>, the same
+     *  path the environment brief and the other bridges use). */
+    private suspend fun runGuestShell(workspace: File, guestWorkspacePath: String, command: String, timeoutSec: Int): String =
         withContext(Dispatchers.IO) {
             val runtime = runCatching { installer.installedRuntime() }.getOrElse {
                 return@withContext "Error: Ubuntu runtime installed nahi hai — pehle app ka setup pura karo."
@@ -649,6 +694,7 @@ class NativeRuntimeBridge(
                     workspace = workspace,
                     environment = emptyMap(),
                     guestCommand = listOf("/usr/bin/env", "bash", "-lc", command),
+                    guestWorkspacePath = guestWorkspacePath,
                 )
             }.getOrElse { return@withContext "Error: shell start nahi ho paya: ${it.message}" }
             activeProcess = process
@@ -656,36 +702,49 @@ class NativeRuntimeBridge(
             val collected = StringBuilder()
             val deadline = System.currentTimeMillis() + timeoutSec * 1000L
             var offset = 0L
-            try {
-                while (true) {
-                    val file = native?.outputFile
-                    if (file != null && file.length() > offset) {
-                        RandomAccessFile(file, "r").use { input ->
-                            input.seek(offset)
-                            val available = (input.length() - offset).coerceAtMost(256 * 1024).toInt()
-                            if (available > 0) {
-                                val bytes = ByteArray(available)
-                                input.readFully(bytes)
-                                offset += available
-                                collected.append(bytes.toString(Charsets.UTF_8).replace('\r', '\n'))
-                                if (collected.length > MAX_COLLECTED_OUTPUT) {
-                                    collected.delete(0, collected.length - MAX_COLLECTED_OUTPUT)
-                                }
+            fun drain() {
+                val file = native?.outputFile ?: return
+                if (file.length() > offset) {
+                    RandomAccessFile(file, "r").use { input ->
+                        input.seek(offset)
+                        val available = (input.length() - offset).coerceAtMost(256 * 1024).toInt()
+                        if (available > 0) {
+                            val bytes = ByteArray(available)
+                            input.readFully(bytes)
+                            offset += available
+                            collected.append(bytes.toString(Charsets.UTF_8).replace('\r', '\n'))
+                            if (collected.length > MAX_COLLECTED_OUTPUT) {
+                                collected.delete(0, collected.length - MAX_COLLECTED_OUTPUT)
                             }
                         }
                     }
-                    if (!process.isAlive) break
+                }
+            }
+            try {
+                // Keep draining while the process runs OR the output file
+                // still has unread bytes — the native pump can lag behind
+                // process exit, and breaking on !isAlive alone loses the
+                // tail of fast commands.
+                while (true) {
+                    drain()
+                    if (!process.isAlive && (native?.outputFile?.length() ?: 0L) <= offset) break
                     if (stopRequested) {
                         process.destroy()
+                        Thread.sleep(500)
+                        if (process.isAlive) runCatching { process.destroyForcibly() }
+                        drain()
                         return@withContext "Command stopped by user.\n$collected"
                     }
                     if (System.currentTimeMillis() > deadline) {
                         process.destroy()
-                        runCatching { process.destroyForcibly() }
+                        Thread.sleep(500)
+                        if (process.isAlive) runCatching { process.destroyForcibly() }
+                        drain()
                         return@withContext "Error: command timed out after ${timeoutSec}s.\nPartial output:\n$collected"
                     }
                     Thread.sleep(120)
                 }
+                drain()
                 val exit = runCatching { process.exitValue() }.getOrDefault(-1)
                 val output = collected.toString().trimEnd()
                 if (output.isBlank()) "(no output, exit code $exit)"
@@ -726,12 +785,12 @@ class NativeRuntimeBridge(
             Regex(""">\s*/dev/"""),
         )
 
-        private const val SYSTEM_PROMPT = """
-You are the built-in coding agent of this Android app. You work inside one project workspace on the user's phone: an Ubuntu environment whose project folder is /workspace (the file tools use paths relative to that same folder).
+        private fun systemPrompt(guestWorkspacePath: String) = """
+You are the built-in coding agent of this Android app. You work inside one project workspace on the user's phone: an Ubuntu environment whose project folder is $guestWorkspacePath (the file tools use paths relative to that same folder).
 
 Rules:
 - Use the tools to do the work: read files before editing them, prefer edit_file for changes, and verify important changes by reading back or running a quick shell check.
-- The shell runs bash inside Ubuntu at /workspace. File-tool paths are relative to the workspace root; never invent absolute phone paths.
+- The shell runs bash inside Ubuntu at $guestWorkspacePath. File-tool paths are relative to the workspace root; never invent absolute phone paths.
 - Keep answers short and direct, in the user's language. When the task is done, say what you changed in one or two lines — do not narrate every step.
 - If a tool returns an error, read it, adjust, and retry once or twice; then tell the user plainly what is blocked.
 - Never claim you did something a tool did not actually do.

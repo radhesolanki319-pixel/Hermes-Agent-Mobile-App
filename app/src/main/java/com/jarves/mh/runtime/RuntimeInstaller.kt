@@ -427,6 +427,7 @@ class RuntimeInstaller(private val context: Context) {
             com.jarves.mh.model.AgentKind.CLAUDE_CODE -> updateClaude(runtime, expectedVersion, onProgress)
             com.jarves.mh.model.AgentKind.ANTIGRAVITY -> updateAgy(runtime, expectedVersion, onProgress)
             com.jarves.mh.model.AgentKind.HERMES -> updateHermes(runtime, expectedVersion, onProgress)
+            com.jarves.mh.model.AgentKind.NATIVE -> Unit
         }
         onProgress(RuntimeInstallProgress(str(R.string.rt_install_version_ready, agent.localizedTitle(context), expectedVersion), 1f, event = RuntimeInstallEvent.COMPLETED))
     }
