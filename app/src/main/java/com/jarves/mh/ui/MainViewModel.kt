@@ -545,12 +545,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     // Writes are drained into a per-chat batch below so rapid activity frames do not
     // serialize hundreds of obsolete snapshots.
     private val transcriptWrites = Channel<TranscriptWrite>(Channel.UNLIMITED)
-    // v50: the external CLI agents were removed in v48; the one active agent
-    // is the built-in NATIVE agent. Whatever was stored before migrates here,
-    // unconditionally — the old kinds can no longer run a turn.
-    private val initialAgentKind = AgentKind.NATIVE.also {
-        if (preferences.agentKind != it.stableId) preferences.agentKind = it.stableId
-    }
+    // v50 forced NATIVE when the CLI agents were removed; v54 brings the
+    // user's own Hermes back as an installable agent, so the stored choice
+    // is honored again (unknown/removed ids fall back to NATIVE).
+    private val initialAgentKind = AgentKind.fromStored(preferences.agentKind)
     private val initialPrimaryAgentKind = preferences.primaryAgentKind
         .takeIf(String::isNotBlank)
         ?.let(AgentKind::fromStored)

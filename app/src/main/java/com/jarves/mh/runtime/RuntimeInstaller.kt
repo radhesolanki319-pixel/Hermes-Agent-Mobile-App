@@ -264,7 +264,11 @@ class RuntimeInstaller(private val context: Context) {
     ) {
         val runtime = installedRuntime()
         when (agent) {
-            com.jarves.mh.model.AgentKind.CLAUDE_CODE -> ensureClaudeInstalled(runtime.proot, 0.05f, onProgress)
+            // v54 (user order): Claude Code installs the LATEST release —
+            // the version is resolved live and the official linux-arm64
+            // release binary is downloaded + checksum-verified (the same
+            // route updateClaude uses), not the old pinned 2.1.316 bundle.
+            com.jarves.mh.model.AgentKind.CLAUDE_CODE -> installClaudeLatest(runtime, onProgress)
             com.jarves.mh.model.AgentKind.ANTIGRAVITY -> ensureAgyInstalled(runtime.proot, 0.05f, onProgress)
             com.jarves.mh.model.AgentKind.HERMES -> ensureHermesInstalled(runtime.proot, 0.05f, onProgress)
             // The built-in agent ships inside the app — nothing to install.
@@ -430,6 +434,18 @@ class RuntimeInstaller(private val context: Context) {
             com.jarves.mh.model.AgentKind.NATIVE -> Unit
         }
         onProgress(RuntimeInstallProgress(str(R.string.rt_install_version_ready, agent.localizedTitle(context), expectedVersion), 1f, event = RuntimeInstallEvent.COMPLETED))
+    }
+
+    /** First install of Claude Code at the newest released version (v54). */
+    private suspend fun installClaudeLatest(
+        runtime: InstalledRuntime,
+        onProgress: suspend (RuntimeInstallProgress) -> Unit,
+    ) {
+        if (isAgentInstalled(com.jarves.mh.model.AgentKind.CLAUDE_CODE)) return
+        val latest = JSONObject(
+            fetchText("https://registry.npmjs.org/@anthropic-ai/claude-code/latest"),
+        ).getString("version")
+        updateClaude(runtime, latest, onProgress)
     }
 
     private suspend fun updateClaude(
@@ -2425,7 +2441,11 @@ exec 3<&-
          * Later upgrades are unlocked: they install the newest PyPI release the
          * user approves, and the version marker then records that release.
          */
-        const val HERMES_VERSION = "0.23.2"
+        // v54: the bundle is built from the user's own GitHub repo
+        // (radhesolanki319-pixel/Hermes-agent-, upstream latest main of
+        // 2026-11-20) — the version label is the build date, matching the
+        // bundle file name and release tag hermes-bundle-2026.11.20.
+        const val HERMES_VERSION = "2026.11.20"
 
         /**
          * The aiohttp pin the pinned Hermes wheel's own metadata
@@ -2523,9 +2543,9 @@ exec 3<&-
         )
         private val HERMES_BUNDLE = RuntimeBundle(
             label = "Hermes Agent",
-            fileName = "pocketdev-hermes-arm64-0.23.2.tar.zst",
-            sha256 = "867188964fac4af901415ea8b1cbd9d8531d91be68c9da00db1216ff04824842",
-            compressedBytes = 71_191_725L,
+            fileName = "pocketdev-hermes-arm64-2026.11.20.tar.zst",
+            sha256 = "f4bc23fd57a4b6de638b12c50ca9206290a880c6cfc8695d7b45de96661552fa",
+            compressedBytes = 71_555_005L,
             // Published as a release asset in the user's repo (tag
             // hermes-bundle-0.23.2), not under the upstream runtime release —
             // the online flavor downloads it from here, SHA-256 verified.

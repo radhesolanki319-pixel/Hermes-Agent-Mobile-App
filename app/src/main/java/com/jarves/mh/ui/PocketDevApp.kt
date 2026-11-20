@@ -1673,7 +1673,9 @@ private fun AgentChoiceRow(
 @Composable
 private fun AgentSwitchSheet(
     selected: AgentKind,
+    uninstalled: Set<AgentKind>,
     onSelect: (AgentKind) -> Unit,
+    onInstall: (AgentKind) -> Unit,
     onDismiss: () -> Unit,
 ) {
     // Resolve text before entering ModalBottomSheet. Dialog windows can expose
@@ -1682,7 +1684,11 @@ private fun AgentSwitchSheet(
     val sheetTitle = localizedContext.getString(R.string.agent_choose_title)
     val sheetDescription = localizedContext.getString(R.string.agent_choose_desc)
     val recommendedLabel = localizedContext.getString(R.string.agent_recommended)
-    val agentLabels = AgentKind.entries.associateWith { agent ->
+    // v54: three agents — the built-in App Agent, the user's own Hermes
+    // (installed on demand from his GitHub bundle) and Claude Code (latest
+    // release, installed on demand). Antigravity stays removed (v48 order).
+    val sheetAgents = listOf(AgentKind.NATIVE, AgentKind.HERMES, AgentKind.CLAUDE_CODE)
+    val agentLabels = sheetAgents.associateWith { agent ->
         localizedContext.getString(agent.titleRes()) to
             localizedContext.getString(agent.subtitleRes())
     }
@@ -1711,17 +1717,28 @@ private fun AgentSwitchSheet(
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
             ) {
                 Column {
-                    AgentKind.entries.forEachIndexed { index, agent ->
+                    sheetAgents.forEachIndexed { index, agent ->
                         val labels = agentLabels.getValue(agent)
+                        val needsInstall = agent in uninstalled
                         AgentChoiceRow(
                             agent = agent,
                             title = labels.first,
-                            subtitle = labels.second,
+                            subtitle = if (needsInstall) {
+                                localizedContext.getString(
+                                    if (agent == AgentKind.HERMES) {
+                                        R.string.agent_hermes_not_installed
+                                    } else {
+                                        R.string.agent_claude_not_installed
+                                    },
+                                )
+                            } else {
+                                labels.second
+                            },
                             recommendedLabel = recommendedLabel,
                             selected = agent == selected,
-                            onClick = { onSelect(agent) },
+                            onClick = { if (needsInstall) onInstall(agent) else onSelect(agent) },
                         )
-                        if (index != AgentKind.entries.lastIndex) {
+                        if (index != sheetAgents.lastIndex) {
                             HorizontalDivider(
                                 modifier = Modifier.padding(start = 62.dp),
                                 color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
@@ -2510,6 +2527,7 @@ private fun RootScreenHost(
                         onCreateQuickProject = viewModel::createQuickProject,
                         onDeleteActiveProject = viewModel::deleteActiveProject,
                         onSelectAgent = viewModel::selectAgent,
+                        onInstallAgent = viewModel::installAgent,
                     )
                 } else {
                     // Transient: PocketDevApp auto-opens the most recent project
@@ -3991,6 +4009,7 @@ private fun WorkspaceScreen(
     onCreateQuickProject: () -> Unit,
     onDeleteActiveProject: () -> Unit,
     onSelectAgent: (AgentKind) -> Unit,
+    onInstallAgent: (AgentKind) -> Unit,
 ) {
     val context = LocalContext.current
     val isAndroidProject = state.androidProjectDetected
@@ -4182,6 +4201,41 @@ private fun WorkspaceScreen(
         return
     }
 
+    if (showAgentSwitcher) {
+        AgentSwitchSheet(
+            selected = state.agentKind,
+            uninstalled = buildSet {
+                if (state.installedAgentVersions[AgentKind.HERMES].isNullOrBlank()) add(AgentKind.HERMES)
+                if (state.installedAgentVersions[AgentKind.CLAUDE_CODE].isNullOrBlank()) add(AgentKind.CLAUDE_CODE)
+            },
+            onSelect = { agent ->
+                onSelectAgent(agent)
+                showAgentSwitcher = false
+            },
+            onInstall = { agent ->
+                onInstallAgent(agent)
+                showAgentSwitcher = false
+            },
+            onDismiss = { showAgentSwitcher = false },
+        )
+    }
+    if (state.agentInstalling != null) {
+        AlertDialog(
+            onDismissRequest = {},
+            title = { Text(stringResource(R.string.agent_installing_title)) },
+            text = {
+                Column {
+                    Text(state.agentMessage ?: "")
+                    Spacer(Modifier.height(12.dp))
+                    LinearProgressIndicator(
+                        progress = { state.agentProgress },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            },
+            confirmButton = {},
+        )
+    }
     if (showChats) {
         ChatSwitcherDialog(
             // v50: chats belong to the built-in agent now; the list shows the
@@ -4256,6 +4310,41 @@ private fun WorkspaceScreen(
                             .padding(vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
+                        // v54: agent chip — the current agent; tapping opens
+                        // the switcher (App Agent / Hermes, with install).
+                        Surface(
+                            onClick = { showAgentSwitcher = true },
+                            shape = CircleShape,
+                            color = when (state.agentKind) {
+                                AgentKind.HERMES -> Color(0xFF0F766E)
+                                AgentKind.CLAUDE_CODE -> Color(0xFFD97757)
+                                else -> Color(0xFF2563EB)
+                            },
+                            modifier = Modifier.padding(end = 10.dp),
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
+                            ) {
+                                Text(
+                                    when (state.agentKind) {
+                                        AgentKind.HERMES -> "HA"
+                                        AgentKind.CLAUDE_CODE -> "CC"
+                                        AgentKind.ANTIGRAVITY -> "AG"
+                                        AgentKind.NATIVE -> "AA"
+                                    },
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White,
+                                )
+                                Icon(
+                                    Icons.Default.ExpandMore,
+                                    contentDescription = stringResource(R.string.agent_choose),
+                                    tint = Color.White,
+                                    modifier = Modifier.size(13.dp),
+                                )
+                            }
+                        }
                         Column(Modifier.weight(1f)) {
                             Text(
                                 state.activeProject?.name.orEmpty(),
@@ -4263,8 +4352,8 @@ private fun WorkspaceScreen(
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                             )
-                            // v50: one built-in agent — the subtitle names the
-                            // provider profile it will answer from + the chat.
+                            // The subtitle names the provider profile the
+                            // active agent will answer from + the chat.
                             Text(
                                 "${state.provider.kind.localizedTitle()} · ${activeChat?.localizedTitle() ?: stringResource(R.string.tab_chat_tab)}",
                                 fontSize = 11.sp,

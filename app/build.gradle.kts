@@ -33,7 +33,7 @@ val runtimeReleaseBaseUrl =
 // installer verifies it against the bundle's pinned SHA-256). The offline
 // flavor still embeds it — see offlineRuntimeBundleFiles below.
 val hermesBundleBaseUrl =
-    "https://github.com/radhesolanki319-pixel/Mobile-Harness/releases/download/hermes-bundle-0.23.2"
+    "https://github.com/radhesolanki319-pixel/Mobile-Harness/releases/download/hermes-bundle-2026.11.20"
 // The Core bundle follows the same pattern since v40: the Ubuntu 26.04
 // core is published as a release asset in the user's own repo (the
 // shared upstream runtime release still carries the old Ubuntu 20.04
@@ -147,8 +147,8 @@ android {
         targetSdk = if (playBuild) 36 else 28
         // Keep literal defaults so F-Droid's static manifest parser can detect
         // the tagged release. Gradle properties may still override Play builds.
-        versionCode = 53
-        versionName = "1.0.52"
+        versionCode = 54
+        versionName = "1.0.53"
         providers.gradleProperty("appVersionCode").orNull?.toIntOrNull()?.let { versionCode = it }
         providers.gradleProperty("appVersionName").orNull?.let { versionName = it }
 

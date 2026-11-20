@@ -294,6 +294,9 @@
     <string name="agent_title_antigravity">Antigravity CLI</string>
     <string name="agent_title_hermes">Hermes Agent</string>
     <string name="agent_title_native">App Agent</string>
+    <string name="agent_hermes_not_installed">Not installed · tap to install (your GitHub Hermes)</string>
+    <string name="agent_installing_title">Installing agent</string>
+    <string name="agent_claude_not_installed">Not installed · tap to install (latest version)</string>
     <string name="hermes_host_title">Hermes host</string>
     <string name="hermes_host_desc">Hermes can run on this phone, or on a Hermes gateway hosted on your own always-on machine (for example a cloud server). Remote mode needs no local Hermes install — chats, memory and tools live on the host.</string>
     <string name="hermes_host_preconnected">Hermes is connected to its own computer — the gateway is built into the app, so there is nothing to set up. You can still override it below.</string>
