@@ -50,7 +50,7 @@ val appUpdateManifestUrl =
 // with it; nothing in the app reads them. (The Actions secret and the
 // workflow env line may linger repo-side — inert, and not this file's
 // concern.)
-// v27: FreeLLM — the user's own 107-model API on Render — is pre-connected
+// v27: FreeLLM — the user's own 158-model API on Render — is pre-connected
 // from inside the app: the endpoint is a public constant, and
 // the API key reaches the build ONLY through the FREELLM_API_KEY
 // environment variable (a GitHub Actions secret on the user's repo, mapped
@@ -147,8 +147,8 @@ android {
         targetSdk = if (playBuild) 36 else 28
         // Keep literal defaults so F-Droid's static manifest parser can detect
         // the tagged release. Gradle properties may still override Play builds.
-        versionCode = 49
-        versionName = "1.0.48"
+        versionCode = 50
+        versionName = "1.0.49"
         providers.gradleProperty("appVersionCode").orNull?.toIntOrNull()?.let { versionCode = it }
         providers.gradleProperty("appVersionName").orNull?.let { versionName = it }
 

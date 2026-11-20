@@ -44,7 +44,7 @@ enum class ProviderKind(
     ),
     CUSTOM(
         "FreeLLM API",
-        "FreeLLM Render Server (107 Models)",
+        "FreeLLM Render Server (158 Models)",
         ProviderProtocol.ANTHROPIC_GATEWAY,
         "https://freellmapi-backup.onrender.com/v1",
         "auto-fusion",
