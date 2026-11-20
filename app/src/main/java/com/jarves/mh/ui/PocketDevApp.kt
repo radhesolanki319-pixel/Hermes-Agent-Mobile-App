@@ -93,6 +93,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Android
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.HealthAndSafety
@@ -1673,9 +1674,9 @@ private fun AgentChoiceRow(
 @Composable
 private fun AgentSwitchSheet(
     selected: AgentKind,
-    uninstalled: Set<AgentKind>,
+    uninstalled: Set<AgentKind> = emptySet(),
     onSelect: (AgentKind) -> Unit,
-    onInstall: (AgentKind) -> Unit,
+    onInstall: (AgentKind) -> Unit = {},
     onDismiss: () -> Unit,
 ) {
     // Resolve text before entering ModalBottomSheet. Dialog windows can expose
