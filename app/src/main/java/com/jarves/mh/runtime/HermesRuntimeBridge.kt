@@ -900,6 +900,7 @@ class HermesRuntimeBridge(
     private val saveConversationId: (String, String) -> Unit,
 ) : RuntimeBridge {
     private val installer = RuntimeInstaller(context)
+    private val mcpServersPrefs = McpServersPrefs(context)
     private val checkpoints = WorkspaceCheckpoints(context.filesDir, context)
     private val warmServer = HermesWarmServerManager(context)
     private val warmClient = HermesWarmChatClient()

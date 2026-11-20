@@ -129,7 +129,7 @@ class PhoneControlBridge(
             }
 
             writer.write(trimmedOutput)
-            writer.write('\n')
+            writer.write("\n")
             writer.flush()
         }
     }

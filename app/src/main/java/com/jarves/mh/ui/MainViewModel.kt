@@ -2604,7 +2604,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             autoUpdateHermesIfNeeded()
             // Phone control (Shizuku): restore the bridge when the user
             // left the feature enabled.
-            PhoneControlController.startIfEnabled(application)
+            PhoneControlController.startIfEnabled(getApplication())
         } else {
             showStartupError(result.exceptionOrNull() ?: IllegalStateException(str(R.string.vm_initialization_failed)))
         }

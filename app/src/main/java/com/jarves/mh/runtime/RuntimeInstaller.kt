@@ -1974,13 +1974,13 @@ BRIDGE_HOST="127.0.0.1"
 BRIDGE_PORT=37123
 
 # Check token file exists
-if [[ ! -f "$TOKEN_FILE" ]]; then
-    echo "Phone control not configured: token file missing at $TOKEN_FILE" >&2
+if [[ ! -f "${'$'}TOKEN_FILE" ]]; then
+    echo "Phone control not configured: token file missing at ${'$'}TOKEN_FILE" >&2
     exit 1
 fi
 
-TOKEN=$(cat "$TOKEN_FILE" 2>/dev/null | tr -d '[:space:]')
-if [[ -z "$TOKEN" ]]; then
+TOKEN=$(cat "${'$'}TOKEN_FILE" 2>/dev/null | tr -d '[:space:]')
+if [[ -z "${'$'}TOKEN" ]]; then
     echo "Phone control not configured: empty token" >&2
     exit 1
 fi
@@ -1996,17 +1996,17 @@ CMD="$*"
 
 # Use bash /dev/tcp to connect to the bridge
 # Protocol: line 1 = token, line 2 = command, then read response until EOF
-exec 3<> /dev/tcp/$BRIDGE_HOST/$BRIDGE_PORT 2>/dev/null || {
-    echo "Phone control unavailable: cannot connect to bridge at $BRIDGE_HOST:$BRIDGE_PORT" >&2
+exec 3<> /dev/tcp/${'$'}BRIDGE_HOST/${'$'}BRIDGE_PORT 2>/dev/null || {
+    echo "Phone control unavailable: cannot connect to bridge at ${'$'}BRIDGE_HOST:${'$'}BRIDGE_PORT" >&2
     echo "Make sure Phone Control (Shizuku) is enabled in Hermes Agent Settings." >&2
     exit 1
 }
 
 # Send auth token
-echo "$TOKEN" >&3
+echo "${'$'}TOKEN" >&3
 
 # Send command
-echo "$CMD" >&3
+echo "${'$'}CMD" >&3
 
 # Close write side, read response
 exec 3>&-
