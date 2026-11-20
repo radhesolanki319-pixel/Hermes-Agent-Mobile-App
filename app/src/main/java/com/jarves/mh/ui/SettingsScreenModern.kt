@@ -525,15 +525,8 @@ fun SettingsScreen(
                 }
             }
 
-            // MCP Servers section
-            item {
-                McpServersSection()
-            }
-
-            // Phone Control (Shizuku) section
-            item {
-                PhoneControlSection()
-            }
+            // Agents removed (v48/v49): the MCP Servers and Phone Control
+            // sections configured tooling for the agents — gone with them.
 
             if (BuildConfig.DEBUG) {
                 item {
