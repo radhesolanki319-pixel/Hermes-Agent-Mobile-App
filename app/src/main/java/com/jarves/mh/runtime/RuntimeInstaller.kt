@@ -3,6 +3,7 @@ package com.jarves.mh.runtime
 import android.content.Context
 import android.net.ConnectivityManager
 import android.system.Os
+import android.util.Log
 import com.jarves.mh.BuildConfig
 import com.jarves.mh.R
 import com.jarves.mh.data.AppPreferences
@@ -680,7 +681,8 @@ class RuntimeInstaller(private val context: Context) {
             true
         } catch (cancelled: CancellationException) {
             throw cancelled
-        } catch (_: Throwable) {
+        } catch (error: Throwable) {
+            Log.e("RuntimeInstaller", "Hermes bundle installation failed, falling back to network routes", error)
             false
         }
         if (bundled) return
@@ -719,14 +721,18 @@ class RuntimeInstaller(private val context: Context) {
             bundle = HERMES_BUNDLE,
             message = str(R.string.rt_install_installing_version, "Hermes Agent", HERMES_VERSION),
             from = fraction,
-            to = 0.995f,
+            to = 0.95f,
             onProgress = onProgress,
         )
+        // Ensure uv is present so warm transport and package management work seamlessly
+        runCatching { ensureUvInstalled(proot, 0.95f, 0.98f, onProgress) }
         verifyGuest(proot, "$HERMES_GUEST_PATH --version", str(R.string.rt_install_verify_failed, "Hermes Agent"))
         hermesMarker.writeText(HERMES_VERSION)
         require(isAgentInstalled(com.jarves.mh.model.AgentKind.HERMES)) {
             "Hermes Agent installation is incomplete"
         }
+        // Best-effort warm transport pre-warm: install aiohttp if not present
+        runCatching { ensureHermesWarmTransport() }
     }
 
     /**
@@ -752,10 +758,18 @@ class RuntimeInstaller(private val context: Context) {
             val python = "$HERMES_PREFIX_GUEST_PATH/venv/bin/python"
             val probe = "$python -c \"import aiohttp\""
             if (guestCommandSucceeds(installed.proot, probe)) return@runCatching true
+            if (!isUvInstalled()) {
+                runCatching { ensureUvInstalled(installed.proot, 0f, 0.5f) {} }
+            }
+            val pipCommand = if (isUvInstalled()) {
+                "$UV_GUEST_PATH pip install --python $python \"$HERMES_AIOHTTP_SPEC\""
+            } else {
+                "$python -m pip install \"$HERMES_AIOHTTP_SPEC\""
+            }
             runGuestCommand(
                 proot = installed.proot,
-                command = "$UV_GUEST_PATH pip install --python $python \"$HERMES_AIOHTTP_SPEC\"",
-                displayCommand = "uv pip install aiohttp (Hermes warm transport)",
+                command = pipCommand,
+                displayCommand = "pip install aiohttp (Hermes warm transport)",
                 fraction = 0f,
                 timeoutMs = 5 * 60 * 1_000L,
                 onProgress = {},
@@ -2254,32 +2268,69 @@ exec 3<&-
         }
         val temporary = File(destination.parentFile, "${destination.name}.part")
         var existing = temporary.takeIf(File::isFile)?.length() ?: 0L
-        val connection = URL(url).openConnection() as HttpURLConnection
-        connection.connectTimeout = 20_000
-        connection.readTimeout = 120_000
-        connection.instanceFollowRedirects = true
-        if (existing > 0L) connection.setRequestProperty("Range", "bytes=$existing-")
-        check(connection.responseCode in 200..299) { str(R.string.rt_install_download_failed_http, connection.responseCode) }
-        val resumed = connection.responseCode == HttpURLConnection.HTTP_PARTIAL && existing > 0L
-        if (!resumed) {
-            temporary.delete()
-            existing = 0L
+
+        var currentUrl = url
+        var connection: HttpURLConnection? = null
+        var redirectCount = 0
+        while (redirectCount < 6) {
+            val conn = URL(currentUrl).openConnection() as HttpURLConnection
+            conn.connectTimeout = 20_000
+            conn.readTimeout = 120_000
+            conn.instanceFollowRedirects = false
+            conn.setRequestProperty("User-Agent", "Hermes-Agent-App")
+            if (existing > 0L) conn.setRequestProperty("Range", "bytes=$existing-")
+            val code = conn.responseCode
+            if (code in 300..399) {
+                val location = conn.getHeaderField("Location")
+                conn.disconnect()
+                if (location.isNullOrBlank()) break
+                currentUrl = if (location.startsWith("http://") || location.startsWith("https://")) {
+                    location
+                } else {
+                    URL(URL(currentUrl), location).toString()
+                }
+                redirectCount++
+                continue
+            }
+            if (existing > 0L && code !in 200..299 && code != HttpURLConnection.HTTP_PARTIAL) {
+                conn.disconnect()
+                temporary.delete()
+                existing = 0L
+                currentUrl = url
+                redirectCount = 0
+                continue
+            }
+            connection = conn
+            break
         }
-        val total = connection.contentLengthLong.takeIf { it >= 0L }?.plus(existing) ?: -1L
-        connection.inputStream.use { input ->
-            FileOutputStream(temporary, resumed).use { output ->
-                val buffer = ByteArray(128 * 1024)
-                var downloaded = existing
-                while (true) {
-                    val count = input.read(buffer)
-                    if (count < 0) break
-                    output.write(buffer, 0, count)
-                    downloaded += count
-                    onBytes(downloaded, total)
+        val activeConn = checkNotNull(connection) { "Could not connect to $url" }
+        try {
+            check(activeConn.responseCode in 200..299) {
+                temporary.delete()
+                str(R.string.rt_install_download_failed_http, activeConn.responseCode)
+            }
+            val resumed = activeConn.responseCode == HttpURLConnection.HTTP_PARTIAL && existing > 0L
+            if (!resumed) {
+                temporary.delete()
+                existing = 0L
+            }
+            val total = activeConn.contentLengthLong.takeIf { it >= 0L }?.plus(existing) ?: -1L
+            activeConn.inputStream.use { input ->
+                FileOutputStream(temporary, resumed).use { output ->
+                    val buffer = ByteArray(128 * 1024)
+                    var downloaded = existing
+                    while (true) {
+                        val count = input.read(buffer)
+                        if (count < 0) break
+                        output.write(buffer, 0, count)
+                        downloaded += count
+                        onBytes(downloaded, total)
+                    }
                 }
             }
+        } finally {
+            activeConn.disconnect()
         }
-        connection.disconnect()
         val actual = digest(temporary, algorithm)
         if (!actual.equals(expectedChecksum, ignoreCase = true)) {
             temporary.delete()
@@ -2290,12 +2341,39 @@ exec 3<&-
     }
 
     private fun fetchText(url: String): String {
-        val connection = URL(url).openConnection() as HttpURLConnection
-        connection.connectTimeout = 15_000
-        connection.readTimeout = 30_000
-        connection.setRequestProperty("Accept", "application/json")
-        check(connection.responseCode in 200..299) { "Request failed with HTTP ${connection.responseCode}" }
-        return connection.inputStream.bufferedReader().use { it.readText() }.also { connection.disconnect() }
+        var currentUrl = url
+        var connection: HttpURLConnection? = null
+        var redirectCount = 0
+        while (redirectCount < 6) {
+            val conn = URL(currentUrl).openConnection() as HttpURLConnection
+            conn.connectTimeout = 15_000
+            conn.readTimeout = 30_000
+            conn.instanceFollowRedirects = false
+            conn.setRequestProperty("Accept", "application/json")
+            conn.setRequestProperty("User-Agent", "Hermes-Agent-App")
+            val code = conn.responseCode
+            if (code in 300..399) {
+                val location = conn.getHeaderField("Location")
+                conn.disconnect()
+                if (location.isNullOrBlank()) break
+                currentUrl = if (location.startsWith("http://") || location.startsWith("https://")) {
+                    location
+                } else {
+                    URL(URL(currentUrl), location).toString()
+                }
+                redirectCount++
+                continue
+            }
+            connection = conn
+            break
+        }
+        val activeConn = checkNotNull(connection) { "Could not connect to $url" }
+        return try {
+            check(activeConn.responseCode in 200..299) { "Request failed with HTTP ${activeConn.responseCode}" }
+            activeConn.inputStream.bufferedReader().use { it.readText() }
+        } finally {
+            activeConn.disconnect()
+        }
     }
 
     private fun digest(file: File, algorithm: String): String {
