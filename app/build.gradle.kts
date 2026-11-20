@@ -50,7 +50,7 @@ val appUpdateManifestUrl =
 // with it; nothing in the app reads them. (The Actions secret and the
 // workflow env line may linger repo-side — inert, and not this file's
 // concern.)
-// v27: FreeLLM — the user's own 107-model API on Render — is pre-connected
+// v27: FreeLLM — the user's own 158-model API on Render — is pre-connected
 // from inside the app: the endpoint is a public constant, and
 // the API key reaches the build ONLY through the FREELLM_API_KEY
 // environment variable (a GitHub Actions secret on the user's repo, mapped

@@ -251,7 +251,7 @@
     <string name="provider_title_opencode">OpenCode Zen</string>
     <string name="provider_title_nvidia">NVIDIA NIM</string>
     <string name="provider_title_custom">FreeLLM API</string>
-    <string name="provider_subtitle_custom">FreeLLM Render Server (107 Models)</string>
+    <string name="provider_subtitle_custom">FreeLLM Render Server (158 Models)</string>
     <string name="provider_subtitle_claude">Pro, Max, Team or Enterprise</string>
     <string name="provider_subtitle_anthropic">Usage billed through Console</string>
     <string name="provider_subtitle_openrouter">Use your OpenRouter API key</string>

@@ -164,7 +164,7 @@ object ProviderKeyMigrator {
  * v27: the baked-in FreeLLM pre-connect — the second half of the "connect
  * it from inside the app" pair (the first half, the v26 gateway
  * pre-connect, was removed in v31 when Hermes became embedded only).
- * FreeLLM is the user's own 107-model API on
+ * FreeLLM is the user's own 158-model API on
  * Render; its endpoint is a public constant baked into the build
  * (`BuildConfig.FREELLM_BASE_URL`) and its key reaches the build only
  * through CI (`BuildConfig.FREELLM_KEY`, from the FREELLM_API_KEY Actions

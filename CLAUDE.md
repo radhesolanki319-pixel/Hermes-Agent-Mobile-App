@@ -15,7 +15,7 @@
 - **Default Provider**: `ProviderKind.CUSTOM` ("FreeLLM API")
 - **Base URL**: `https://freellmapi-backup.onrender.com/v1`
 - **Baked API Key**: `freellmapi-c7bf396fcf0351dbba9546933a8881054c627e6f78875206`
-- **Default Fast Model**: `claude-haiku-4.5` (Total 107 flagship models available on FreeLLM)
+- **Default Fast Model**: `claude-haiku-4.5` (Total 158 unified models available on FreeLLM)
 - **Supported Protocols**:
   - OpenAI-compatible (`/v1/chat/completions`)
   - Anthropic-compatible (`/v1/messages`)
