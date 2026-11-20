@@ -686,9 +686,6 @@ class RuntimeInstaller(private val context: Context) {
             false
         }
         if (bundled) return
-        check(!BuildConfig.OFFLINE_RUNTIME_BUNDLES) {
-            str(R.string.rt_install_hermes_needs_online)
-        }
         val sourceCheckout = hermesSourceCheckout()
         if (sourceCheckout != null) {
             installHermesFromSource(proot, sourceCheckout, fraction, onProgress)
@@ -1229,32 +1226,43 @@ class RuntimeInstaller(private val context: Context) {
     ): File {
         downloads.mkdirs()
         val destination = File(downloads, bundle.fileName)
-        val useEmbedded = preferEmbedded || BuildConfig.OFFLINE_RUNTIME_BUNDLES
-        if (useEmbedded) {
+        val shouldTryEmbedded = preferEmbedded || BuildConfig.OFFLINE_RUNTIME_BUNDLES
+        val embeddedStream = if (shouldTryEmbedded) {
+            runCatching { context.assets.open("runtime/${bundle.fileName}") }.getOrNull()
+        } else null
+
+        if (embeddedStream != null) {
             val loadingLabel = str(R.string.rt_install_loading_bundle, bundle.label)
             onProgress(RuntimeInstallProgress(loadingLabel, from, 0, bundle.compressedBytes))
             val temporary = File(downloads, "${bundle.fileName}.part")
-            context.assets.open("runtime/${bundle.fileName}").use { input ->
-                FileOutputStream(temporary).use { output ->
-                    val buffer = ByteArray(256 * 1024)
-                    var copied = 0L
-                    while (true) {
-                        coroutineContext.ensureActive()
-                        val count = input.read(buffer)
-                        if (count < 0) break
-                        output.write(buffer, 0, count)
-                        copied += count
-                        val ratio = (copied.toFloat() / bundle.compressedBytes).coerceIn(0f, 1f)
-                        onProgress(RuntimeInstallProgress(loadingLabel, from + ratio * (to - from), copied, bundle.compressedBytes))
+            val extractionOk = runCatching {
+                embeddedStream.use { input ->
+                    FileOutputStream(temporary).use { output ->
+                        val buffer = ByteArray(256 * 1024)
+                        var copied = 0L
+                        while (true) {
+                            coroutineContext.ensureActive()
+                            val count = input.read(buffer)
+                            if (count < 0) break
+                            output.write(buffer, 0, count)
+                            copied += count
+                            val ratio = (copied.toFloat() / bundle.compressedBytes).coerceIn(0f, 1f)
+                            onProgress(RuntimeInstallProgress(loadingLabel, from + ratio * (to - from), copied, bundle.compressedBytes))
+                        }
                     }
                 }
-            }
-            require(digest(temporary, "SHA-256").equals(bundle.sha256, ignoreCase = true)) {
-                "${bundle.label} bundle checksum mismatch"
-            }
-            if (destination.exists()) destination.delete()
-            check(temporary.renameTo(destination)) { "Could not stage the ${bundle.label} bundle" }
-            return destination
+                require(digest(temporary, "SHA-256").equals(bundle.sha256, ignoreCase = true)) {
+                    "${bundle.label} bundle checksum mismatch"
+                }
+                if (destination.exists()) destination.delete()
+                check(temporary.renameTo(destination)) { "Could not stage the ${bundle.label} bundle" }
+                true
+            }.onFailure {
+                temporary.delete()
+                Log.w("RuntimeInstaller", "Embedded bundle ${bundle.label} extraction failed or checksum mismatch, falling back to download", it)
+            }.getOrDefault(false)
+
+            if (extractionOk) return destination
         }
 
         val url = "${bundle.releaseBaseUrl ?: BuildConfig.RUNTIME_RELEASE_BASE_URL}/${bundle.fileName}"
