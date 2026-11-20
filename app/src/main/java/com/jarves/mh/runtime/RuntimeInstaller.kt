@@ -2322,7 +2322,7 @@ exec 3<&-
         /** Pinned uv release; version, URL and SHA-256 are Hermes's own installer pins (`pm/lock.json`). */
         private const val UV_VERSION = "0.13.9"
         private const val UV_RELEASE_URL = "https://github.com/astral-sh/uv/releases/download/0.13.9/uv-aarch64-unknown-linux-gnu.tar.gz"
-        private const val UV_RELEASE_SHA256 = "4bb69cf95ed13f23713bb7bc09f241896ea0c75b7c557e615a20604b82f9c403"
+        private const val UV_RELEASE_SHA256 = "0797542018e541a9288855df555c8077eed06f7a47d206362030480e8ecc9f3d"
         /**
          * Pinned Hermes release for the first install from PyPI (spike-verified).
          * Later upgrades are unlocked: they install the newest PyPI release the
@@ -2348,7 +2348,7 @@ exec 3<&-
         private const val AGY_RELEASE_SHA512 = "ed45f6930785aa4b42f14e07ace1c9d91a94fb76e760f54acbd7d3d3951e1f957fd456a0dae2a3124dd9a3b689bf7afb7c9303a3e4ba95037fc10063424d9bf9"
         private const val GITHUB_CLI_VERSION = "2.100.0"
         private const val GITHUB_CLI_RELEASE_URL = "https://github.com/cli/cli/releases/download/v2.105.0/gh_2.105.0_linux_arm64.tar.gz"
-        private const val GITHUB_CLI_RELEASE_SHA256 = "ea4e7a581a32ccad6cc7923cb1576ac5859ba4b9a16ab22eb8f8a96e78e2e961"
+        private const val GITHUB_CLI_RELEASE_SHA256 = "b1278c75107423d818f1937fd92cafc9e5e9b606631568f68d7fb816f5885a02"
         private const val LEGACY_README = "# Pocket Dev project\n\nThis project is managed locally on Android.\n"
         private const val LEGACY_INDEX = "<!doctype html><title>Pocket Dev</title><h1>Hello from Android</h1>\n"
         private const val ROOTFS_VERSION = "ubuntu-26.04.1-arm64"
