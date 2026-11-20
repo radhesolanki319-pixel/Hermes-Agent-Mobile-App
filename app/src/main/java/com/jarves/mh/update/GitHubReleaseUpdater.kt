@@ -2,6 +2,7 @@ package com.jarves.mh.update
 
 import java.net.HttpURLConnection
 import java.net.URL
+import org.json.JSONArray
 import org.json.JSONObject
 
 /**
@@ -18,8 +19,8 @@ import org.json.JSONObject
  */
 object GitHubReleaseUpdate {
 
-    const val LATEST_RELEASE_API_URL =
-        "https://api.github.com/repos/radhesolanki319-pixel/Mobile-Harness/releases/latest"
+    const val RELEASES_API_URL =
+        "https://api.github.com/repos/radhesolanki319-pixel/Mobile-Harness/releases?per_page=30"
 
     /** Release tag → versionCode: "v12" → 12, "12" → 12, anything else → null. */
     fun parseVersionCode(tagName: String?): Long? =
@@ -30,14 +31,40 @@ object GitHubReleaseUpdate {
         remoteVersionCode > installedVersionCode
 
     /**
-     * Parse a `/releases/latest` response body into an [AppUpdateInfo], or
-     * null when the release is not newer, has no `.apk` asset, or the asset
-     * URL is not HTTPS. The release carries no checksum, so `sha256` stays
-     * blank and [AppUpdater.download] skips its checksum step (its package /
+     * Parse a `/releases` LIST response body: among all published releases,
+     * pick the highest `v<versionCode>` tag that is strictly newer than the
+     * install. Runtime-bundle releases (`hermes-bundle-*`, `core-bundle-*`)
+     * share this repo and their tags do not parse as version codes, so they
+     * are skipped. Listing is deliberate: `/releases/latest` returns
+     * whichever release was CREATED most recently, so a bundle release
+     * published after an app release used to hide that update entirely
+     * (v40, 2026-11-20 — the app reported "on the latest version" while
+     * v40 was live, because core-bundle-2026.11.1 was created after it).
+     */
+    fun parseReleaseList(body: String, installedVersionCode: Long): AppUpdateInfo? {
+        val releases = JSONArray(body)
+        var best: AppUpdateInfo? = null
+        for (index in 0 until releases.length()) {
+            val release = releases.optJSONObject(index) ?: continue
+            if (release.optBoolean("draft") || release.optBoolean("prerelease")) continue
+            val info = parseRelease(release, installedVersionCode) ?: continue
+            if (best == null || info.versionCode > best.versionCode) best = info
+        }
+        return best
+    }
+
+    /** Parse a single-release response body (kept for compatibility). */
+    fun parseLatestRelease(body: String, installedVersionCode: Long): AppUpdateInfo? =
+        parseRelease(JSONObject(body), installedVersionCode)
+
+    /**
+     * Parse one release object into an [AppUpdateInfo], or null when the
+     * release is not newer, has no `.apk` asset, or the asset URL is not
+     * HTTPS. The release carries no checksum, so `sha256` stays blank and
+     * [AppUpdater.download] skips its checksum step (its package /
      * version / signature verification still applies).
      */
-    fun parseLatestRelease(body: String, installedVersionCode: Long): AppUpdateInfo? {
-        val root = JSONObject(body)
+    private fun parseRelease(root: JSONObject, installedVersionCode: Long): AppUpdateInfo? {
         val remoteVersionCode = parseVersionCode(root.optString("tag_name")) ?: return null
         if (!isUpdateAvailable(installedVersionCode, remoteVersionCode)) return null
         val assets = root.optJSONArray("assets") ?: return null
@@ -69,7 +96,7 @@ object GitHubReleaseUpdate {
 class GitHubReleaseUpdater {
 
     fun check(installedVersionCode: Long): AppUpdateInfo? {
-        val connection = URL(GitHubReleaseUpdate.LATEST_RELEASE_API_URL).openConnection() as HttpURLConnection
+        val connection = URL(GitHubReleaseUpdate.RELEASES_API_URL).openConnection() as HttpURLConnection
         return try {
             connection.connectTimeout = 8_000
             connection.readTimeout = 10_000
@@ -79,7 +106,7 @@ class GitHubReleaseUpdater {
             connection.setRequestProperty("User-Agent", "Hermes-Agent-App-Updater")
             if (connection.responseCode !in 200..299) return null
             val body = connection.inputStream.bufferedReader().use { it.readText() }
-            GitHubReleaseUpdate.parseLatestRelease(body, installedVersionCode)
+            GitHubReleaseUpdate.parseReleaseList(body, installedVersionCode)
         } finally {
             connection.disconnect()
         }
