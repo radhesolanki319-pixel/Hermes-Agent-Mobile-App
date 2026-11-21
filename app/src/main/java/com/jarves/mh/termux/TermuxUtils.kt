@@ -2,6 +2,8 @@ package com.jarves.mh.termux
 
 // Ported from AndroidHarness (Sanuu7/AndroidHarness, MIT).
 
+import java.io.File
+
 data class PkgMeta(
     val name: String,
     val version: String,
