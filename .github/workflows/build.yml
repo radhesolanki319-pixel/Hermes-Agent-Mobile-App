@@ -8,6 +8,8 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -28,6 +30,18 @@ jobs:
           HERMES_GATEWAY_KEY: ${{ secrets.HERMES_GATEWAY_KEY }}
           FREELLM_API_KEY: ${{ secrets.FREELLM_API_KEY }}
         run: gradle assembleDebug --stacktrace
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="v79"
+          APK_FILE=$(find app/build/outputs/apk/debug -name "*.apk" | head -n 1)
+          echo "Found APK at: $APK_FILE"
+          cp "$APK_FILE" "Hermes_Agent_${TAG}.apk"
+          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --title "Hermes Agent $TAG (100% Offline Hermes Ready)" --notes "v79: Hermes glibc env fix + Claude DISABLED (user order). 100% offline Hermes Agent."
+          gh release upload "$TAG" "Hermes_Agent_${TAG}.apk" --clobber
+          echo "Release $TAG uploaded successfully!"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
