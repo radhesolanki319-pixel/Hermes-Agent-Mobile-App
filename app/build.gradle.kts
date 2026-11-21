@@ -100,7 +100,7 @@ val generatedAgentsAssets = layout.buildDirectory.dir("generated/agents-assets")
 // extension and stores the content decompressed, which would break the
 // runtime's asset lookup. The bytes are still the same tar.gz archives.
 val agentsBundleFiles = linkedMapOf(
-    "hermes-bionic.bin" to 58_158_317L,
+    "hermes-bionic.bin" to 59_393_064L,
 )
 val fetchAgentsBundle = tasks.register("fetchAgentsBundle") {
     description = "Downloads the prebuilt agents bundle (agents-bundle-v1) into the APK assets."
@@ -187,8 +187,8 @@ android {
         targetSdk = if (playBuild) 36 else 28
         // Keep literal defaults so F-Droid's static manifest parser can detect
         // the tagged release. Gradle properties may still override Play builds.
-        versionCode = 81
-        versionName = "1.0.81"
+        versionCode = 82
+        versionName = "1.0.82"
         providers.gradleProperty("appVersionCode").orNull?.toIntOrNull()?.let { versionCode = it }
         providers.gradleProperty("appVersionName").orNull?.let { versionName = it }
 
