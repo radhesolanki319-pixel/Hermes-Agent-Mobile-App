@@ -2441,11 +2441,11 @@ exec 3<&-
          * Later upgrades are unlocked: they install the newest PyPI release the
          * user approves, and the version marker then records that release.
          */
-        // v54: the bundle is built from the user's own GitHub repo
-        // (radhesolanki319-pixel/Hermes-agent-, upstream latest main of
-        // 2026-11-20) — the version label is the build date, matching the
-        // bundle file name and release tag hermes-bundle-2026.11.20.
-        const val HERMES_VERSION = "2026.11.20"
+        // The bundle is built from the user's own GitHub repo
+        // (radhesolanki319-pixel/Hermes-agent- main) — the version label is
+        // the build date, matching the bundle file name and release tag.
+        // v55: rebuilt from the rewritten main (custom mods + MAX POWER).
+        const val HERMES_VERSION = "2026.11.21"
 
         /**
          * The aiohttp pin the pinned Hermes wheel's own metadata
@@ -2543,9 +2543,9 @@ exec 3<&-
         )
         private val HERMES_BUNDLE = RuntimeBundle(
             label = "Hermes Agent",
-            fileName = "pocketdev-hermes-arm64-2026.11.20.tar.zst",
-            sha256 = "f4bc23fd57a4b6de638b12c50ca9206290a880c6cfc8695d7b45de96661552fa",
-            compressedBytes = 71_555_005L,
+            fileName = "pocketdev-hermes-arm64-2026.11.21.tar.zst",
+            sha256 = "37ffbb46b3fb485eaea06f2a9e62438abd3386270ee78b06ca7e89efdcc14492",
+            compressedBytes = 67_298_060L,
             // Published as a release asset in the user's repo (tag
             // hermes-bundle-0.23.2), not under the upstream runtime release —
             // the online flavor downloads it from here, SHA-256 verified.
