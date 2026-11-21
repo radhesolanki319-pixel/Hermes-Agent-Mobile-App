@@ -766,6 +766,71 @@ class RuntimeInstaller(private val context: Context) {
      * <home>/hermes/.venv (see termuxProcess), so no bridge change is
      * needed; Hermes's own data lands in <home>/.hermes via HOME.
      */
+    /** glibc-runner (grun) must exist before any glibc binary can run. */
+    private suspend fun ensureGlibcRunner(
+        termux: TermuxEnvironment,
+        onProgress: suspend (RuntimeInstallProgress) -> Unit,
+    ) {
+        if (File(termux.prefix, "bin/grun").exists() || File(termux.prefix, "glibc/bin/grun").exists()) return
+        onProgress(RuntimeInstallProgress("glibc runtime install ho raha hai…", 0.06f))
+        termux.install(listOf("glibc-runner")) { line ->
+            onProgress(RuntimeInstallProgress(line, 0.08f))
+        }.exceptionOrNull()?.let { throw it }
+    }
+
+    private fun grunPath(termux: TermuxEnvironment): String =
+        if (File(termux.prefix, "bin/grun").exists()) {
+            File(termux.prefix, "bin/grun").absolutePath
+        } else {
+            File(termux.prefix, "glibc/bin/grun").absolutePath
+        }
+
+    /** Extracts a .tar.gz with zip-slip protection (used for the glibc CPython). */
+    private fun extractTarGz(archive: File, destDir: File) {
+        destDir.mkdirs()
+        val destCanonical = destDir.canonicalFile
+        GzipCompressorInputStream(BufferedInputStream(archive.inputStream())).use { gz ->
+            TarArchiveInputStream(gz).use { tar ->
+                var entry = tar.nextEntry
+                while (entry != null) {
+                    val out = File(destDir, entry.name)
+                    check(out.canonicalFile.path.startsWith(destCanonical.path)) {
+                        "Unsafe tar entry: ${entry.name}"
+                    }
+                    when {
+                        entry.isDirectory -> out.mkdirs()
+                        entry.isSymbolicLink -> {
+                            out.parentFile?.mkdirs()
+                            runCatching { Os.symlink(entry.linkName, out.absolutePath) }
+                        }
+                        entry.isLink -> {
+                            out.parentFile?.mkdirs()
+                            val target = File(destDir, entry.linkName)
+                            if (target.isFile) target.copyTo(out, overwrite = true)
+                        }
+                        else -> {
+                            out.parentFile?.mkdirs()
+                            FileOutputStream(out).use { o -> tar.copyTo(o) }
+                            runCatching { Os.chmod(out.absolutePath, entry.mode) }
+                        }
+                    }
+                    entry = tar.nextEntry
+                }
+            }
+        }
+    }
+
+    /**
+     * Termux Hermes install — glibc route (v75). Why: Hermes's locked deps
+     * (pydantic-core, httptools, uvloop, cryptography, numpy…) publish NO
+     * Android wheels, so `uv sync` against Termux's bionic Python tries to
+     * compile everything from source and dies (seen on device, v74:
+     * 'aarch64-linux-android-clang' Permission denied). Instead the venv is
+     * built on a glibc CPython (python-build-standalone) whose interpreter
+     * is patchelf'd onto the Termux glibc loader: uv then resolves ordinary
+     * manylinux wheels for every dep — zero source builds. The bridge's
+     * guest path /root/.pocket-hermes/venv still translates to this venv.
+     */
     private suspend fun installHermesOnTermux(
         termux: TermuxEnvironment,
         onProgress: suspend (RuntimeInstallProgress) -> Unit,
@@ -780,16 +845,48 @@ class RuntimeInstaller(private val context: Context) {
                 onProgress(RuntimeInstallProgress(line, 0.08f))
             }.exceptionOrNull()?.let { throw it }
         }
-        onProgress(RuntimeInstallProgress("Hermes (Termux): repo clone ho raha hai…", 0.1f))
+        ensureGlibcRunner(termux, onProgress)
+        // glibc CPython (pinned python-build-standalone), extracted once.
+        val optDir = File(termux.prefix, "opt").apply { mkdirs() }
+        val glibcPythonHome = File(optDir, "python-glibc")
+        val glibcPython = File(glibcPythonHome, "bin/python3.13")
+        if (!glibcPython.exists()) {
+            onProgress(RuntimeInstallProgress("Hermes (Termux): glibc Python download ho raha hai…", 0.12f))
+            val tarball = File(downloads, "cpython-glibc-3.13.tar.gz")
+            downloadVerified(GLIBC_PYTHON_URL, tarball, GLIBC_PYTHON_SHA256) { bytes, total ->
+                val ratio = if (total > 0L) bytes.toFloat() / total else 0f
+                onProgress(
+                    RuntimeInstallProgress(
+                        "glibc Python download ho raha hai…",
+                        0.12f + ratio * 0.2f,
+                        bytes,
+                        total.takeIf { it > 0L },
+                        event = RuntimeInstallEvent.DOWNLOAD,
+                    ),
+                )
+            }
+            val staging = File(optDir, "python-extract").apply { deleteRecursively(); mkdirs() }
+            extractTarGz(tarball, staging)
+            tarball.delete()
+            File(staging, "python").renameTo(glibcPythonHome)
+            staging.deleteRecursively()
+            check(glibcPython.exists()) { "glibc Python extract fail" }
+        }
+        onProgress(RuntimeInstallProgress("Hermes (Termux): repo clone + wheels install ho rahe hain…", 0.35f))
         val script = """
             set -e
             exec 2>&1
+            export UV_PYTHON_DOWNLOADS=never
             cd __HOME__
             if [ -d hermes/.git ]; then git -C hermes pull --ff-only || true; else git clone --depth 1 https://github.com/radhesolanki319-pixel/Hermes-agent- hermes; fi
             cd hermes
-            uv sync --no-dev --python "${'$'}(command -v python3)"
+            __GRUN__ "${'$'}PREFIX/glibc/bin/patchelf" --set-interpreter "${'$'}PREFIX/glibc/lib/ld-linux-aarch64.so.1" "${'$'}PREFIX/opt/python-glibc/bin/python3.13"
+            rm -rf .venv
+            uv sync --no-dev --python "${'$'}PREFIX/opt/python-glibc/bin/python3.13"
             .venv/bin/hermes --version
-        """.trimIndent().replace("__HOME__", home.absolutePath)
+        """.trimIndent()
+            .replace("__HOME__", home.absolutePath)
+            .replace("__GRUN__", grunPath(termux))
         val process = termux.startShell(script, home)
         val tail = java.util.Collections.synchronizedList(mutableListOf<String>())
         val reader = kotlin.concurrent.thread(name = "hermes-termux-install", isDaemon = true) {
@@ -799,9 +896,9 @@ class RuntimeInstaller(private val context: Context) {
                 }
             }
         }
-        var fraction = 0.15f
+        var fraction = 0.4f
         while (!process.waitFor(5, java.util.concurrent.TimeUnit.SECONDS)) {
-            fraction = (fraction + 0.05f).coerceAtMost(0.9f)
+            fraction = (fraction + 0.03f).coerceAtMost(0.92f)
             val last = synchronized(tail) { tail.lastOrNull() } ?: "Hermes install chal raha hai…"
             onProgress(RuntimeInstallProgress(last.take(120), fraction))
         }
@@ -2733,6 +2830,12 @@ exec 3<&-
         // the build date, matching the bundle file name and release tag.
         // v55: rebuilt from the rewritten main (custom mods + MAX POWER).
         const val HERMES_VERSION = "2026.11.22"
+
+        /** Pinned glibc CPython (python-build-standalone) for the Hermes venv. */
+        const val GLIBC_PYTHON_URL =
+            "https://github.com/astral-sh/python-build-standalone/releases/download/20261110/cpython-3.13.18%2B20261110-aarch64-unknown-linux-gnu-install_only.tar.gz"
+        const val GLIBC_PYTHON_SHA256 =
+            "d25a65036d5e149db902fa52ad65878d0c00e9301360ec197832f99063087e9e"
 
         /**
          * The aiohttp pin the pinned Hermes wheel's own metadata
