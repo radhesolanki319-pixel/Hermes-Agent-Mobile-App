@@ -275,6 +275,15 @@ class RuntimeInstaller(private val context: Context) {
      * data dir (/root/.hermes) is preserved.
      */
     suspend fun reinstallHermes(onProgress: suspend (RuntimeInstallProgress) -> Unit) {
+        // Termux: wipe the clone + marker and reinstall from the repo.
+        val termux = TermuxEnvironment(context)
+        if (termux.isInstalled()) {
+            termuxHermesMarker(termux).delete()
+            File(termux.prefix, "home/hermes").deleteRecursively()
+            installHermesOnTermux(termux, onProgress)
+            onProgress(RuntimeInstallProgress(str(R.string.rt_install_ready, com.jarves.mh.model.AgentKind.HERMES.localizedTitle(context)), 1f))
+            return
+        }
         val runtime = installedRuntime()
         hermesMarker.delete()
         ensureHermesInstalled(runtime.proot, 0.05f, onProgress)
@@ -288,10 +297,24 @@ class RuntimeInstaller(private val context: Context) {
         ensureAgentInstalled(com.jarves.mh.model.AgentKind.CLAUDE_CODE, onProgress)
     }
 
+    /** Where Termux-side Hermes records its install (content = HERMES_VERSION). */
+    private fun termuxHermesMarker(termux: TermuxEnvironment): File =
+        File(termux.prefix, ".hermes-installed")
+
+    private fun termuxHermesBinary(termux: TermuxEnvironment): File =
+        File(termux.prefix, "home/hermes/.venv/bin/hermes")
+
     suspend fun ensureAgentInstalled(
         agent: com.jarves.mh.model.AgentKind,
         onProgress: suspend (RuntimeInstallProgress) -> Unit,
     ) {
+        // Termux: Hermes installs from the user's own GitHub repo via
+        // git clone + uv sync — no bundle, no PRoot.
+        val termux = TermuxEnvironment(context)
+        if (agent == com.jarves.mh.model.AgentKind.HERMES && termux.isInstalled()) {
+            if (!isAgentInstalled(agent)) installHermesOnTermux(termux, onProgress)
+            return
+        }
         val runtime = installedRuntime()
         when (agent) {
             // Claude Code installs the latest release live from npm/Anthropic,
@@ -326,9 +349,19 @@ class RuntimeInstaller(private val context: Context) {
             com.jarves.mh.model.AgentKind.ANTIGRAVITY -> isInstalled() &&
                 File(rootfs, AGY_GUEST_PATH.removePrefix("/")).canExecute() &&
                 !agyMarker.readTextOrNull().isNullOrBlank()
-            com.jarves.mh.model.AgentKind.HERMES -> isInstalled() &&
-                File(rootfs, HERMES_GUEST_PATH.removePrefix("/")).canExecute() &&
-                !hermesMarker.readTextOrNull().isNullOrBlank()
+            com.jarves.mh.model.AgentKind.HERMES -> {
+                // Termux: Hermes lives in the uv-sync venv of the repo cloned
+                // at <prefix>/home/hermes (see installHermesOnTermux).
+                val termux = TermuxEnvironment(context)
+                if (termux.isInstalled()) {
+                    termuxHermesBinary(termux).canExecute() &&
+                        !termuxHermesMarker(termux).readTextOrNull().isNullOrBlank()
+                } else {
+                    isInstalled() &&
+                        File(rootfs, HERMES_GUEST_PATH.removePrefix("/")).canExecute() &&
+                        !hermesMarker.readTextOrNull().isNullOrBlank()
+                }
+            }
             // Built into the app: available whenever the core runtime is.
             com.jarves.mh.model.AgentKind.NATIVE -> isInstalled()
         }
@@ -415,7 +448,10 @@ class RuntimeInstaller(private val context: Context) {
             ?.takeIf { it.isNotEmpty() && File(rootfs, AGY_GUEST_PATH.removePrefix("/")).canExecute() }
             ?.let { put(com.jarves.mh.model.AgentKind.ANTIGRAVITY, it) }
 
-        hermesMarker.readTextOrNull()
+        val termuxEnv = TermuxEnvironment(context)
+        val hermesMarkerFile =
+            if (termuxEnv.isInstalled()) termuxHermesMarker(termuxEnv) else hermesMarker
+        hermesMarkerFile.readTextOrNull()
             ?.trim()
             ?.takeIf { isAgentInstalled(com.jarves.mh.model.AgentKind.HERMES) }
             ?.let { put(com.jarves.mh.model.AgentKind.HERMES, it) }
@@ -438,7 +474,11 @@ class RuntimeInstaller(private val context: Context) {
                         put(com.jarves.mh.model.AgentKind.ANTIGRAVITY, AgentUpdateInfo(current, latest))
                     }
             }
-            installed[com.jarves.mh.model.AgentKind.HERMES]?.let { current ->
+            installed[com.jarves.mh.model.AgentKind.HERMES]?.takeIf {
+                // Termux Hermes updates come from its own repo (git pull +
+                // uv sync on reinstall), never from bundle releases.
+                !TermuxEnvironment(context).isInstalled()
+            }?.let { current ->
                 // Upgrades are unlocked (user decision, 2026-11-17): advertise
                 // the newest stable release, not just the pinned first-install
                 // version. Since v0.23.2 Hermes publishes on GitHub only —
@@ -775,6 +815,54 @@ class RuntimeInstaller(private val context: Context) {
      * checksum-mismatching download, or a binary that does not run — and the
      * caller falls back to the network routes.
      */
+    /**
+     * Termux Hermes install: clone the user's Hermes repo into the Termux
+     * home and `uv sync` it — the route proven on Muse's VM (2026-11-21).
+     * The bridge's guest path /root/.pocket-hermes/venv translates to
+     * <home>/hermes/.venv (see termuxProcess), so no bridge change is
+     * needed; Hermes's own data lands in <home>/.hermes via HOME.
+     */
+    private suspend fun installHermesOnTermux(
+        termux: TermuxEnvironment,
+        onProgress: suspend (RuntimeInstallProgress) -> Unit,
+    ) {
+        val home = File(termux.prefix, "home").apply { mkdirs() }
+        onProgress(RuntimeInstallProgress("Hermes (Termux): repo clone ho raha hai…", 0.1f))
+        val script = """
+            set -e
+            exec 2>&1
+            cd __HOME__
+            if [ -d hermes/.git ]; then git -C hermes pull --ff-only || true; else git clone --depth 1 https://github.com/radhesolanki319-pixel/Hermes-agent- hermes; fi
+            cd hermes
+            python -m pip install -q uv || pip install -q uv
+            uv sync --no-dev --python "${'$'}(command -v python3)"
+            .venv/bin/hermes --version
+        """.trimIndent().replace("__HOME__", home.absolutePath)
+        val process = termux.startShell(script, home)
+        val tail = java.util.Collections.synchronizedList(mutableListOf<String>())
+        val reader = kotlin.concurrent.thread(name = "hermes-termux-install", isDaemon = true) {
+            runCatching {
+                process.inputStream.bufferedReader().forEachLine { line ->
+                    synchronized(tail) { tail += line; if (tail.size > 40) tail.removeAt(0) }
+                }
+            }
+        }
+        var fraction = 0.15f
+        while (!process.waitFor(5, java.util.concurrent.TimeUnit.SECONDS)) {
+            fraction = (fraction + 0.05f).coerceAtMost(0.9f)
+            val last = synchronized(tail) { tail.lastOrNull() } ?: "Hermes install chal raha hai…"
+            onProgress(RuntimeInstallProgress(last.take(120), fraction))
+        }
+        runCatching { reader.join(2_000) }
+        val exit = process.exitValue()
+        check(exit == 0 && termuxHermesBinary(termux).canExecute()) {
+            "Hermes (Termux) install fail (exit $exit): " +
+                synchronized(tail) { tail.takeLast(6).joinToString(" · ") }
+        }
+        termuxHermesMarker(termux).writeText(HERMES_VERSION)
+        onProgress(RuntimeInstallProgress("Hermes (Termux) ready hai", 1f))
+    }
+
     private suspend fun installHermesFromBundle(
         proot: File,
         fraction: Float,
