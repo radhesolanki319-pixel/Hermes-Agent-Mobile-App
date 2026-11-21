@@ -559,8 +559,6 @@ class TermuxEnvironment(private val context: Context) {
         }
     }.getOrDefault(false)
 
-    private fun File.isElf(): Boolean = isElf(this)
-
     private fun shellQuote(s: String): String = "'" + s.replace("'", "'\\''") + "'"
 
     /** (Re)generates the bash-function shim file when missing or stale. */
@@ -582,7 +580,7 @@ class TermuxEnvironment(private val context: Context) {
             sb.append(header).append('\n')
 
             fun addShim(file: File) {
-                val isElf = file.isElf()
+                val isElf = isElf(file)
                 val shebang = if (isElf) null
                 else runCatching { file.bufferedReader().use { it.readLine() } }.getOrNull()?.trim()
                 ShellShims.line(file.name, file.absolutePath, isElf, shebang, linker, bash, nodeBin, pythonBin)
