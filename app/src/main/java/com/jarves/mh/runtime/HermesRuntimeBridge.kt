@@ -1639,28 +1639,36 @@ class HermesRuntimeBridge(
         options: HermesConfigOptions,
         mcpServers: List<McpServerConfig> = emptyList(),
     ) {
-        val home = File(rootfs, HERMES_HOME_GUEST_PATH.removePrefix("/")).apply { mkdirs() }
-        // Hermes's learned skills and persistent memories live under
-        // HERMES_HOME; the bridge never deletes or resets them — it only
-        // makes sure the directories exist.
-        File(home, "skills").mkdirs()
-        File(home, "memories").mkdirs()
-        val configFile = File(home, "config.yaml")
-        val existingConfig = configFile.takeIf(File::isFile)?.readText()
-        val newConfig = if (existingConfig.isNullOrBlank()) {
-            HermesConfigFiles.freshConfig(route, model, options, mcpServers)
-        } else {
-            HermesConfigFiles.mergedConfig(existingConfig, route, model, options, mcpServers)
+        val targetHomes = listOf(
+            File(rootfs, HERMES_HOME_GUEST_PATH.removePrefix("/")),
+            File(context.filesDir, "linux/home/hermes"),
+            File(context.filesDir, "linux/home/.hermes"),
+        ).distinctBy { it.absolutePath }
+
+        for (home in targetHomes) {
+            home.mkdirs()
+            // Hermes's learned skills and persistent memories live under
+            // HERMES_HOME; the bridge never deletes or resets them — it only
+            // makes sure the directories exist.
+            File(home, "skills").mkdirs()
+            File(home, "memories").mkdirs()
+            val configFile = File(home, "config.yaml")
+            val existingConfig = configFile.takeIf(File::isFile)?.readText()
+            val newConfig = if (existingConfig.isNullOrBlank()) {
+                HermesConfigFiles.freshConfig(route, model, options, mcpServers)
+            } else {
+                HermesConfigFiles.mergedConfig(existingConfig, route, model, options, mcpServers)
+            }
+            // The merge is stable (merging a merged file changes nothing),
+            // so after the first launch the computed text equals the file
+            // on disk launch after launch: skip the rewrite entirely
+            // instead of touching both files on every turn (v32 latency).
+            if (newConfig != existingConfig) configFile.writeText(newConfig)
+            val envFile = File(home, ".env")
+            val existingEnv = envFile.takeIf(File::isFile)?.readText().orEmpty()
+            val newEnv = HermesConfigFiles.mergedEnv(existingEnv, route, secret)
+            if (newEnv != existingEnv) envFile.writeText(newEnv)
         }
-        // The merge is stable (merging a merged file changes nothing),
-        // so after the first launch the computed text equals the file
-        // on disk launch after launch: skip the rewrite entirely
-        // instead of touching both files on every turn (v32 latency).
-        if (newConfig != existingConfig) configFile.writeText(newConfig)
-        val envFile = File(home, ".env")
-        val existingEnv = envFile.takeIf(File::isFile)?.readText().orEmpty()
-        val newEnv = HermesConfigFiles.mergedEnv(existingEnv, route, secret)
-        if (newEnv != existingEnv) envFile.writeText(newEnv)
     }
 
     /**

@@ -891,6 +891,31 @@ class RuntimeInstaller(private val context: Context) {
                 File(termux.prefix, ".harness-installed").writeText(
                     "bash\nbusybox\nca-certificates\ntermux-exec\ngit\ngh\npython\npython-pip\nnodejs\nnpm\nuv\n",
                 )
+                val hermesHome = File(termux.prefix, "home/hermes").apply { mkdirs() }
+                val hermesCfg = File(hermesHome, "config.yaml")
+                if (!hermesCfg.exists()) {
+                    val defaultRoute = HermesRoute(
+                        provider = HermesProviderCatalog.CUSTOM_ID,
+                        keyEnv = HermesProviderCatalog.CUSTOM_KEY_ENV,
+                        baseUrl = HermesProviderCatalog.CUSTOM_DEF.baseUrl,
+                        custom = true,
+                    )
+                    val defaultCfg = HermesConfigFiles.freshConfig(defaultRoute, HermesProviderCatalog.CUSTOM_DEF.defaultModel)
+                    runCatching { hermesCfg.writeText(defaultCfg) }
+                    runCatching {
+                        val dotHome = File(termux.prefix, "home/.hermes").apply { mkdirs() }
+                        File(dotHome, "config.yaml").writeText(defaultCfg)
+                    }
+                }
+                val hermesEnv = File(hermesHome, ".env")
+                if (!hermesEnv.exists()) {
+                    val defaultEnv = "CUSTOM_PROVIDER_API_KEY=no-key-required\nOPENAI_BASE_URL=https://freellmapi-backup.onrender.com/v1\nOPENAI_API_KEY=no-key-required\n"
+                    runCatching { hermesEnv.writeText(defaultEnv) }
+                    runCatching {
+                        val dotHome = File(termux.prefix, "home/.hermes").apply { mkdirs() }
+                        File(dotHome, ".env").writeText(defaultEnv)
+                    }
+                }
             }
             onProgress(RuntimeInstallProgress("Hermes (Termux): verify ho raha hai…", 0.9f))
             val verifyCmd = if (isBionic) {
@@ -2519,6 +2544,55 @@ class RuntimeInstaller(private val context: Context) {
                 put("HERMES_HOME", hermesHome.absolutePath)
                 put("PATH", "${prefix.absolutePath}/bin:" + (get("PATH") ?: ""))
                 put("LD_LIBRARY_PATH", "${prefix.absolutePath}/lib")
+
+                val dotHermes = File(home, ".hermes")
+                val hermesCfg = File(hermesHome, "config.yaml")
+                val dotCfg = File(dotHermes, "config.yaml")
+                val rootfsCfg = File(runtimeDir, "ubuntu/root/.hermes/config.yaml")
+                if (!hermesCfg.exists()) {
+                    when {
+                        dotCfg.exists() -> runCatching { dotCfg.copyTo(hermesCfg, overwrite = true) }
+                        rootfsCfg.exists() -> runCatching { rootfsCfg.copyTo(hermesCfg, overwrite = true) }
+                        else -> {
+                            val defaultRoute = HermesRoute(
+                                provider = HermesProviderCatalog.CUSTOM_ID,
+                                keyEnv = HermesProviderCatalog.CUSTOM_KEY_ENV,
+                                baseUrl = HermesProviderCatalog.CUSTOM_DEF.baseUrl,
+                                custom = true,
+                            )
+                            val defaultCfg = HermesConfigFiles.freshConfig(defaultRoute, HermesProviderCatalog.CUSTOM_DEF.defaultModel)
+                            runCatching {
+                                hermesHome.mkdirs()
+                                hermesCfg.writeText(defaultCfg)
+                                dotHermes.mkdirs()
+                                dotCfg.writeText(defaultCfg)
+                            }
+                        }
+                    }
+                }
+                val hermesEnv = File(hermesHome, ".env")
+                val dotEnv = File(dotHermes, ".env")
+                val rootfsEnv = File(runtimeDir, "ubuntu/root/.hermes/.env")
+                if (!hermesEnv.exists()) {
+                    when {
+                        dotEnv.exists() -> runCatching { dotEnv.copyTo(hermesEnv, overwrite = true) }
+                        rootfsEnv.exists() -> runCatching { rootfsEnv.copyTo(hermesEnv, overwrite = true) }
+                        else -> {
+                            val defaultEnv = "CUSTOM_PROVIDER_API_KEY=no-key-required\nOPENAI_BASE_URL=https://freellmapi-backup.onrender.com/v1\nOPENAI_API_KEY=no-key-required\n"
+                            runCatching {
+                                hermesEnv.writeText(defaultEnv)
+                                dotEnv.writeText(defaultEnv)
+                            }
+                        }
+                    }
+                }
+
+                if (!containsKey("OPENAI_BASE_URL")) {
+                    put("OPENAI_BASE_URL", "https://freellmapi-backup.onrender.com/v1")
+                }
+                if (!containsKey("OPENAI_API_KEY")) {
+                    put("OPENAI_API_KEY", "no-key-required")
+                }
             }
         }
         val touchesGlibcTree = !isHermesSpawn && translatedArgv.any {

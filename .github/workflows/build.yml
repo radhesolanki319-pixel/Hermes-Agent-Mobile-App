@@ -35,11 +35,11 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG="v82"
+          TAG="v83"
           APK_FILE=$(find app/build/outputs/apk/debug -name "*.apk" | head -n 1)
           echo "Found APK at: $APK_FILE"
           cp "$APK_FILE" "Hermes_Agent_${TAG}.apk"
-          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --title "Hermes Agent $TAG (Complete Bionic Shared Libraries & Python Fix)" --notes "v82: Complete Native Bionic shared libraries packaged (libz.so, libsqlite3.so, libreadline.so, liblzma.so, libbz2.so, libexpat.so, libncursesw.so). All Python C extensions verified."
+          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --title "Hermes Agent $TAG (Hermes Home Config Auto-Sync & Provider Fallback Fix)" --notes "v83: Automatically syncs and writes config.yaml and .env to hermesHome and .hermes, injects fallback provider environment so Hermes never aborts with missing providers on first run."
           gh release upload "$TAG" "Hermes_Agent_${TAG}.apk" --clobber
           echo "Release $TAG uploaded successfully!"
 
