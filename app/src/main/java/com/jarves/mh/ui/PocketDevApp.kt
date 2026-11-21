@@ -6011,6 +6011,17 @@ private fun createCameraPhotoUri(context: Context): Uri {
     return FileProvider.getUriForFile(context, "${context.packageName}.files", file)
 }
 
+/**
+ * A completely empty assistant message — blank text, no attachments, no
+ * work items, no GenUI payload — renders as an empty grey box (the
+ * "faltu boxes" the user reported, v76). Whitespace-only stream deltas
+ * used to create such messages, and they persist in saved transcripts,
+ * so the chat simply never renders them.
+ */
+private fun isEmptyAssistantMessage(message: ChatMessage): Boolean =
+    !message.fromUser && message.workItems.isEmpty() && message.text.isBlank() &&
+        message.attachments.isEmpty() && message.genUiPayload == null
+
 @Composable
 private fun ChatTab(
     messages: List<ChatMessage>,
@@ -6104,7 +6115,7 @@ private fun ChatTab(
                 contentPadding = PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                items(messages, key = { it.id }) { message ->
+                items(messages.filterNot(::isEmptyAssistantMessage), key = { it.id }) { message ->
                     if (message.workItems.isNotEmpty()) {
                         WorkBlockCard(message)
                     } else {

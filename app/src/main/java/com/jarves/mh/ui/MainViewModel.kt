@@ -5760,16 +5760,34 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     activity = current.activity.mapIndexed { index, item -> if (index == 0) item.copy(isComplete = true) else item },
                 )
                 is RuntimeEvent.AssistantDelta -> {
-                    val timeline = if (current.liveThinking || current.liveProcess.any { !isNoisyRuntimeItem(it) }) {
-                        finishWorkSegment(current)
+                    if (event.text.isBlank()) {
+                        // Whitespace-only deltas carry no visible content.
+                        // Inside an already-streaming message they are just
+                        // spacing, but as a NEW message they render as the
+                        // empty grey boxes the user complained about (v76) —
+                        // a blank delta must never start a message. The work
+                        // segment, if any, is finished by the next real delta
+                        // or at session end.
+                        val lastMessage = current.messages.lastOrNull()
+                        if (lastMessage != null && !lastMessage.fromUser && lastMessage.workItems.isEmpty() &&
+                            lastMessage.workedMillis == 0L && lastMessage.text.isNotEmpty()
+                        ) {
+                            current.copy(messages = current.messages.dropLast(1) + lastMessage.copy(text = lastMessage.text + event.text))
+                        } else {
+                            current
+                        }
                     } else {
-                        current
-                    }
-                    val lastMessage = timeline.messages.lastOrNull()
-                    if (lastMessage != null && !lastMessage.fromUser && lastMessage.workItems.isEmpty() && lastMessage.workedMillis == 0L) {
-                        timeline.copy(messages = timeline.messages.dropLast(1) + lastMessage.copy(text = lastMessage.text + event.text))
-                    } else {
-                        timeline.copy(messages = timeline.messages + ChatMessage(fromUser = false, text = event.text))
+                        val timeline = if (current.liveThinking || current.liveProcess.any { !isNoisyRuntimeItem(it) }) {
+                            finishWorkSegment(current)
+                        } else {
+                            current
+                        }
+                        val lastMessage = timeline.messages.lastOrNull()
+                        if (lastMessage != null && !lastMessage.fromUser && lastMessage.workItems.isEmpty() && lastMessage.workedMillis == 0L) {
+                            timeline.copy(messages = timeline.messages.dropLast(1) + lastMessage.copy(text = lastMessage.text + event.text))
+                        } else {
+                            timeline.copy(messages = timeline.messages + ChatMessage(fromUser = false, text = event.text))
+                        }
                     }
                 }
                 is RuntimeEvent.ReasoningProgress -> {

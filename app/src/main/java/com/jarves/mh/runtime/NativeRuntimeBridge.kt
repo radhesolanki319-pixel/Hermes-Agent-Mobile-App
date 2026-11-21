@@ -9,6 +9,7 @@ import com.jarves.mh.model.ProviderProtocol
 import com.jarves.mh.model.RiskLevel
 import com.jarves.mh.model.RuntimeEvent
 import com.jarves.mh.model.ToolRequest
+import com.jarves.mh.termux.TermuxEnvironment
 import java.io.BufferedReader
 import java.io.File
 import java.io.InputStreamReader
@@ -35,8 +36,8 @@ import org.json.JSONObject
  * install, nothing to download. It talks to the active provider profile
  * over the OpenAI-compatible chat API with streaming, and executes tools
  * against the project workspace: file tools host-side on
- * `filesDir/workspaces/<projectId>`, the shell tool inside the Ubuntu
- * guest where that same folder is bind-mounted at /workspace.
+ * `filesDir/workspaces/<projectId>`, the shell tool inside the app's
+ * Termux environment where that same folder appears at /workspace.
  *
  * Loop contract (from the design doc): max [MAX_ITERATIONS] model turns,
  * tool timeout 120s default / 600s max, destructive shell commands go
@@ -547,6 +548,7 @@ class NativeRuntimeBridge(
             "shell" -> args.optString("command").take(120)
             "read_file", "write_file", "edit_file", "list_dir" -> args.optString("path")
             "search_files" -> args.optString("query")
+            "install_package" -> args.optString("packages").take(120)
             "http_fetch" -> args.optString("url").take(120)
             "git_status" -> "git status"
             "git_diff" -> args.optString("path").take(120)
@@ -561,6 +563,7 @@ class NativeRuntimeBridge(
                 "list_dir" -> toolListDir(workspace, args)
                 "search_files" -> toolSearchFiles(workspace, args)
                 "shell" -> toolShell(sessionId, workspace, guestWorkspacePath, args)
+                "install_package" -> toolInstallPackage(args)
                 "http_fetch" -> toolHttpFetch(args)
                 "git_status" -> runGuestShell(workspace, guestWorkspacePath, "git status --short --branch", 30)
                 "git_diff" -> toolGitDiff(workspace, guestWorkspacePath, args)
@@ -761,6 +764,34 @@ class NativeRuntimeBridge(
         return runGuestShell(workspace, guestWorkspacePath, command, timeoutSec)
     }
 
+    /**
+     * Installs Termux packages into the app's own environment — the agent's
+     * equivalent of running `pkg install` in Termux. The app's installer
+     * resolves the dependency closure from the official repository index
+     * and SHA-256-verifies every .deb, exactly like the first-run setup.
+     */
+    private suspend fun toolInstallPackage(args: JSONObject): String {
+        val raw = args.optString("packages")
+        val names = raw.split(Regex("[,\\s]+")).map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+        if (names.isEmpty()) return "Error: 'packages' is required (one or more Termux package names)."
+        if (names.size > 20) return "Error: too many packages at once (max 20)."
+        val termux = TermuxEnvironment(context)
+        if (!termux.isInstalled()) {
+            return "Error: Termux environment abhi installed nahi hai — pehle app ka setup pura karo."
+        }
+        val already = names.filter { termux.installedContains(it) }
+        val wanted = names.filter { it !in already }
+        if (wanted.isEmpty()) return "Already installed: ${names.joinToString(", ")}"
+        val result = termux.install(wanted)
+        return result.fold(
+            onSuccess = {
+                "Installed: ${wanted.joinToString(", ")}" +
+                    if (already.isNotEmpty()) " (already installed: ${already.joinToString(", ")})" else ""
+            },
+            onFailure = { "Error: install fail hua: ${it.message?.take(400) ?: it.javaClass.simpleName}" },
+        )
+    }
+
     private fun isDestructive(command: String): Boolean =
         DESTRUCTIVE_PATTERNS.any { it.containsMatchIn(command) }
 
@@ -770,7 +801,7 @@ class NativeRuntimeBridge(
     private suspend fun runGuestShell(workspace: File, guestWorkspacePath: String, command: String, timeoutSec: Int): String =
         withContext(Dispatchers.IO) {
             val runtime = runCatching { installer.installedRuntime() }.getOrElse {
-                return@withContext "Error: Ubuntu runtime installed nahi hai — pehle app ka setup pura karo."
+                return@withContext "Error: Termux environment installed nahi hai — pehle app ka setup pura karo."
             }
             val process = runCatching {
                 installer.process(
@@ -840,7 +871,7 @@ class NativeRuntimeBridge(
         }
 
     companion object {
-        private const val MAX_ITERATIONS = 10
+        private const val MAX_ITERATIONS = 25
         private const val MAX_TOKENS = 8192
         private const val HISTORY_CHAR_BUDGET = 48_000
         private const val CONNECT_TIMEOUT_MS = 30_000
@@ -857,8 +888,10 @@ class NativeRuntimeBridge(
         private val SEARCH_SKIP_DIRS = setOf(".git", "node_modules", "build", ".gradle", ".cxx", "dist")
 
         private val DESTRUCTIVE_PATTERNS = listOf(
-            Regex("""\brm\s"""),
-            Regex("""\brm$"""),
+            // Only RECURSIVE delete asks for approval (v76, user order: the
+            // agent gets full control like Claude Code in Termux — a plain
+            // `rm file` just runs; `rm -rf` still asks first).
+            Regex("""\brm\s+[^|;&]*-[a-zA-Z]*r"""),
             Regex("""\bmkfs\b"""),
             Regex("""\bdd\s"""),
             Regex("""\breboot\b"""),
@@ -871,14 +904,22 @@ class NativeRuntimeBridge(
         )
 
         private fun systemPrompt(guestWorkspacePath: String) = """
-You are the built-in coding agent of this Android app. You work inside one project workspace on the user's phone: an Ubuntu environment whose project folder is $guestWorkspacePath (the file tools use paths relative to that same folder).
+You are the App Agent built into this Android app — the user's personal AI agent, in the style of Muse. You live on the user's phone and you have FULL control of this app's own Linux environment: a real Termux environment (Android/bionic) with bash, python, nodejs, git and more. The current project workspace is $guestWorkspacePath and your home directory is the Termux home.
 
-Rules:
-- Use the tools to do the work: read files before editing them, prefer edit_file for changes, and verify important changes by reading back or running a quick shell check.
-- The shell runs bash inside Ubuntu at $guestWorkspacePath. File-tool paths are relative to the workspace root; never invent absolute phone paths.
-- Keep answers short and direct, in the user's language. When the task is done, say what you changed in one or two lines — do not narrate every step.
+How you talk:
+- Chat like a person, not a manual. Reply in the user's language: if they write Hinglish (Roman Hindi), reply in Hinglish; if English, reply in English.
+- Keep replies short and direct. Simple chat ("hi", small talk, a quick question) gets a simple friendly answer — do NOT jump into tools and do NOT ask "what should I build?" unless the user actually asks for work.
+- When the user asks for work, just do it. Decide the obvious details yourself instead of asking follow-up questions; ask only when a real choice would change the result.
+- Do not narrate every step while working. When the work is done, say what changed in one or two lines.
+- Never claim you did something a tool did not actually do. If something is blocked, say so plainly, with the reason.
+
+Your powers — full control of this app's environment:
+- The shell runs bash in the app's Termux environment, starting in the workspace. You can go anywhere in the environment (cd ~, cd ${'$'}PREFIX), run any installed program, use pip and npm, clone repos, and run builds.
+- If a program or library is missing, install it yourself with install_package (any package from the official Termux repository — e.g. clang, rust, ffmpeg, openssh, vim) instead of telling the user it is missing.
+- The file tools (read_file, write_file, edit_file, list_dir, search_files) work on paths relative to the workspace root; use the shell for anything outside the workspace.
+- Read files before editing them, prefer edit_file for changes, and verify important changes by reading back or running a quick shell check.
+- Only truly destructive shell commands (rm -rf, mkfs, dd, reboot, pm uninstall) ask the user for approval first — everything else just runs.
 - If a tool returns an error, read it, adjust, and retry once or twice; then tell the user plainly what is blocked.
-- Never claim you did something a tool did not actually do.
 """
 
         private val TOOL_SCHEMAS: JSONArray = JSONArray().apply {
@@ -935,11 +976,20 @@ Rules:
             put(
                 toolSchema(
                     "shell",
-                    "Run a bash command inside the Ubuntu workspace at /workspace. Destructive commands ask the user first.",
+                    "Run a bash command in the app's Termux environment (working directory = the project workspace). You have the full environment: cd anywhere, the Termux home and prefix, every installed program. Only truly destructive commands ask the user first.",
                     JSONObject()
                         .put("command", stringProp("The bash command to run"))
                         .put("timeout_sec", intProp("Timeout in seconds (default 120, max 600)")),
                     arrayOf("command"),
+                ),
+            )
+            put(
+                toolSchema(
+                    "install_package",
+                    "Install packages from the official Termux repository into the app's environment, with their dependencies (e.g. 'ffmpeg', 'clang', 'rust', 'openssh', 'vim', 'imagemagick'). Use this whenever a needed program is missing instead of giving up. Already-installed packages are skipped.",
+                    JSONObject()
+                        .put("packages", stringProp("One Termux package name, or several separated by spaces or commas")),
+                    arrayOf("packages"),
                 ),
             )
             put(
