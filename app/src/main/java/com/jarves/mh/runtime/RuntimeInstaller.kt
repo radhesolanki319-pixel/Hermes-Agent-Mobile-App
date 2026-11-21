@@ -867,6 +867,24 @@ class RuntimeInstaller(private val context: Context) {
                 ensureBundledPython(termux)
             }
             extractBundledAsset(assetName, termux.prefix)
+            if (isBionic) {
+                // v81 fix (issue #1, second defect): the bionic bundle's
+                // .venv/bin/python and python3 symlinks point to
+                // "../../../bin/python3.11", which resolves to the
+                // nonexistent <prefix>/home/bin/python3.11. The venv sits
+                // one level deeper (home/hermes/.venv/bin), so the correct
+                // relative target is "../../../../bin/python3.11". Repair
+                // both links here so anything spawning the venv python
+                // does not die with the same ENOENT as the chat bug.
+                val venvBin = File(termux.prefix, "home/hermes/.venv/bin")
+                for (name in listOf("python", "python3")) {
+                    runCatching {
+                        val link = File(venvBin, name)
+                        link.delete()
+                        Os.symlink("../../../../bin/python3.11", link.absolutePath)
+                    }
+                }
+            }
             val launcher = termuxHermesBinary(termux)
             runCatching { Os.chmod(launcher.absolutePath, 0b111101101) }
             runCatching { Os.chmod(File(termux.prefix, "bin/bash").absolutePath, 0b111101101) }
@@ -2394,32 +2412,59 @@ class RuntimeInstaller(private val context: Context) {
             }
         }.getOrDefault(emptyMap())
 
-        fun translate(value: String): String {
-            var out = value
-            // Hermes's venv: guest /root/.pocket-hermes/venv is the uv-sync
-            // venv of the repo cloned at <home>/hermes on the Termux side.
-            out = out.replace(
-                "/root/.pocket-hermes/venv",
-                File(home, "hermes/.venv").absolutePath,
-            )
-            out = out.replace("/pocket-bridge", File(context.filesDir, "runtime-bridge").absolutePath)
-            out = out.replace(guestWorkspacePath, cwd.absolutePath)
-            siblingPaths.forEach { (guest, host) -> out = out.replace(guest, host) }
-            out = out.replace(
-                "/workspace/.agent-chats",
-                File(context.filesDir, "workspaces/.agent-chats").absolutePath,
-            )
-            out = out.replace("/workspace", workspace.absolutePath)
-            out = out.replace("/root", home.absolutePath)
-            val bin = "${prefix.absolutePath}/bin/"
-            out = out.replace("/usr/local/sbin/", bin)
-            out = out.replace("/usr/local/bin/", bin)
-            out = out.replace("/usr/sbin/", bin)
-            out = out.replace("/usr/bin/", bin)
-            out = out.replace("/sbin/", bin)
-            out = out.replace("/bin/", bin)
-            return out
+        // v81 fix (GitHub issue #1): the old translate() ran SEQUENTIAL
+        // String.replace calls, so a real path inserted by an early replace
+        // was RESCANNED by the later ones — "/root/.pocket-hermes/venv" first
+        // became "<prefix>/home/hermes/.venv", and then replace("/bin/", …)
+        // corrupted the result into "<prefix>/home/hermes/.venv/<prefix>/bin/
+        // hermes", a file that does not exist. Every Hermes chat spawn died
+        // in pocket_spawn with "Pocket native exec failed: No such file or
+        // directory" (execve ENOENT), while the install verify (a bash
+        // command string, never translated) passed. Translate in ONE pass:
+        // a single Regex alternation, longest guest prefix first, whose
+        // replacements are never rescanned.
+        val translateMap = LinkedHashMap<String, String>()
+        fun mapGuest(guest: String, real: String) {
+            if (guest.isNotEmpty() && guest !in translateMap) translateMap[guest] = real
         }
+        // Hermes's venv: guest /root/.pocket-hermes/venv is the uv-sync
+        // venv of the repo cloned at <home>/hermes on the Termux side.
+        mapGuest("/root/.pocket-hermes/venv", File(home, "hermes/.venv").absolutePath)
+        mapGuest("/pocket-bridge", File(context.filesDir, "runtime-bridge").absolutePath)
+        mapGuest(guestWorkspacePath, cwd.absolutePath)
+        siblingPaths.forEach { (guest, host) -> mapGuest(guest, host) }
+        mapGuest(
+            "/workspace/.agent-chats",
+            File(context.filesDir, "workspaces/.agent-chats").absolutePath,
+        )
+        mapGuest("/workspace", workspace.absolutePath)
+        mapGuest("/root", home.absolutePath)
+        val binPrefix = "${prefix.absolutePath}/bin/"
+        listOf("/usr/local/sbin/", "/usr/local/bin/", "/usr/sbin/", "/usr/bin/", "/sbin/", "/bin/")
+            .forEach { mapGuest(it, binPrefix) }
+        // Anchoring matters as much as the single pass: the guest Hermes
+        // path itself contains "/bin/" as an ordinary segment
+        // ("/root/.pocket-hermes/venv/bin/hermes"), so the bin prefixes may
+        // only fire where a path token STARTS (start of string, or right
+        // after whitespace / ':' / '=' / a quote) — never mid-path. The
+        // structural prefixes additionally require a path boundary after
+        // them, so "/root" cannot eat "/rootfs". Lookbehind/lookahead are
+        // zero-width, so match.value is exactly the guest prefix.
+        val structuralAlt = translateMap.keys
+            .filter { !it.endsWith("/") }
+            .sortedByDescending { it.length }
+            .joinToString("|") { Regex.escape(it) }
+        val binAlt = translateMap.keys
+            .filter { it.endsWith("/") }
+            .sortedByDescending { it.length }
+            .joinToString("|") { Regex.escape(it) }
+        val anchor = "(?:^|(?<=[\\s:=\"']))"
+        val translateRegex = Regex(
+            "$anchor(?:$structuralAlt)(?=\$|[/:\\s=\"'])|$anchor(?:$binAlt)",
+        )
+
+        fun translate(value: String): String =
+            translateRegex.replace(value) { match -> translateMap[match.value] ?: match.value }
 
         val translatedArgv = guestCommand.map { translate(it) }
         val linker = termux.linkerPath()
