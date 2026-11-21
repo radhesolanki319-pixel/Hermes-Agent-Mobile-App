@@ -80,7 +80,7 @@ object HermesProviderCatalog {
     const val CUSTOM_ID = "custom"
 
     /** Key of the app-managed entry under `providers:` for a custom endpoint. */
-    const val CUSTOM_PROVIDER_KEY = "custom-provider"
+    const val CUSTOM_PROVIDER_KEY = "custom"
 
     /** Display name written for the custom provider entry. */
     const val CUSTOM_PROVIDER_NAME = "Custom endpoint"

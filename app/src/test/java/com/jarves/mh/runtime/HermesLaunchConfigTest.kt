@@ -23,7 +23,7 @@ class HermesLaunchConfigTest {
         baseUrl = "https://api.anthropic.com",
     )
     private val customRoute = HermesRoute(
-        provider = "custom-provider",
+        provider = "custom",
         keyEnv = "CUSTOM_PROVIDER_API_KEY",
         baseUrl = "https://llm.example.com/v1",
         custom = true,
@@ -68,10 +68,10 @@ class HermesLaunchConfigTest {
         )
         val route = HermesProfileRoute.routeFor(profile)
         val fresh = HermesConfigFiles.freshConfig(route, HermesProfileRoute.modelFor(profile))
-        assertTrue(fresh.contains("model:\n  provider: 'custom-provider'\n  default: 'fusion'\n"))
+        assertTrue(fresh.contains("model:\n  provider: 'custom'\n  default: 'fusion'\n"))
         assertTrue(
             fresh.contains(
-                "providers:\n  custom-provider:\n    name: 'Custom endpoint'\n" +
+                "providers:\n  custom:\n    name: 'Custom endpoint'\n" +
                     "    api: 'https://freellmapi-backup.onrender.com/v1'\n    key_env: CUSTOM_PROVIDER_API_KEY\n",
             ),
         )
@@ -135,7 +135,7 @@ class HermesLaunchConfigTest {
         assertFalse(merged.contains("mh-custom"))
         assertTrue(
             merged.contains(
-                "providers:\n  custom-provider:\n    name: 'Custom endpoint'\n" +
+                "providers:\n  custom:\n    name: 'Custom endpoint'\n" +
                     "    api: 'https://llm.example.com/v1'\n    key_env: CUSTOM_PROVIDER_API_KEY\n",
             ),
         )

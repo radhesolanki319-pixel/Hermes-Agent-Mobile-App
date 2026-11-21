@@ -589,9 +589,10 @@ internal object HermesConfigFiles {
             section == null -> lines.addAll(customProviderSectionLines(route))
             section.inlineValue -> Unit // Same flow-style limit as the model section.
             else -> {
-                // The legacy app-owned block from older builds is removed:
-                // it is this writer's own artifact, and leaving it would
+                // The legacy app-owned blocks from older builds are removed:
+                // they are this writer's own artifacts, and leaving them would
                 // keep a second, stale custom endpoint defined.
+                removeProviderBlock(lines, "custom-provider")
                 removeProviderBlock(lines, LEGACY_CUSTOM_PROVIDER_KEY)
                 val refreshed = findSection(lines, "providers") ?: return
                 val nameIndex = childKeyIndex(lines, refreshed, indent = 2, key = route.provider)

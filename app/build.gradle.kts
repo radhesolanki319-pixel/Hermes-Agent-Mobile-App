@@ -33,7 +33,7 @@ val runtimeReleaseBaseUrl =
 // installer verifies it against the bundle's pinned SHA-256). The offline
 // flavor still embeds it — see offlineRuntimeBundleFiles below.
 val hermesBundleBaseUrl =
-    "https://github.com/radhesolanki319-pixel/Mobile-Harness/releases/download/hermes-bundle-2026.11.21"
+    "https://github.com/radhesolanki319-pixel/Mobile-Harness/releases/download/hermes-bundle-2026.11.22"
 // The Core bundle follows the same pattern since v40: the Ubuntu 26.04
 // core is published as a release asset in the user's own repo (the
 // shared upstream runtime release still carries the old Ubuntu 20.04
@@ -74,7 +74,7 @@ val generatedRuntimeAssets = layout.buildDirectory.dir("generated/runtime-assets
 // downloads the same archive once, at first Hermes install, from
 // hermesBundleBaseUrl — so online updates no longer re-download its ~52 MB.
 val agyBundleFile = runtimeBundleDir.file("pocketdev-agy-arm64-2026.09.1.tar.zst")
-val hermesBundleFile = runtimeBundleDir.file("pocketdev-hermes-arm64-2026.11.21.tar.zst")
+val hermesBundleFile = runtimeBundleDir.file("pocketdev-hermes-arm64-2026.11.22.tar.zst")
 val sharedBundleFiles = listOf(agyBundleFile)
 val prepareBundledAgentAssets = tasks.register<Sync>("prepareBundledAgentAssets") {
     onlyIf { sharedBundleFiles.any { it.asFile.isFile } }
@@ -147,8 +147,8 @@ android {
         targetSdk = if (playBuild) 36 else 28
         // Keep literal defaults so F-Droid's static manifest parser can detect
         // the tagged release. Gradle properties may still override Play builds.
-        versionCode = 68
-        versionName = "1.0.68"
+        versionCode = 69
+        versionName = "1.0.69"
         providers.gradleProperty("appVersionCode").orNull?.toIntOrNull()?.let { versionCode = it }
         providers.gradleProperty("appVersionName").orNull?.let { versionName = it }
 
