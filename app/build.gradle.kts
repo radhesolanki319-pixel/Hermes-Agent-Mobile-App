@@ -96,11 +96,14 @@ val prepareBundledAgentAssets = tasks.register<Sync>("prepareBundledAgentAssets"
 val agentsBundleBaseUrl =
     "https://github.com/radhesolanki319-pixel/Mobile-Harness/releases/download/agents-bundle-v1"
 val generatedAgentsAssets = layout.buildDirectory.dir("generated/agents-assets")
+// NOTE: the assets use a .bin suffix, NOT .tar.gz — AAPT strips a .gz
+// extension and stores the content decompressed, which would break the
+// runtime's asset lookup. The bytes are still the same tar.gz archives.
 val agentsBundleFiles = linkedMapOf(
-    "claude.tar.gz" to 172_837_320L,
-    "glibc.tar.gz" to 116_403_122L,
-    "hermes.tar.gz" to 123_689_915L,
-    "python-glibc.tar.gz" to 58_206_799L,
+    "claude.bin" to 172_837_320L,
+    "glibc.bin" to 116_403_122L,
+    "hermes.bin" to 123_689_915L,
+    "python-glibc.bin" to 58_206_799L,
 )
 val fetchAgentsBundle = tasks.register("fetchAgentsBundle") {
     description = "Downloads the prebuilt agents bundle (agents-bundle-v1) into the APK assets."
@@ -277,7 +280,7 @@ android {
     androidResources.noCompress += "zst"
     // The agents bundle is already gzip-compressed; storing it raw keeps
     // asset extraction on first run a straight copy.
-    androidResources.noCompress += "gz"
+    androidResources.noCompress += "bin"
 }
 
 tasks.matching { it.name.startsWith("mergeOffline") && it.name.endsWith("Assets") }

@@ -813,7 +813,7 @@ class RuntimeInstaller(private val context: Context) {
     private fun ensureBundledGlibc(termux: TermuxEnvironment) {
         val flag = File(termux.prefix, ".bundled-glibc-v1")
         if (flag.exists() && File(termux.prefix, "bin/grun").exists()) return
-        extractBundledAsset("glibc.tar.gz", termux.prefix)
+        extractBundledAsset("glibc.bin", termux.prefix)
         flag.writeText("agents-bundle-v1")
     }
 
@@ -821,7 +821,7 @@ class RuntimeInstaller(private val context: Context) {
     private fun ensureBundledPython(termux: TermuxEnvironment) {
         val flag = File(termux.prefix, ".bundled-python-v1")
         if (flag.exists() && File(termux.prefix, "opt/python-glibc/bin/python3.14").exists()) return
-        extractBundledAsset("python-glibc.tar.gz", termux.prefix)
+        extractBundledAsset("python-glibc.bin", termux.prefix)
         flag.writeText("agents-bundle-v1")
     }
 
@@ -834,12 +834,12 @@ class RuntimeInstaller(private val context: Context) {
         termux: TermuxEnvironment,
         onProgress: suspend (RuntimeInstallProgress) -> Unit,
     ): Boolean {
-        if (!bundledAssetPresent("hermes.tar.gz")) return false
+        if (!bundledAssetPresent("hermes.bin")) return false
         return runCatching {
             onProgress(RuntimeInstallProgress("Hermes app ke andar se install ho raha hai…", 0.15f))
             ensureBundledGlibc(termux)
             ensureBundledPython(termux)
-            extractBundledAsset("hermes.tar.gz", termux.prefix)
+            extractBundledAsset("hermes.bin", termux.prefix)
             val launcher = termuxHermesBinary(termux)
             runCatching { Os.chmod(launcher.absolutePath, 0b111101101) }
             onProgress(RuntimeInstallProgress("Hermes (Termux): verify ho raha hai…", 0.9f))
@@ -859,11 +859,11 @@ class RuntimeInstaller(private val context: Context) {
         termux: TermuxEnvironment,
         onProgress: suspend (RuntimeInstallProgress) -> Unit,
     ): Boolean {
-        if (!bundledAssetPresent("claude.tar.gz")) return false
+        if (!bundledAssetPresent("claude.bin")) return false
         return runCatching {
             onProgress(RuntimeInstallProgress("Claude Code app ke andar se install ho raha hai…", 0.15f))
             ensureBundledGlibc(termux)
-            extractBundledAsset("claude.tar.gz", termux.prefix)
+            extractBundledAsset("claude.bin", termux.prefix)
             val real = File(termux.prefix, "bin/claude-real")
             check(real.isFile) { "claude-real bundle me nahi mila" }
             runCatching { Os.chmod(real.absolutePath, 0b111101101) }
