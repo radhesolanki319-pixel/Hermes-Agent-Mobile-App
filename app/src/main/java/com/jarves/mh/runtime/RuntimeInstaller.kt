@@ -843,7 +843,7 @@ class RuntimeInstaller(private val context: Context) {
             val launcher = termuxHermesBinary(termux)
             runCatching { Os.chmod(launcher.absolutePath, 0b111101101) }
             onProgress(RuntimeInstallProgress("Hermes (Termux): verify ho raha hai…", 0.9f))
-            val out = runTermuxCapture(termux, "\"${launcher.absolutePath}\" --version 2>&1")
+            val out = runTermuxCapture(termux, "\"${launcher.absolutePath}\" --version 2>&1", 300)
             check(out.contains("Python:")) { "Hermes bundled verify fail: ${out.take(300)}" }
             termuxHermesMarker(termux).writeText(HERMES_VERSION)
             onProgress(RuntimeInstallProgress("Hermes (Termux) ready hai", 1f))
@@ -888,14 +888,24 @@ class RuntimeInstaller(private val context: Context) {
         val binDir = File(termux.prefix, "bin").apply { mkdirs() }
         val real = File(binDir, "claude-real")
         val wrapper = File(binDir, "claude")
+        // Shebang MUST point at the prefix's own bash: Android has no
+        // /bin/sh, and relying on termux-exec to rewrite a /bin/sh shebang
+        // is fragile (v77's bundled Claude route failed its verify on a
+        // real device and silently fell back to a 380 MB download).
         wrapper.writeText(
-            "#!/bin/sh\n" +
+            "#!${termux.prefix.absolutePath}/bin/bash\n" +
                 "export PATH=\"${termux.prefix.absolutePath}/glibc/bin:\$PATH\"\n" +
                 "exec \"${grunPath(termux)}\" \"${real.absolutePath}\" \"\$@\"\n",
         )
         Os.chmod(wrapper.absolutePath, 0b111101101)
         onProgress(RuntimeInstallProgress("Claude Code (Termux): verify ho raha hai…", 0.9f))
-        val out = runTermuxCapture(termux, "\"${wrapper.absolutePath}\" --version 2>&1")
+        // First run of the 380 MB binary through the glibc loader can be
+        // slow on a cold page cache — give it real time, and retry once
+        // (the second run is warm) before declaring failure.
+        var out = runTermuxCapture(termux, "\"${wrapper.absolutePath}\" --version 2>&1", 300)
+        if (!Regex("[0-9]+\\.[0-9]+\\.[0-9]+").containsMatchIn(out)) {
+            out = runTermuxCapture(termux, "\"${wrapper.absolutePath}\" --version 2>&1", 300)
+        }
         check(Regex("[0-9]+\\.[0-9]+\\.[0-9]+").containsMatchIn(out)) {
             "Claude Code (Termux) verify fail: ${out.take(300)}"
         }
@@ -1042,7 +1052,11 @@ class RuntimeInstaller(private val context: Context) {
     }
 
     /** Runs a Termux shell command and returns its combined output. */
-    private fun runTermuxCapture(termux: TermuxEnvironment, command: String): String {
+    private fun runTermuxCapture(
+        termux: TermuxEnvironment,
+        command: String,
+        timeoutSeconds: Long = 90,
+    ): String {
         val process = termux.startShell(command, File(termux.prefix, "home"))
         val text = StringBuilder()
         val reader = kotlin.concurrent.thread(isDaemon = true) {
@@ -1052,7 +1066,7 @@ class RuntimeInstaller(private val context: Context) {
                 }
             }
         }
-        if (!process.waitFor(90, java.util.concurrent.TimeUnit.SECONDS)) {
+        if (!process.waitFor(timeoutSeconds, java.util.concurrent.TimeUnit.SECONDS)) {
             runCatching { process.destroy() }
             throw IllegalStateException("Termux command timeout: $command")
         }
