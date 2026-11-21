@@ -545,4 +545,7 @@
     <string name="agents_update_to">Update to %1$s</string>
     <string name="agents_checking">Checking…</string>
     <string name="agents_reinstall_hermes">Naya Hermes install karo (%1$s)</string>
+    <string name="agents_reinstall_claude">Claude Code reinstall karo</string>
+    <string name="chat_agent_not_installed_banner">%1$s install nahi hai — pehle download karke install karo</string>
+    <string name="chat_agent_install_btn">Install from GitHub</string>
 </resources>

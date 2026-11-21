@@ -235,6 +235,16 @@ private fun AgentInstallCard(
                         Text(stringResource(R.string.agents_reinstall_hermes, com.jarves.mh.runtime.RuntimeInstaller.HERMES_VERSION))
                     }
                 }
+                if (kind == AgentKind.CLAUDE_CODE && installed && !installing) {
+                    OutlinedButton(
+                        onClick = { onInstallAgent(kind) },
+                        enabled = state.agentInstalling == null && state.agentUpdating == null,
+                    ) {
+                        Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(17.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text(stringResource(R.string.agents_reinstall_claude))
+                    }
+                }
                 if (installed && kind != state.agentKind) {
                     Button(onClick = { onUseAgent(kind) }, enabled = !state.isRunning && !busy) {
                         Text(stringResource(R.string.agents_use_in_chat))

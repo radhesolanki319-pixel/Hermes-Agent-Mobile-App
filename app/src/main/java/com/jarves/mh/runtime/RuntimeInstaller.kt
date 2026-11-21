@@ -276,17 +276,33 @@ class RuntimeInstaller(private val context: Context) {
         onProgress(RuntimeInstallProgress(str(R.string.rt_install_ready, com.jarves.mh.model.AgentKind.HERMES.localizedTitle(context)), 1f))
     }
 
+    suspend fun reinstallClaude(onProgress: suspend (RuntimeInstallProgress) -> Unit) {
+        val runtime = installedRuntime()
+        claudeMarker.delete()
+        File(rootfs, CLAUDE_GUEST_PATH.removePrefix("/")).delete()
+        ensureAgentInstalled(com.jarves.mh.model.AgentKind.CLAUDE_CODE, onProgress)
+    }
+
     suspend fun ensureAgentInstalled(
         agent: com.jarves.mh.model.AgentKind,
         onProgress: suspend (RuntimeInstallProgress) -> Unit,
     ) {
         val runtime = installedRuntime()
         when (agent) {
-            // v54 (user order): Claude Code installs the LATEST release —
-            // the version is resolved live and the official linux-arm64
-            // release binary is downloaded + checksum-verified (the same
-            // route updateClaude uses), not the old pinned 2.1.316 bundle.
-            com.jarves.mh.model.AgentKind.CLAUDE_CODE -> installClaudeLatest(runtime, onProgress)
+            // Claude Code installs the latest release live from npm/Anthropic,
+            // with guaranteed fallback to the prebuilt bundle if network fails.
+            com.jarves.mh.model.AgentKind.CLAUDE_CODE -> {
+                val latestOk = runCatching {
+                    installClaudeLatest(runtime, onProgress)
+                    true
+                }.onFailure {
+                    Log.w("RuntimeInstaller", "Claude latest live download failed, falling back to bundle", it)
+                }.getOrDefault(false)
+
+                if (!latestOk && !isAgentInstalled(com.jarves.mh.model.AgentKind.CLAUDE_CODE)) {
+                    ensureClaudeInstalled(runtime.proot, 0.05f, onProgress)
+                }
+            }
             com.jarves.mh.model.AgentKind.ANTIGRAVITY -> ensureAgyInstalled(runtime.proot, 0.05f, onProgress)
             com.jarves.mh.model.AgentKind.HERMES -> ensureHermesInstalled(runtime.proot, 0.05f, onProgress)
             // The built-in agent ships inside the app — nothing to install.

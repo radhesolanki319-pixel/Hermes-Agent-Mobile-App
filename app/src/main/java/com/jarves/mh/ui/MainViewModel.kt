@@ -2632,9 +2632,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      * extraction; [installAgent] applies all the usual guards.
      */
     private fun maybeAutoInstallHermes() {
-        if (_state.value.agentKind != AgentKind.HERMES) return
-        if (installer.isAgentInstalled(AgentKind.HERMES)) return
-        installAgent(AgentKind.HERMES)
+        val hermesInstalled = installer.isAgentInstalled(AgentKind.HERMES)
+        val claudeInstalled = installer.isAgentInstalled(AgentKind.CLAUDE_CODE)
+        if (!hermesInstalled && !claudeInstalled) {
+            installAgent(AgentKind.HERMES)
+        }
     }
 
     /**
@@ -2934,7 +2936,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /** Installs the other agent on demand (Settings) with live progress, then switches to it. */
-    fun installAgent(kind: AgentKind) {
+    fun installAgent(kind: AgentKind, forceReinstall: Boolean = false) {
         if (_state.value.agentInstalling != null) return
         if (_state.value.isRunning) {
             _state.update { it.copy(toastMessage = str(R.string.vm_stop_agent_before_switching)) }
@@ -2945,7 +2947,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         // must REPLACE it with the current bundle, not just select it.
         val staleHermes = kind == AgentKind.HERMES &&
             installer.installedAgentVersions()[kind]?.let { it != RuntimeInstaller.HERMES_VERSION } == true
-        if (installer.isAgentInstalled(kind) && !staleHermes) {
+        if (installer.isAgentInstalled(kind) && !staleHermes && !forceReinstall) {
             selectAgent(kind)
             return
         }
@@ -2984,10 +2986,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             )
                         }
                     }
-                    if (staleHermes) {
-                        installer.reinstallHermes(installProgress)
-                    } else {
-                        agentRegistry.require(kind).install(installer, installProgress)
+                    when {
+                        staleHermes || (forceReinstall && kind == AgentKind.HERMES) -> {
+                            installer.reinstallHermes(installProgress)
+                        }
+                        forceReinstall && kind == AgentKind.CLAUDE_CODE -> {
+                            installer.reinstallClaude(installProgress)
+                        }
+                        else -> {
+                            agentRegistry.require(kind).install(installer, installProgress)
+                        }
                     }
                 }
             }
@@ -3703,9 +3711,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      * simply proceed on the current agent, exactly as before v25.
      */
     private fun activateHermesForNewProject() {
-        // v50: retargeted — a new project always opens on the one built-in
-        // agent (the v25 helper's original intent, Hermes is gone).
-        if (_state.value.agentKind != AgentKind.NATIVE) selectAgent(AgentKind.NATIVE)
+        val preferred = AgentKind.fromStored(preferences.agentKind)
+        val target = when {
+            installer.isAgentInstalled(preferred) -> preferred
+            installer.isAgentInstalled(AgentKind.HERMES) -> AgentKind.HERMES
+            installer.isAgentInstalled(AgentKind.CLAUDE_CODE) -> AgentKind.CLAUDE_CODE
+            else -> AgentKind.NATIVE
+        }
+        if (_state.value.agentKind != target) selectAgent(target)
     }
 
     fun createProject(name: String) {
@@ -5282,6 +5295,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         val attachments = state.value.pendingAttachments
         if (prompt.isBlank() && attachments.isEmpty()) return
+        if (!installer.isAgentInstalled(_state.value.agentKind) && _state.value.agentKind != AgentKind.NATIVE) {
+            _state.update { it.copy(toastMessage = str(R.string.chat_agent_not_installed_banner, _state.value.agentKind.localizedTitle(getApplication()))) }
+            installAgent(_state.value.agentKind)
+            return
+        }
         if (state.value.isRunning || state.value.androidBuildRunning) {
             queueFollowUp(project, prompt, attachments)
             return

@@ -4534,6 +4534,11 @@ private fun WorkspaceScreen(
                     queuedFollowUps = state.queuedFollowUps,
                     onSteerFollowUp = onSteerFollowUp,
                     onRemoveFollowUp = onRemoveFollowUp,
+                    isAgentInstalled = state.agentKind == AgentKind.NATIVE || !state.installedAgentVersions[state.agentKind].isNullOrBlank(),
+                    onInstallAgent = onInstallAgent,
+                    agentInstalling = state.agentInstalling,
+                    agentProgress = state.agentProgress,
+                    agentMessage = state.agentMessage,
                 )
                 WorkspaceTab.FILES -> FilesTab(
                     files = state.workspaceFiles,
@@ -6034,6 +6039,11 @@ private fun ChatTab(
     onContinueHere: () -> Unit = {},
     genUiStates: Map<String, GenUiMessageState> = emptyMap(),
     onGenUiAction: (String, GenUiEvent) -> Unit = { _, _ -> },
+    isAgentInstalled: Boolean = true,
+    onInstallAgent: (AgentKind) -> Unit = {},
+    agentInstalling: AgentKind? = null,
+    agentProgress: Float = 0f,
+    agentMessage: String? = null,
 ) {
     val view = LocalView.current
     // Keep the screen on while the selected agent is working in this chat. Released automatically
@@ -6051,6 +6061,42 @@ private fun ChatTab(
         }
     }
     Column(Modifier.fillMaxSize().imePadding()) {
+        if (!readOnly && !isAgentInstalled && agentKind != AgentKind.NATIVE) {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.primaryContainer,
+                ),
+            ) {
+                Column(Modifier.padding(14.dp)) {
+                    Text(
+                        stringResource(R.string.chat_agent_not_installed_banner, stringResource(agentKind.titleRes())),
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    if (agentInstalling == agentKind) {
+                        LinearProgressIndicator(progress = { agentProgress }, modifier = Modifier.fillMaxWidth())
+                        agentMessage?.let { msg ->
+                            Spacer(Modifier.height(4.dp))
+                            Text(msg, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                        }
+                    } else {
+                        Button(
+                            onClick = { onInstallAgent(agentKind) },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text(stringResource(R.string.chat_agent_install_btn))
+                        }
+                    }
+                }
+            }
+        }
         Box(Modifier.weight(1f)) {
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
