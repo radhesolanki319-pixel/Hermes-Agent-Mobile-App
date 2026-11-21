@@ -2439,6 +2439,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val installed = withContext(Dispatchers.IO) {
             // Upgrades from the old single-bundle layout keep every already-installed tool.
             installer.migrateLegacyToolMarkers()
+            // Stage E: once Termux is in, the old Ubuntu/PRoot rootfs on the
+            // device is dead weight (~1 GB) — remove it and its swap leftovers.
+            if (com.jarves.mh.termux.TermuxEnvironment(getApplication()).isInstalled()) {
+                val runtimeDir = File(getApplication<Application>().filesDir, "runtime")
+                runCatching { File(runtimeDir, "ubuntu").deleteRecursively() }
+                runCatching { File(runtimeDir, "ubuntu.installing").deleteRecursively() }
+                runCatching { File(runtimeDir, "ubuntu.repair-backup").deleteRecursively() }
+            }
             installer.isInstalled().also { ready ->
                 if (ready) {
                     installer.cleanupLegacyWorkspaceScaffolding()
