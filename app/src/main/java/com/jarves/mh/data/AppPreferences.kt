@@ -32,6 +32,10 @@ class AppPreferences(private val context: Context) {
         get() = preferences.getBoolean("runtime_setup_complete", false)
         set(value) { preferences.edit().putBoolean("runtime_setup_complete", value).apply() }
 
+    var termuxRuntimeEnabled: Boolean
+        get() = preferences.getBoolean("termux_runtime_enabled", false)
+        set(value) { preferences.edit().putBoolean("termux_runtime_enabled", value).apply() }
+
     var backgroundSetupComplete: Boolean
         get() = preferences.getBoolean("background_setup_complete", false)
         set(value) { preferences.edit().putBoolean("background_setup_complete", value).apply() }
