@@ -2645,7 +2645,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (autoInstallLaunched) return
         autoInstallLaunched = true
         val needHermes = !installer.isAgentInstalled(AgentKind.HERMES)
-        val needClaude = !installer.isAgentInstalled(AgentKind.CLAUDE_CODE)
+        // v79: Claude Code disabled by user order — never auto-install it.
+        val needClaude = !RuntimeInstaller.CLAUDE_DISABLED &&
+            !installer.isAgentInstalled(AgentKind.CLAUDE_CODE)
         if (!needHermes && !needClaude) return
         viewModelScope.launch {
             if (needHermes) {
@@ -2957,6 +2959,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     /** Installs the other agent on demand (Settings) with live progress, then switches to it. */
     fun installAgent(kind: AgentKind, forceReinstall: Boolean = false) {
+        // v79: Claude Code disabled by user order until Hermes is proven.
+        if (kind == AgentKind.CLAUDE_CODE && RuntimeInstaller.CLAUDE_DISABLED) {
+            _state.update {
+                it.copy(toastMessage = "Claude Code abhi band hai — pehle Hermes pakka kar rahe hain")
+            }
+            return
+        }
         if (_state.value.agentInstalling != null) return
         if (_state.value.isRunning) {
             _state.update { it.copy(toastMessage = str(R.string.vm_stop_agent_before_switching)) }

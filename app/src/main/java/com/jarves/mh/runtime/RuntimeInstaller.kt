@@ -203,6 +203,10 @@ class RuntimeInstaller(private val context: Context) {
     }
 
     suspend fun reinstallClaude(onProgress: suspend (RuntimeInstallProgress) -> Unit) {
+        if (CLAUDE_DISABLED) {
+            onProgress(RuntimeInstallProgress("Claude Code abhi band hai — pehle Hermes pakka ho raha hai", 1f))
+            return
+        }
         // Termux: wipe the wrapper + binary + marker and reinstall.
         val termux = TermuxEnvironment(context)
         if (termux.isInstalled()) {
@@ -241,6 +245,10 @@ class RuntimeInstaller(private val context: Context) {
             return
         }
         if (agent == com.jarves.mh.model.AgentKind.CLAUDE_CODE && termux.isInstalled()) {
+            if (CLAUDE_DISABLED) {
+                onProgress(RuntimeInstallProgress("Claude Code abhi band hai — pehle Hermes pakka ho raha hai", 1f))
+                return
+            }
             if (!isAgentInstalled(agent)) installClaudeOnTermux(termux, onProgress)
             return
         }
@@ -825,6 +833,9 @@ class RuntimeInstaller(private val context: Context) {
         flag.writeText("agents-bundle-v1")
     }
 
+    /** Why the bundled Hermes route last failed (shown if the fallback also fails). */
+    private var lastHermesBundleFailure: String? = null
+
     /**
      * Bundled Hermes install: extract the prebuilt environment, then hold
      * it to the same bar as every route — the marker is written only
@@ -843,13 +854,27 @@ class RuntimeInstaller(private val context: Context) {
             val launcher = termuxHermesBinary(termux)
             runCatching { Os.chmod(launcher.absolutePath, 0b111101101) }
             onProgress(RuntimeInstallProgress("Hermes (Termux): verify ho raha hai…", 0.9f))
-            val out = runTermuxCapture(termux, "\"${launcher.absolutePath}\" --version 2>&1", 300)
+            // Clean glibc env for the verify run (see termuxProcess): the
+            // shared Termux env's bionic-first LD_LIBRARY_PATH kills the
+            // venv Python's stdlib imports on a real device.
+            val cleanEnv = "env -u LD_PRELOAD " +
+                "LD_LIBRARY_PATH=\"${termux.prefix.absolutePath}/glibc/lib\""
+            val out = runTermuxCapture(
+                termux,
+                "$cleanEnv \"${launcher.absolutePath}\" --version 2>&1",
+                300,
+            )
             check(out.contains("Python:")) { "Hermes bundled verify fail: ${out.take(300)}" }
             termuxHermesMarker(termux).writeText(HERMES_VERSION)
             onProgress(RuntimeInstallProgress("Hermes (Termux) ready hai", 1f))
             true
         }.getOrElse {
             Log.w("RuntimeInstaller", "Bundled Hermes install failed, network route lagega", it)
+            // v79: keep the reason — if the network route also fails, the
+            // final install error shows BOTH, instead of the empty tail the
+            // user saw on v77/v78 ("install fail (exit 1):" with nothing
+            // after it).
+            lastHermesBundleFailure = it.message?.take(240) ?: it.javaClass.simpleName
             false
         }
     }
@@ -1019,7 +1044,9 @@ class RuntimeInstaller(private val context: Context) {
             cd __HOME__
             if [ -d hermes/.git ]; then git -C hermes pull --ff-only || true; else git clone --depth 1 https://github.com/radhesolanki319-pixel/Hermes-agent- hermes; fi
             cd hermes
-            __GRUN__ "${'$'}PREFIX/glibc/bin/patchelf" --set-interpreter "${'$'}PREFIX/glibc/lib/ld-linux-aarch64.so.1" "${'$'}PREFIX/opt/python-glibc/bin/python3.14"
+            "${'$'}PREFIX/glibc/lib/ld-linux-aarch64.so.1" "${'$'}PREFIX/glibc/bin/patchelf" --set-interpreter "${'$'}PREFIX/glibc/lib/ld-linux-aarch64.so.1" "${'$'}PREFIX/opt/python-glibc/bin/python3.14"
+            export LD_LIBRARY_PATH="${'$'}PREFIX/glibc/lib"
+            unset LD_PRELOAD
             rm -rf .venv
             uv sync --no-dev --python "${'$'}PREFIX/opt/python-glibc/bin/python3.14"
             .venv/bin/hermes --version
@@ -1045,7 +1072,8 @@ class RuntimeInstaller(private val context: Context) {
         val exit = process.exitValue()
         check(exit == 0 && termuxHermesBinary(termux).canExecute()) {
             "Hermes (Termux) install fail (exit $exit): " +
-                synchronized(tail) { tail.takeLast(6).joinToString(" · ") }
+                synchronized(tail) { tail.takeLast(6).joinToString(" · ") } +
+                (lastHermesBundleFailure?.let { " · bundle fail: $it" } ?: "")
         }
         termuxHermesMarker(termux).writeText(HERMES_VERSION)
         onProgress(RuntimeInstallProgress("Hermes (Termux) ready hai", 1f))
@@ -1089,6 +1117,12 @@ class RuntimeInstaller(private val context: Context) {
         termux: TermuxEnvironment,
         onProgress: suspend (RuntimeInstallProgress) -> Unit,
     ) {
+        // v79 master gate: Claude disabled (user order) — every install
+        // path funnels through here, so no route can start a download.
+        if (CLAUDE_DISABLED) {
+            onProgress(RuntimeInstallProgress("Claude Code abhi band hai — pehle Hermes pakka ho raha hai", 1f))
+            return
+        }
         // v77: the prebuilt bundle inside the APK wins; network is fallback.
         if (installClaudeFromApkBundle(termux, onProgress)) return
         if (!File(termux.prefix, "bin/grun").exists() && !File(termux.prefix, "glibc/bin/grun").exists()) {
@@ -2387,9 +2421,29 @@ class RuntimeInstaller(private val context: Context) {
                 put(key, translate(value))
             }
         }
+        // v79 — glibc processes (the Hermes venv and its CPython) must NOT
+        // inherit the shared Termux env: LD_LIBRARY_PATH puts the BIONIC
+        // lib dir first, so the glibc loader picks bionic libssl/libsqlite/
+        // libffi for the venv Python's stdlib modules and it dies at import
+        // time (seen on device, v77/v78: bundled Hermes extracted fine but
+        // `hermes --version` never printed; the same tree ran clean in a
+        // glibc-only env). LD_PRELOAD (bionic termux-exec) likewise does
+        // not belong in a glibc process. Give glibc-tree spawns a clean
+        // loader env: glibc/lib only, no preload.
+        val touchesGlibcTree = translatedArgv.any {
+            it.contains("/home/hermes/.venv/") || it.contains("/opt/python-glibc/")
+        }
+        val finalEnv = if (touchesGlibcTree) {
+            env.toMutableMap().apply {
+                put("LD_LIBRARY_PATH", "${prefix.absolutePath}/glibc/lib")
+                remove("LD_PRELOAD")
+            }
+        } else {
+            env
+        }
         return NativeSpawnProcess.start(
             argv = argv,
-            environment = env,
+            environment = finalEnv,
             cwd = cwd.absolutePath,
             outputFile = outputFile,
             pseudoTerminal = pseudoTerminal,
@@ -2960,6 +3014,16 @@ exec 3<&-
 
         /** Claude Code version inside the v77 APK bundle (agents-bundle-v1). */
         const val BUNDLED_CLAUDE_VERSION = "2.1.330"
+
+        /**
+         * v79 (user order, 2026-11-21): Claude Code stays DISABLED until
+         * Hermes is proven working on his device — no auto-install, no
+         * manual install, no 380 MB fallback download. Its bundled route
+         * also still carries the broken grun script (its body sources a
+         * com.termux path that does not exist inside this app); that fix
+         * lands with the build that re-enables Claude.
+         */
+        const val CLAUDE_DISABLED = true
 
         /**
          * Pinned glibc CPython (python-build-standalone) for the Hermes venv.
