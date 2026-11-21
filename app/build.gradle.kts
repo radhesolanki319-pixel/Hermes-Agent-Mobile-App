@@ -147,8 +147,8 @@ android {
         targetSdk = if (playBuild) 36 else 28
         // Keep literal defaults so F-Droid's static manifest parser can detect
         // the tagged release. Gradle properties may still override Play builds.
-        versionCode = 70
-        versionName = "1.0.70"
+        versionCode = 71
+        versionName = "1.0.71"
         providers.gradleProperty("appVersionCode").orNull?.toIntOrNull()?.let { versionCode = it }
         providers.gradleProperty("appVersionName").orNull?.let { versionName = it }
 
@@ -276,6 +276,7 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.8.7")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     implementation("org.apache.commons:commons-compress:1.27.1")
+    implementation("org.tukaani:xz:1.12")
     implementation("com.github.luben:zstd-jni:1.5.7-12@aar")
     // Shizuku for phone control (Feature 2)
     implementation("dev.rikka.shizuku:api:13.1.5")
