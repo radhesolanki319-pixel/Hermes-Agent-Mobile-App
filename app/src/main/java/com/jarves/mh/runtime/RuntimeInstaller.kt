@@ -905,6 +905,24 @@ class RuntimeInstaller(private val context: Context) {
             }
             val out = runTermuxCapture(termux, verifyCmd, 300)
             check(out.contains("Python:")) { "Hermes bundled verify fail: ${out.take(300)}" }
+            if (isBionic) {
+                // v82: `hermes --version` alone is too weak a gate — on
+                // v80/v81 it passed while the bundle was missing the real
+                // library files behind its lib/ symlinks (libz, libsqlite3,
+                // libreadline, liblzma, libbz2…), and chat then died with
+                // "dlopen failed: library libz.so.1 not found". Import the
+                // stdlib modules that pull those libraries so a bundle
+                // with missing libs fails HERE, loudly, not in chat.
+                val py = File(termux.prefix, "bin/python3.11").absolutePath
+                val pyPath = File(termux.prefix, "home/hermes/Hermes-agent-").absolutePath +
+                    ":" + File(termux.prefix, "home/hermes/.venv/lib/python3.11/site-packages").absolutePath
+                val libCmd = "PYTHONPATH=\"$pyPath\" " +
+                    "LD_LIBRARY_PATH=\"${termux.prefix.absolutePath}/lib\" " +
+                    "\"$py\" -c \"import binascii, zlib, sqlite3, lzma, bz2, readline, " +
+                    "ssl, crypt, dbm.gnu, xml.parsers.expat, _multiprocessing; print('libs-ok')\" 2>&1"
+                val libOut = runTermuxCapture(termux, libCmd, 300)
+                check(libOut.contains("libs-ok")) { "Hermes bundled library check fail: ${libOut.take(300)}" }
+            }
             termuxHermesMarker(termux).writeText(HERMES_VERSION)
             onProgress(RuntimeInstallProgress("Hermes (Termux) ready hai", 1f))
             true
