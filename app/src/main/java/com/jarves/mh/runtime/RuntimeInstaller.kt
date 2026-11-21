@@ -169,93 +169,22 @@ class RuntimeInstaller(private val context: Context) {
                 System.getProperty("os.arch"),
             ),
         ) { str(R.string.rt_install_unsupported_arch) }
-        val proot = File(context.applicationInfo.nativeLibraryDir, "libproot.so")
-        require(proot.canExecute()) { "The embedded PRoot launcher is unavailable" }
-
-        val staging = File(runtimeDir, "ubuntu.installing")
-        val repairBackup = File(runtimeDir, "ubuntu.repair-backup")
-        RootfsRepair.reconcileInterruptedSwap(
-            rootfs = rootfs,
-            staging = staging,
-            backup = repairBackup,
-            validate = ::isValidCoreRootfs,
-        )
-        val layoutBroken = rootfs.isDirectory && !ensureRootfsCompatibilityLinks()
-        if (layoutBroken ||
-            !File(rootfs, "usr/bin/bash").exists() ||
-            rootfsMarker.readTextOrNull() != ROOTFS_VERSION
-        ) {
-            onProgress(RuntimeInstallProgress(str(R.string.rt_install_preparing_runtime), 0.03f))
-            val archive = obtainRuntimeBundle(
-                CORE_BUNDLE,
-                preferEmbedded = BuildConfig.OFFLINE_RUNTIME_BUNDLES,
-                from = 0.03f,
-                to = 0.25f,
-                onProgress,
-            )
-            onProgress(RuntimeInstallProgress(str(R.string.rt_install_unpacking_core), 0.28f))
-            staging.deleteRecursively()
-            staging.mkdirs()
-            extractZstdTar(archive, staging)
-            stripMacosMetadataArtifacts(staging)
-            RootfsRepair.activate(
-                rootfs = rootfs,
-                staging = staging,
-                backup = repairBackup,
-                validate = ::isValidCoreRootfs,
-            )
-            writeResolver()
-            if (archive.parentFile == downloads) archive.delete()
+        // Termux setup (Stage D): the whole first-run setup is now the
+        // Termux package install + Hermes — the user should never have to
+        // install pieces by hand from Settings/Agent screens.
+        val termux = TermuxEnvironment(context)
+        if (!termux.isFullyInstalled()) {
+            termux.install(TermuxEnvironment.fullPackages) { line ->
+                onProgress(RuntimeInstallProgress(line, 0.4f))
+            }.exceptionOrNull()?.let { throw it }
+        } else {
+            termux.repairIfNeeded()
         }
-
-        check(ensureRootfsCompatibilityLinks()) { "Core runtime has an invalid Linux filesystem layout" }
-
-        migrateLegacyClaudeMarker()
-        ensureSettingsAndHooks()
-
-        // Node.js and Git are always available in the Core runtime. Python,
-        // C/C++, PHP, and Android remain opt-in stacks during onboarding.
-        val coreNeeded = !File(rootfs, "usr/bin/git").exists() || !isSupportedCoreToolsVersion()
-        if (coreNeeded) {
-            installNodeIfNeeded(proot, 0.58f, 0.66f, onProgress)
-        }
-        if (systemUpgradeMarker.readTextOrNull() != SYSTEM_UPGRADE_VERSION) {
-            runSystemMaintenance(proot, onProgress)
-            systemUpgradeMarker.writeText(SYSTEM_UPGRADE_VERSION)
-        }
-        if (coreNeeded) {
-            aptInstall(
-                proot,
-                listOf("git", "ca-certificates"),
-                str(R.string.rt_install_git_base_tools),
-                0.70f,
-                onProgress,
-            )
-            writeResolver()
-            verifyGuest(proot, "git --version", str(R.string.rt_install_verify_failed, "Git"))
-            coreToolsMarker.writeText(CORE_TOOLS_VERSION)
-        }
-
-        val missingStacks = selectedStacks.filterNot(::isStackInstalled)
-        missingStacks.forEachIndexed { index, stack ->
-            val slice = 0.26f / maxOf(1, missingStacks.size)
-            val from = 0.72f + index * slice
-            applyStack(proot, stack, from, from + slice, onProgress)
-        }
-
-        // Agents removed (v48): setup installs the core runtime only. The
-        // per-agent installers remain for the legacy on-demand path but are
-        // no longer invoked from setup.
-        if (agent != null) {
-            when (agent) {
-                com.jarves.mh.model.AgentKind.CLAUDE_CODE -> ensureClaudeInstalled(proot, 0.985f, onProgress)
-                com.jarves.mh.model.AgentKind.ANTIGRAVITY -> ensureAgyInstalled(proot, 0.985f, onProgress)
-                com.jarves.mh.model.AgentKind.HERMES -> ensureHermesInstalled(proot, 0.985f, onProgress)
-                com.jarves.mh.model.AgentKind.NATIVE -> Unit
-            }
+        if (!isAgentInstalled(com.jarves.mh.model.AgentKind.HERMES)) {
+            installHermesOnTermux(termux, onProgress)
         }
         onProgress(RuntimeInstallProgress(str(R.string.rt_install_setup_complete), 1f))
-        return InstalledRuntime(proot, rootfs)
+        return InstalledRuntime(termux.prefix, termux.prefix)
     }
 
     /**
@@ -827,6 +756,15 @@ class RuntimeInstaller(private val context: Context) {
         onProgress: suspend (RuntimeInstallProgress) -> Unit,
     ) {
         val home = File(termux.prefix, "home").apply { mkdirs() }
+        // uv MUST come from Termux's own repo (native bionic build): pip
+        // only finds uv's sdist on this platform and tries to compile it
+        // with Rust, which fails (seen on device, v71).
+        if (!File(termux.prefix, "bin/uv").exists()) {
+            onProgress(RuntimeInstallProgress("Hermes (Termux): uv package install ho raha hai…", 0.05f))
+            termux.install(listOf("uv")) { line ->
+                onProgress(RuntimeInstallProgress(line, 0.08f))
+            }.exceptionOrNull()?.let { throw it }
+        }
         onProgress(RuntimeInstallProgress("Hermes (Termux): repo clone ho raha hai…", 0.1f))
         val script = """
             set -e
@@ -834,7 +772,6 @@ class RuntimeInstaller(private val context: Context) {
             cd __HOME__
             if [ -d hermes/.git ]; then git -C hermes pull --ff-only || true; else git clone --depth 1 https://github.com/radhesolanki319-pixel/Hermes-agent- hermes; fi
             cd hermes
-            python -m pip install -q uv || pip install -q uv
             uv sync --no-dev --python "${'$'}(command -v python3)"
             .venv/bin/hermes --version
         """.trimIndent().replace("__HOME__", home.absolutePath)

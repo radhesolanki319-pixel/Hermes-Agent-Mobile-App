@@ -48,7 +48,7 @@ class TermuxEnvironment(private val context: Context) {
         private const val MAX_DOWNLOAD_HOSTS = 4
 
         val corePackages = listOf("bash", "busybox", "ca-certificates", "termux-exec", "git")
-        val fullPackages = corePackages + listOf("gh", "python", "python-pip", "nodejs", "npm")
+        val fullPackages = corePackages + listOf("gh", "python", "python-pip", "nodejs", "npm", "uv")
 
         /** Package name → files proving it is actually usable (any-of). */
         private val BINARY_PROOF: Map<String, List<String>> = mapOf(
