@@ -1,3 +1,4 @@
+import java.net.URL
 import java.util.Properties
 import org.gradle.api.tasks.Sync
 
@@ -110,7 +111,7 @@ val fetchAgentsBundle = tasks.register("fetchAgentsBundle") {
             val dest = File(dir, name)
             if (dest.isFile && dest.length() == size) continue
             val tmp = File(dir, "$name.part")
-            java.net.URL("$agentsBundleBaseUrl/$name").openStream().use { input ->
+            URL("$agentsBundleBaseUrl/$name").openStream().use { input ->
                 tmp.outputStream().use { output -> input.copyTo(output) }
             }
             check(tmp.length() == size) {
