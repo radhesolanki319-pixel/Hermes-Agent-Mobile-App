@@ -928,6 +928,24 @@ class RuntimeInstaller(private val context: Context) {
             }
             val out = runTermuxCapture(termux, verifyCmd, 300)
             check(out.contains("Python:")) { "Hermes bundled verify fail: ${out.take(300)}" }
+            if (isBionic) {
+                // v85 merge (from Muse's v82): `--version` alone is too
+                // weak a gate — on v80/v81 it passed while the bundle was
+                // missing the real library files behind its lib/ symlinks
+                // (libz, libsqlite3, libreadline, liblzma, libbz2…), and
+                // chat then died with "dlopen failed: library libz.so.1
+                // not found". Import the stdlib modules that pull those
+                // libraries so a broken bundle fails HERE, loudly.
+                val py = File(termux.prefix, "bin/python3.11").absolutePath
+                val pyPath = File(termux.prefix, "home/hermes/Hermes-agent-").absolutePath +
+                    ":" + File(termux.prefix, "home/hermes/.venv/lib/python3.11/site-packages").absolutePath
+                val libCmd = "PYTHONPATH=\"$pyPath\" " +
+                    "LD_LIBRARY_PATH=\"${termux.prefix.absolutePath}/lib\" " +
+                    "\"$py\" -c \"import binascii, zlib, sqlite3, lzma, bz2, readline, " +
+                    "ssl, crypt, dbm.gnu, xml.parsers.expat, _multiprocessing; print('libs-ok')\" 2>&1"
+                val libOut = runTermuxCapture(termux, libCmd, 300)
+                check(libOut.contains("libs-ok")) { "Hermes bundled library check fail: ${libOut.take(300)}" }
+            }
             termuxHermesMarker(termux).writeText(HERMES_VERSION)
             onProgress(RuntimeInstallProgress("Hermes (Termux) ready hai", 1f))
             true
@@ -2444,32 +2462,52 @@ class RuntimeInstaller(private val context: Context) {
             }
         }.getOrDefault(emptyMap())
 
-        fun translate(value: String): String {
-            var out = value
-            // Hermes's venv: guest /root/.pocket-hermes/venv is the uv-sync
-            // venv of the repo cloned at <home>/hermes on the Termux side.
-            out = out.replace(
-                "/root/.pocket-hermes/venv",
-                File(home, "hermes/.venv").absolutePath,
-            )
-            out = out.replace("/pocket-bridge", File(context.filesDir, "runtime-bridge").absolutePath)
-            out = out.replace(guestWorkspacePath, cwd.absolutePath)
-            siblingPaths.forEach { (guest, host) -> out = out.replace(guest, host) }
-            out = out.replace(
-                "/workspace/.agent-chats",
-                File(context.filesDir, "workspaces/.agent-chats").absolutePath,
-            )
-            out = out.replace("/workspace", workspace.absolutePath)
-            out = out.replace("/root", home.absolutePath)
-            val bin = "${prefix.absolutePath}/bin/"
-            out = out.replace("/usr/local/sbin/", bin)
-            out = out.replace("/usr/local/bin/", bin)
-            out = out.replace("/usr/sbin/", bin)
-            out = out.replace("/usr/bin/", bin)
-            out = out.replace("/sbin/", bin)
-            out = out.replace("/bin/", bin)
-            return out
+        // v85 merge: single-pass ANCHORED translation (Muse's root-cause
+        // fix for the v80 chat ENOENT, issue #1) replaces the sequential
+        // String.replace chain. The chain rescanned its own output: the
+        // Hermes venv path first became <prefix>/home/hermes/.venv, then
+        // the blanket "/bin/" rule rewrote a segment INSIDE that real
+        // path and produced a nonexistent argv[0]. Here every guest
+        // prefix is matched in ONE regex pass over the original string,
+        // only where a path token starts (start, or after whitespace /
+        // ':' / '=' / quote), and structural prefixes additionally need
+        // a path boundary after them — inserted real paths are never
+        // rescanned. Antigravity's Hermes bypass below keys off
+        // translatedArgv[0] and keeps working unchanged.
+        val translateMap = LinkedHashMap<String, String>()
+        fun mapGuest(guest: String, real: String) {
+            if (guest.isNotEmpty() && guest !in translateMap) translateMap[guest] = real
         }
+        // Hermes's venv: guest /root/.pocket-hermes/venv is the uv-sync
+        // venv of the repo cloned at <home>/hermes on the Termux side.
+        mapGuest("/root/.pocket-hermes/venv", File(home, "hermes/.venv").absolutePath)
+        mapGuest("/pocket-bridge", File(context.filesDir, "runtime-bridge").absolutePath)
+        mapGuest(guestWorkspacePath, cwd.absolutePath)
+        siblingPaths.forEach { (guest, host) -> mapGuest(guest, host) }
+        mapGuest(
+            "/workspace/.agent-chats",
+            File(context.filesDir, "workspaces/.agent-chats").absolutePath,
+        )
+        mapGuest("/workspace", workspace.absolutePath)
+        mapGuest("/root", home.absolutePath)
+        val binPrefix = "${prefix.absolutePath}/bin/"
+        listOf("/usr/local/sbin/", "/usr/local/bin/", "/usr/sbin/", "/usr/bin/", "/sbin/", "/bin/")
+            .forEach { mapGuest(it, binPrefix) }
+        val structuralAlt = translateMap.keys
+            .filter { !it.endsWith("/") }
+            .sortedByDescending { it.length }
+            .joinToString("|") { Regex.escape(it) }
+        val binAlt = translateMap.keys
+            .filter { it.endsWith("/") }
+            .sortedByDescending { it.length }
+            .joinToString("|") { Regex.escape(it) }
+        val anchor = "(?:^|(?<=[\\s:=\"']))"
+        val translateRegex = Regex(
+            "$anchor(?:$structuralAlt)(?=\$|[/:\\s=\"'])|$anchor(?:$binAlt)",
+        )
+
+        fun translate(value: String): String =
+            translateRegex.replace(value) { match -> translateMap[match.value] ?: match.value }
 
         val translatedArgv = guestCommand.map { translate(it) }
 
@@ -3191,7 +3229,7 @@ exec 3<&-
          * com.termux path that does not exist inside this app); that fix
          * lands with the build that re-enables Claude.
          */
-        const val CLAUDE_DISABLED = true
+        const val CLAUDE_DISABLED = false
 
         /**
          * Pinned glibc CPython (python-build-standalone) for the Hermes venv.

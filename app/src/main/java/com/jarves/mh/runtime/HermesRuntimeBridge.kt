@@ -987,14 +987,18 @@ class HermesRuntimeBridge(
             val environment = hermesLaunchEnvironment(route, secret)
             val guestWorkspacePath = "/workspace/$projectSlug"
             val resumeId = conversationId(projectId)?.takeIf(String::isNotBlank)
-            // v40: the DIRECT CLI transport (the full Hermes Agent CLI,
-            // `--format stream-json`) takes the turn first — the chat is
-            // connected to the CLI itself, as the user directed. It
-            // returns false only when the attempt delivered nothing at
-            // all; then the warm API server tries, and the quiet one-shot
-            // CLI path remains the final fallback, so no single broken
+            // v85 merge: the WARM gateway transport takes the turn first
+            // (Muse's v84). The v40 order (DIRECT CLI first) paid a full
+            // Hermes process start — Python boot + full Hermes import on
+            // the phone CPU — on EVERY message, and the user reported
+            // every reply was slow (2026-11-22). The warm server starts
+            // once and stays resident (fingerprint-keyed restart on
+            // config change, idle stop), so later turns pay only the API
+            // call. It returns false only when it delivered nothing; then
+            // the DIRECT CLI transport tries, and the quiet one-shot CLI
+            // path remains the final fallback, so no single broken
             // transport can make Hermes unusable.
-            val directHandled = runDirectCliTurnIfPossible(
+            val warmHandled = runWarmTurnIfPossible(
                 sessionId = sessionId,
                 projectId = projectId,
                 projectKind = projectKind,
@@ -1003,14 +1007,14 @@ class HermesRuntimeBridge(
                 installed = installed,
                 workspace = workspace,
                 guestWorkspacePath = guestWorkspacePath,
-                environment = environment,
                 route = route,
                 model = model,
+                secret = secret,
                 resumeId = resumeId,
                 before = before,
             )
-            if (!directHandled) {
-                val warmHandled = runWarmTurnIfPossible(
+            if (!warmHandled) {
+                val directHandled = runDirectCliTurnIfPossible(
                     sessionId = sessionId,
                     projectId = projectId,
                     projectKind = projectKind,
@@ -1019,13 +1023,13 @@ class HermesRuntimeBridge(
                     installed = installed,
                     workspace = workspace,
                     guestWorkspacePath = guestWorkspacePath,
+                    environment = environment,
                     route = route,
                     model = model,
-                    secret = secret,
                     resumeId = resumeId,
                     before = before,
                 )
-                if (!warmHandled) {
+                if (!directHandled) {
                     runCliTurn(
                     sessionId = sessionId,
                     projectId = projectId,
