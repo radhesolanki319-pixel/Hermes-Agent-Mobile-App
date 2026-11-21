@@ -90,25 +90,8 @@ class RuntimeInstaller(private val context: Context) {
         AppStrings.get(context, id, *args)
 
     fun isInstalled(): Boolean {
-        // Termux cut-over (transitional): a working Termux environment counts
-        // as "runtime installed" everywhere the PRoot core did. Stage E makes
-        // this the only runtime.
-        if (TermuxEnvironment(context).isInstalled()) return true
-        val proot = File(context.applicationInfo.nativeLibraryDir, "libproot.so")
-        val rootfsLayoutReady = ensureRootfsCompatibilityLinks()
-        // Devices set up before staged toolchains keep working through the legacy marker;
-        // fresh installs require the new core-tools marker instead.
-        val legacyLanguageTools = languageToolsMarker.readTextOrNull() == LANGUAGE_TOOLS_VERSION
-        val coreToolsReady = File(rootfs, "usr/bin/git").exists() && isSupportedCoreToolsVersion()
-        val ready = rootfsLayoutReady &&
-            proot.canExecute() &&
-            File(rootfs, "usr/bin/bash").exists() &&
-            rootfsMarker.readTextOrNull() == ROOTFS_VERSION &&
-            File(rootfs, "usr/local/bin/node").exists() &&
-            (legacyLanguageTools || coreToolsReady) &&
-            coreReadyMarker.exists()
-        if (ready) repairLegacyMacosMetadata()
-        return ready
+        // Stage E: Termux is the only runtime.
+        return TermuxEnvironment(context).isInstalled()
     }
 
     /**
@@ -1845,6 +1828,15 @@ class RuntimeInstaller(private val context: Context) {
     }
 
     suspend fun initializeExisting(onProgress: suspend (RuntimeInstallProgress) -> Unit): InstalledRuntime {
+        // Stage E: on Termux there is no rootfs to validate — just clear any
+        // stale bridge leftovers and hand back the Termux prefix.
+        val termux = TermuxEnvironment(context)
+        if (termux.isInstalled()) {
+            File(context.filesDir, "runtime-bridge").apply {
+                mkdirs(); listFiles()?.forEach { runCatching { it.delete() } }
+            }
+            return InstalledRuntime(termux.prefix, termux.prefix)
+        }
         val installed = installedRuntime()
         onProgress(RuntimeInstallProgress(str(R.string.rt_install_checking_files), 0.15f))
         writeResolver()
@@ -1883,7 +1875,8 @@ class RuntimeInstaller(private val context: Context) {
                 outputFile, pseudoTerminal, ptyRows, ptyColumns,
             )
         }
-        check(ensureRootfsCompatibilityLinks()) { "Core runtime has an invalid Linux filesystem layout" }
+        // Stage E: PRoot execution path deleted — Termux is the only runtime.
+        throw IllegalStateException("PRoot runtime hata diya gaya hai — pehle Termux install karo (Settings → Runtime)")
         require(
             guestWorkspacePath == "/workspace" ||
                 Regex("^/workspace/[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$").matches(guestWorkspacePath),

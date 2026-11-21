@@ -467,13 +467,13 @@ fun SettingsScreen(
             item {
                 SettingsAccordion(
                     title = stringResource(R.string.settings_runtime),
-                    subtitle = "Ubuntu 20.04 PRoot · ARM64",
+                    subtitle = "Termux · ARM64",
                     icon = Icons.Default.Terminal,
                     expanded = expanded == SettingsSection.RUNTIME,
                     onClick = { toggle(SettingsSection.RUNTIME) },
                 ) {
                     RuntimeInfoRow(stringResource(R.string.runtime_architecture), "ARM64 (aarch64)")
-                    RuntimeInfoRow(stringResource(R.string.runtime_environment), "Ubuntu 20.04 PRoot")
+                    RuntimeInfoRow(stringResource(R.string.runtime_environment), "Termux")
                     RuntimeInfoRow(
                         stringResource(R.string.runtime_active_agent),
                         state.agentKind.localizedTitle() + if (state.installedAgentVersions.containsKey(state.agentKind)) "" else " · " + stringResource(R.string.st_not_installed),
@@ -496,7 +496,7 @@ fun SettingsScreen(
                     }
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
                     Text(
-                        "Termux runtime (naya system)",
+                        "Termux runtime",
                         fontSize = 12.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
