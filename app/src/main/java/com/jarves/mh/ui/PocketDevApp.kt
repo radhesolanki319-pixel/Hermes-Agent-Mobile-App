@@ -292,6 +292,9 @@ import androidx.compose.material.icons.filled.Terminal
 
 private enum class RootScreen(@StringRes val labelRes: Int, val icon: ImageVector) {
     CHAT(R.string.tab_chat, Icons.Default.Chat),
+    // v56 (user order): the Agents tab is back — the old-style home for
+    // downloading/installing Hermes and Claude Code, like before v48.
+    AGENT(R.string.tab_agent, Icons.Default.SmartToy),
     SETTINGS(R.string.tab_settings, Icons.Default.Settings),
 }
 private enum class WorkspaceTab(@StringRes val labelRes: Int, val icon: ImageVector) {
@@ -2537,6 +2540,16 @@ private fun RootScreenHost(
                         CircularProgressIndicator()
                     }
                 }
+                RootScreen.AGENT -> AgentsScreen(
+                    state = state,
+                    onInstallAgent = viewModel::installAgent,
+                    onUseAgent = { kind ->
+                        viewModel.selectAgent(kind)
+                        screenName = RootScreen.CHAT.name
+                    },
+                    onUpdateAgent = viewModel::updateAgent,
+                    onCheckUpdates = viewModel::checkAgentUpdates,
+                )
                 RootScreen.SETTINGS -> SettingsScreen(
                     state = state,
                     showBackupDot = !state.backupFeatureSeen,

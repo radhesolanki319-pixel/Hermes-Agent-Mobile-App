@@ -531,4 +531,17 @@
     <string name="phone_control_bridge_stopped">Phone control bridge stopped</string>
     <string name="phone_control_not_ready">Shizuku permission is not granted</string>
     <string name="phone_control_install_shizuku">Install Shizuku</string>
+    <string name="agents_screen_title">Agents</string>
+    <string name="agents_screen_subtitle">Agents download karke install karo — pehle ki tarah. Hermes tumhare GitHub repo se aata hai, Claude Code latest version me.</string>
+    <string name="agents_download_install">Download &amp; Install</string>
+    <string name="agents_use_in_chat">Use in Chat</string>
+    <string name="agents_active">Active</string>
+    <string name="agents_installed">Installed · v%1$s</string>
+    <string name="agents_not_installed">Not installed</string>
+    <string name="agents_builtin">Built-in · always ready</string>
+    <string name="agents_hermes_source">Tumhare GitHub repo (Hermes-agent-) ke latest Hermes ka bundle install hota hai</string>
+    <string name="agents_claude_source">Install ke time sabse latest Claude Code release download hota hai</string>
+    <string name="agents_native_source">App ke andar built-in hai — kuch install nahi karna</string>
+    <string name="agents_update_to">Update to %1$s</string>
+    <string name="agents_checking">Checking…</string>
 </resources>
