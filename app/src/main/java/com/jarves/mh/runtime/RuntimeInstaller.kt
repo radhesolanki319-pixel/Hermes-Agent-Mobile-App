@@ -893,7 +893,7 @@ class RuntimeInstaller(private val context: Context) {
         Os.chmod(wrapper.absolutePath, 0b111101101)
         onProgress(RuntimeInstallProgress("Claude Code (Termux): verify ho raha hai…", 0.9f))
         val out = runTermuxCapture(termux, "\"${wrapper.absolutePath}\" --version 2>&1")
-        check(Regex("[0-9]+\.[0-9]+\.[0-9]+").containsMatchIn(out)) {
+        check(Regex("[0-9]+\\.[0-9]+\\.[0-9]+").containsMatchIn(out)) {
             "Claude Code (Termux) verify fail: ${out.take(300)}"
         }
         termuxClaudeMarker(termux).writeText(latest)
