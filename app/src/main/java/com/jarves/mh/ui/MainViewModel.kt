@@ -2940,7 +2940,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _state.update { it.copy(toastMessage = str(R.string.vm_stop_agent_before_switching)) }
             return
         }
-        if (installer.isAgentInstalled(kind)) {
+        // v57: a Hermes whose marker is not the pinned bundle version is a
+        // stale pre-install (e.g. 0.23.2 left in the rootfs) — "install"
+        // must REPLACE it with the current bundle, not just select it.
+        val staleHermes = kind == AgentKind.HERMES &&
+            installer.installedAgentVersions()[kind]?.let { it != RuntimeInstaller.HERMES_VERSION } == true
+        if (installer.isAgentInstalled(kind) && !staleHermes) {
             selectAgent(kind)
             return
         }
@@ -2959,7 +2964,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             var sampleAt = SystemClock.elapsedRealtime()
             val result = runCatching {
                 withContext(Dispatchers.IO) {
-                    agentRegistry.require(kind).install(installer) { progress ->
+                    val installProgress: suspend (com.jarves.mh.runtime.RuntimeInstallProgress) -> Unit = { progress ->
                         val now = SystemClock.elapsedRealtime()
                         val bytes = progress.downloadedBytes
                         val elapsed = now - sampleAt
@@ -2978,6 +2983,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                 agentBytesPerSecond = speed,
                             )
                         }
+                    }
+                    if (staleHermes) {
+                        installer.reinstallHermes(installProgress)
+                    } else {
+                        agentRegistry.require(kind).install(installer, installProgress)
                     }
                 }
             }

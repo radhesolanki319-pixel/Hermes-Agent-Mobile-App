@@ -220,6 +220,21 @@ private fun AgentInstallCard(
                         Text(stringResource(R.string.agents_download_install))
                     }
                 }
+                // v57: a stale Hermes (purana version pre-installed) gets a
+                // reinstall button — install replaces it with the current
+                // GitHub bundle instead of keeping the broken old one.
+                if (kind == AgentKind.HERMES && installed && !installing &&
+                    installedVersion != com.jarves.mh.runtime.RuntimeInstaller.HERMES_VERSION
+                ) {
+                    Button(
+                        onClick = { onInstallAgent(kind) },
+                        enabled = state.agentInstalling == null && state.agentUpdating == null,
+                    ) {
+                        Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(17.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text(stringResource(R.string.agents_reinstall_hermes, com.jarves.mh.runtime.RuntimeInstaller.HERMES_VERSION))
+                    }
+                }
                 if (installed && kind != state.agentKind) {
                     Button(onClick = { onUseAgent(kind) }, enabled = !state.isRunning && !busy) {
                         Text(stringResource(R.string.agents_use_in_chat))

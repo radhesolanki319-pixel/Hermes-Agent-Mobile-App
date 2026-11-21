@@ -258,6 +258,24 @@ class RuntimeInstaller(private val context: Context) {
      * agent returns immediately without network access. Every coding agent is a
      * separate overlay and is fetched or loaded only when selected.
      */
+    /**
+     * v57: force a FRESH Hermes install of the pinned bundle, replacing
+     * whatever version is currently in the guest. A stale pre-installed
+     * Hermes (e.g. 0.23.2 left in the rootfs from before v48) otherwise
+     * satisfies [isAgentInstalled] forever and can never be replaced from
+     * the UI — and its gateway control-socket peer check
+     * (unsafe_control_peer) cannot pass under PRoot, so its turns fail.
+     * Dropping the marker makes [ensureHermesInstalled] take the clean
+     * install path, which wipes /root/.pocket-hermes first; the Hermes
+     * data dir (/root/.hermes) is preserved.
+     */
+    suspend fun reinstallHermes(onProgress: suspend (RuntimeInstallProgress) -> Unit) {
+        val runtime = installedRuntime()
+        hermesMarker.delete()
+        ensureHermesInstalled(runtime.proot, 0.05f, onProgress)
+        onProgress(RuntimeInstallProgress(str(R.string.rt_install_ready, com.jarves.mh.model.AgentKind.HERMES.localizedTitle(context)), 1f))
+    }
+
     suspend fun ensureAgentInstalled(
         agent: com.jarves.mh.model.AgentKind,
         onProgress: suspend (RuntimeInstallProgress) -> Unit,
