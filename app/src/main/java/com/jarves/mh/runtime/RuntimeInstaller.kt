@@ -2479,7 +2479,7 @@ exec 3<&-
         // (radhesolanki319-pixel/Hermes-agent- main) — the version label is
         // the build date, matching the bundle file name and release tag.
         // v55: rebuilt from the rewritten main (custom mods + MAX POWER).
-        const val HERMES_VERSION = "2026.11.21"
+        const val HERMES_VERSION = "2026.11.22"
 
         /**
          * The aiohttp pin the pinned Hermes wheel's own metadata
@@ -2577,9 +2577,9 @@ exec 3<&-
         )
         private val HERMES_BUNDLE = RuntimeBundle(
             label = "Hermes Agent",
-            fileName = "pocketdev-hermes-arm64-2026.11.21.tar.zst",
-            sha256 = "37ffbb46b3fb485eaea06f2a9e62438abd3386270ee78b06ca7e89efdcc14492",
-            compressedBytes = 67_298_060L,
+            fileName = "pocketdev-hermes-arm64-2026.11.22.tar.zst",
+            sha256 = "c77df3a3709271e3bda956eed70cabae2b71330d2be3930d4214c328b6bf899a",
+            compressedBytes = 67_298_088L,
             // Published as a release asset in the user's repo (tag
             // hermes-bundle-0.23.2), not under the upstream runtime release —
             // the online flavor downloads it from here, SHA-256 verified.
