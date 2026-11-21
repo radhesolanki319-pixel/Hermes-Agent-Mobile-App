@@ -35,11 +35,11 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG="v79"
+          TAG="v80"
           APK_FILE=$(find app/build/outputs/apk/debug -name "*.apk" | head -n 1)
           echo "Found APK at: $APK_FILE"
           cp "$APK_FILE" "Hermes_Agent_${TAG}.apk"
-          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --title "Hermes Agent $TAG (100% Offline Hermes Ready)" --notes "v79: Hermes glibc env fix + Claude DISABLED (user order). 100% offline Hermes Agent."
+          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --title "Hermes Agent $TAG (100% Native Bionic Offline Hermes)" --notes "v80: 100% Native Android Bionic Termux Rootfs + Hermes pre-installed. All glibc removed. Ultra-lightweight APK."
           gh release upload "$TAG" "Hermes_Agent_${TAG}.apk" --clobber
           echo "Release $TAG uploaded successfully!"
 

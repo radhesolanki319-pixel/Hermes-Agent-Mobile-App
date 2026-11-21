@@ -156,6 +156,11 @@ class RuntimeInstaller(private val context: Context) {
         // Termux package install + Hermes — the user should never have to
         // install pieces by hand from Settings/Agent screens.
         val termux = TermuxEnvironment(context)
+        if (!termux.isFullyInstalled() || !isAgentInstalled(com.jarves.mh.model.AgentKind.HERMES)) {
+            if (bundledAssetPresent("hermes-bionic.bin")) {
+                installHermesFromApkBundle(termux, onProgress)
+            }
+        }
         if (!termux.isFullyInstalled()) {
             termux.install(TermuxEnvironment.fullPackages) { line ->
                 onProgress(RuntimeInstallProgress(line, 0.4f))
@@ -187,12 +192,16 @@ class RuntimeInstaller(private val context: Context) {
      * data dir (/root/.hermes) is preserved.
      */
     suspend fun reinstallHermes(onProgress: suspend (RuntimeInstallProgress) -> Unit) {
-        // Termux: wipe the clone + marker and reinstall from the repo.
+        // Termux: wipe the clone + marker and reinstall from the bundle or repo.
         val termux = TermuxEnvironment(context)
         if (termux.isInstalled()) {
             termuxHermesMarker(termux).delete()
             File(termux.prefix, "home/hermes").deleteRecursively()
-            installHermesOnTermux(termux, onProgress)
+            if (bundledAssetPresent("hermes-bionic.bin") || bundledAssetPresent("hermes.bin")) {
+                installHermesFromApkBundle(termux, onProgress)
+            } else {
+                installHermesOnTermux(termux, onProgress)
+            }
             onProgress(RuntimeInstallProgress(str(R.string.rt_install_ready, com.jarves.mh.model.AgentKind.HERMES.localizedTitle(context)), 1f))
             return
         }
@@ -845,35 +854,44 @@ class RuntimeInstaller(private val context: Context) {
         termux: TermuxEnvironment,
         onProgress: suspend (RuntimeInstallProgress) -> Unit,
     ): Boolean {
-        if (!bundledAssetPresent("hermes.bin")) return false
+        val assetName = when {
+            bundledAssetPresent("hermes-bionic.bin") -> "hermes-bionic.bin"
+            bundledAssetPresent("hermes.bin") -> "hermes.bin"
+            else -> return false
+        }
+        val isBionic = assetName == "hermes-bionic.bin"
         return runCatching {
-            onProgress(RuntimeInstallProgress("Hermes app ke andar se install ho raha hai…", 0.15f))
-            ensureBundledGlibc(termux)
-            ensureBundledPython(termux)
-            extractBundledAsset("hermes.bin", termux.prefix)
+            onProgress(RuntimeInstallProgress("Termux Bionic + Hermes unpack ho raha hai…", 0.15f))
+            if (!isBionic) {
+                ensureBundledGlibc(termux)
+                ensureBundledPython(termux)
+            }
+            extractBundledAsset(assetName, termux.prefix)
             val launcher = termuxHermesBinary(termux)
             runCatching { Os.chmod(launcher.absolutePath, 0b111101101) }
+            runCatching { Os.chmod(File(termux.prefix, "bin/bash").absolutePath, 0b111101101) }
+            runCatching { Os.chmod(File(termux.prefix, "bin/python3.11").absolutePath, 0b111101101) }
+            runCatching { Os.chmod(File(termux.prefix, "bin/git").absolutePath, 0b111101101) }
+            if (isBionic) {
+                File(termux.prefix, ".harness-installed").writeText(
+                    "bash\nbusybox\nca-certificates\ntermux-exec\ngit\ngh\npython\npython-pip\nnodejs\nnpm\nuv\n",
+                )
+            }
             onProgress(RuntimeInstallProgress("Hermes (Termux): verify ho raha hai…", 0.9f))
-            // Clean glibc env for the verify run (see termuxProcess): the
-            // shared Termux env's bionic-first LD_LIBRARY_PATH kills the
-            // venv Python's stdlib imports on a real device.
-            val cleanEnv = "env -u LD_PRELOAD " +
-                "LD_LIBRARY_PATH=\"${termux.prefix.absolutePath}/glibc/lib\""
-            val out = runTermuxCapture(
-                termux,
-                "$cleanEnv \"${launcher.absolutePath}\" --version 2>&1",
-                300,
-            )
+            val verifyCmd = if (isBionic) {
+                "\"${launcher.absolutePath}\" --version 2>&1"
+            } else {
+                val cleanEnv = "env -u LD_PRELOAD " +
+                    "LD_LIBRARY_PATH=\"${termux.prefix.absolutePath}/glibc/lib\""
+                "$cleanEnv \"${launcher.absolutePath}\" --version 2>&1"
+            }
+            val out = runTermuxCapture(termux, verifyCmd, 300)
             check(out.contains("Python:")) { "Hermes bundled verify fail: ${out.take(300)}" }
             termuxHermesMarker(termux).writeText(HERMES_VERSION)
             onProgress(RuntimeInstallProgress("Hermes (Termux) ready hai", 1f))
             true
         }.getOrElse {
             Log.w("RuntimeInstaller", "Bundled Hermes install failed, network route lagega", it)
-            // v79: keep the reason — if the network route also fails, the
-            // final install error shows BOTH, instead of the empty tail the
-            // user saw on v77/v78 ("install fail (exit 1):" with nothing
-            // after it).
             lastHermesBundleFailure = it.message?.take(240) ?: it.javaClass.simpleName
             false
         }
@@ -2433,7 +2451,8 @@ class RuntimeInstaller(private val context: Context) {
         val touchesGlibcTree = translatedArgv.any {
             it.contains("/home/hermes/.venv/") || it.contains("/opt/python-glibc/")
         }
-        val finalEnv = if (touchesGlibcTree) {
+        val hasGlibc = File(prefix, "glibc/lib").isDirectory
+        val finalEnv = if (touchesGlibcTree && hasGlibc) {
             env.toMutableMap().apply {
                 put("LD_LIBRARY_PATH", "${prefix.absolutePath}/glibc/lib")
                 remove("LD_PRELOAD")
