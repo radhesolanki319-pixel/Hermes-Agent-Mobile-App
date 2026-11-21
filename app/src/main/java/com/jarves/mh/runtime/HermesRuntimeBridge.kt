@@ -14,6 +14,7 @@ import com.jarves.mh.model.ProjectKind
 import com.jarves.mh.model.ProviderProfile
 import com.jarves.mh.model.RuntimeEvent
 import com.jarves.mh.model.ToolRequest
+import com.jarves.mh.termux.TermuxEnvironment
 import java.io.File
 import java.io.RandomAccessFile
 import java.util.UUID
@@ -1639,7 +1640,24 @@ class HermesRuntimeBridge(
         options: HermesConfigOptions,
         mcpServers: List<McpServerConfig> = emptyList(),
     ) {
-        val home = File(rootfs, HERMES_HOME_GUEST_PATH.removePrefix("/")).apply { mkdirs() }
+        // v83 fix: the config must land in the HERMES_HOME the spawned
+        // process actually reads. In the PRoot era that was the rootfs
+        // file <rootfs>/root/.hermes (the guest's /root/.hermes). Under
+        // Termux there is no rootfs: the spawn env's guest "/root/.hermes"
+        // is translated to <prefix>/home/.hermes (and HOME itself is
+        // <prefix>/home, so Hermes's ~/.hermes default is the same dir).
+        // Writing to File(rootfs, "root/.hermes") with rootfs == the
+        // Termux prefix put config.yaml/.env in <prefix>/root/.hermes —
+        // a directory Hermes never opens — so every chat turn died at
+        // Hermes's first-run guard ("isn't configured yet -- no API keys
+        // or providers found") even though the app had written a full
+        // config. Write to the real Termux home when Termux is installed.
+        val termux = TermuxEnvironment(context)
+        val home = if (termux.isInstalled()) {
+            File(termux.prefix, "home/.hermes")
+        } else {
+            File(rootfs, HERMES_HOME_GUEST_PATH.removePrefix("/"))
+        }.apply { mkdirs() }
         // Hermes's learned skills and persistent memories live under
         // HERMES_HOME; the bridge never deletes or resets them — it only
         // makes sure the directories exist.
