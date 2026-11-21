@@ -100,7 +100,7 @@ val generatedAgentsAssets = layout.buildDirectory.dir("generated/agents-assets")
 // extension and stores the content decompressed, which would break the
 // runtime's asset lookup. The bytes are still the same tar.gz archives.
 val agentsBundleFiles = linkedMapOf(
-    "hermes-bionic.bin" to 59_393_064L,
+    "hermes-bionic.bin" to 59_404_161L,
 )
 val fetchAgentsBundle = tasks.register("fetchAgentsBundle") {
     description = "Downloads the prebuilt agents bundle (agents-bundle-v1) into the APK assets."
