@@ -82,6 +82,45 @@ val prepareBundledAgentAssets = tasks.register<Sync>("prepareBundledAgentAssets"
     into(generatedRuntimeAssets.map { it.dir("shared/runtime") })
 }
 
+// v77: COMPLETE prebuilt agent environments ride INSIDE the APK as
+// assets/agents/*.tar.gz — Hermes (source + locked wheels on glibc
+// CPython 3.14) and Claude Code 2.1.330, plus the glibc runtime and the
+// Python itself — so a fresh install has both agents working with zero
+// runtime downloads (the user's standing order: agents pre-installed
+// inside the app, like Termux). The tarballs are far too big for git,
+// so they are published once on the agents-bundle-v1 release of the
+// user's repo and fetched here at build time, size-pinned. The set was
+// assembled on Muse's VM and run-verified under QEMU on the exact
+// device paths before publishing.
+val agentsBundleBaseUrl =
+    "https://github.com/radhesolanki319-pixel/Mobile-Harness/releases/download/agents-bundle-v1"
+val generatedAgentsAssets = layout.buildDirectory.dir("generated/agents-assets")
+val agentsBundleFiles = linkedMapOf(
+    "claude.tar.gz" to 172_837_320L,
+    "glibc.tar.gz" to 116_403_122L,
+    "hermes.tar.gz" to 123_689_915L,
+    "python-glibc.tar.gz" to 58_206_799L,
+)
+val fetchAgentsBundle = tasks.register("fetchAgentsBundle") {
+    description = "Downloads the prebuilt agents bundle (agents-bundle-v1) into the APK assets."
+    outputs.dir(generatedAgentsAssets)
+    doLast {
+        val dir = generatedAgentsAssets.get().dir("agents").asFile.apply { mkdirs() }
+        for ((name, size) in agentsBundleFiles) {
+            val dest = File(dir, name)
+            if (dest.isFile && dest.length() == size) continue
+            val tmp = File(dir, "$name.part")
+            java.net.URL("$agentsBundleBaseUrl/$name").openStream().use { input ->
+                tmp.outputStream().use { output -> input.copyTo(output) }
+            }
+            check(tmp.length() == size) {
+                "agents bundle $name size mismatch: ${tmp.length()} != $size"
+            }
+            check(tmp.renameTo(dest)) { "agents bundle $name rename failed" }
+        }
+    }
+}
+
 val offlineBundleFiles = listOf(
     "pocketdev-core-arm64-2026.11.2.tar.zst",
     "pocketdev-claude-arm64-2026.11.1.tar.zst",
@@ -147,8 +186,8 @@ android {
         targetSdk = if (playBuild) 36 else 28
         // Keep literal defaults so F-Droid's static manifest parser can detect
         // the tagged release. Gradle properties may still override Play builds.
-        versionCode = 76
-        versionName = "1.0.75"
+        versionCode = 77
+        versionName = "1.0.77"
         providers.gradleProperty("appVersionCode").orNull?.toIntOrNull()?.let { versionCode = it }
         providers.gradleProperty("appVersionName").orNull?.let { versionName = it }
 
@@ -193,6 +232,7 @@ android {
 
     sourceSets.getByName("offline").assets.srcDir(generatedRuntimeAssets.map { it.dir("offline") })
     sourceSets.getByName("main").assets.srcDir(generatedRuntimeAssets.map { it.dir("shared") })
+    sourceSets.getByName("main").assets.srcDir(generatedAgentsAssets)
 
     buildTypes {
         debug {
@@ -234,6 +274,9 @@ android {
     packaging.resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
     packaging.jniLibs.useLegacyPackaging = true
     androidResources.noCompress += "zst"
+    // The agents bundle is already gzip-compressed; storing it raw keeps
+    // asset extraction on first run a straight copy.
+    androidResources.noCompress += "gz"
 }
 
 tasks.matching { it.name.startsWith("mergeOffline") && it.name.endsWith("Assets") }
@@ -241,6 +284,9 @@ tasks.matching { it.name.startsWith("mergeOffline") && it.name.endsWith("Assets"
 
 tasks.matching { it.name.startsWith("merge") && it.name.endsWith("Assets") }
     .configureEach { dependsOn(prepareBundledAgentAssets) }
+
+tasks.matching { it.name.startsWith("merge") && it.name.endsWith("Assets") }
+    .configureEach { dependsOn(fetchAgentsBundle) }
 
 tasks.matching { it.name.contains("lint", ignoreCase = true) }
     .configureEach { dependsOn(prepareBundledAgentAssets) }

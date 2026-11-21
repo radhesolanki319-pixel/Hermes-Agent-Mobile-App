@@ -785,11 +785,134 @@ class RuntimeInstaller(private val context: Context) {
             File(termux.prefix, "glibc/bin/grun").absolutePath
         }
 
+    // ------------------------------------------------------------------
+    // Bundled agents (v77) — the user's standing order: Hermes + Claude
+    // Code PRE-INSTALLED inside the app, the way Termux itself is. The
+    // APK carries complete prebuilt environments as assets/agents/*.tar.gz
+    // (fetched at build time from the agents-bundle-v1 release; assembled
+    // from the official Claude binary, the termux-glibc repo, a
+    // python-build-standalone CPython 3.14 and his Hermes source + locked
+    // wheels, then run-verified under QEMU on the exact device paths:
+    // `claude --version` 2.1.330 OK, `hermes --version` OK, every core
+    // dependency imports under the bundled glibc). Installing an agent
+    // is then pure local extraction — no network, no on-device package
+    // downloads, no source builds. The network routes below stay as
+    // fallback when the bundle is absent or its verify fails.
+    // ------------------------------------------------------------------
+
+    private fun bundledAssetPresent(name: String): Boolean =
+        runCatching { context.assets.open("agents/$name").close() }.isSuccess
+
+    private fun extractBundledAsset(name: String, destDir: File) {
+        context.assets.open("agents/$name").use { input ->
+            extractTarGzStream(BufferedInputStream(input), destDir)
+        }
+    }
+
+    /** Extracts the bundled glibc runtime into the prefix, once. */
+    private fun ensureBundledGlibc(termux: TermuxEnvironment) {
+        val flag = File(termux.prefix, ".bundled-glibc-v1")
+        if (flag.exists() && File(termux.prefix, "bin/grun").exists()) return
+        extractBundledAsset("glibc.tar.gz", termux.prefix)
+        flag.writeText("agents-bundle-v1")
+    }
+
+    /** Extracts the bundled glibc CPython 3.14 into the prefix, once. */
+    private fun ensureBundledPython(termux: TermuxEnvironment) {
+        val flag = File(termux.prefix, ".bundled-python-v1")
+        if (flag.exists() && File(termux.prefix, "opt/python-glibc/bin/python3.14").exists()) return
+        extractBundledAsset("python-glibc.tar.gz", termux.prefix)
+        flag.writeText("agents-bundle-v1")
+    }
+
+    /**
+     * Bundled Hermes install: extract the prebuilt environment, then hold
+     * it to the same bar as every route — the marker is written only
+     * after `hermes --version` really runs on the device.
+     */
+    private suspend fun installHermesFromApkBundle(
+        termux: TermuxEnvironment,
+        onProgress: suspend (RuntimeInstallProgress) -> Unit,
+    ): Boolean {
+        if (!bundledAssetPresent("hermes.tar.gz")) return false
+        return runCatching {
+            onProgress(RuntimeInstallProgress("Hermes app ke andar se install ho raha hai…", 0.15f))
+            ensureBundledGlibc(termux)
+            ensureBundledPython(termux)
+            extractBundledAsset("hermes.tar.gz", termux.prefix)
+            val launcher = termuxHermesBinary(termux)
+            runCatching { Os.chmod(launcher.absolutePath, 0b111101101) }
+            onProgress(RuntimeInstallProgress("Hermes (Termux): verify ho raha hai…", 0.9f))
+            val out = runTermuxCapture(termux, "\"${launcher.absolutePath}\" --version 2>&1")
+            check(out.contains("Python:")) { "Hermes bundled verify fail: ${out.take(300)}" }
+            termuxHermesMarker(termux).writeText(HERMES_VERSION)
+            onProgress(RuntimeInstallProgress("Hermes (Termux) ready hai", 1f))
+            true
+        }.getOrElse {
+            Log.w("RuntimeInstaller", "Bundled Hermes install failed, network route lagega", it)
+            false
+        }
+    }
+
+    /** Bundled Claude Code install: extract, wrap, verify, mark — same bar as the network route. */
+    private suspend fun installClaudeFromApkBundle(
+        termux: TermuxEnvironment,
+        onProgress: suspend (RuntimeInstallProgress) -> Unit,
+    ): Boolean {
+        if (!bundledAssetPresent("claude.tar.gz")) return false
+        return runCatching {
+            onProgress(RuntimeInstallProgress("Claude Code app ke andar se install ho raha hai…", 0.15f))
+            ensureBundledGlibc(termux)
+            extractBundledAsset("claude.tar.gz", termux.prefix)
+            val real = File(termux.prefix, "bin/claude-real")
+            check(real.isFile) { "claude-real bundle me nahi mila" }
+            runCatching { Os.chmod(real.absolutePath, 0b111101101) }
+            finishClaudeTermuxInstall(termux, BUNDLED_CLAUDE_VERSION, onProgress)
+            true
+        }.getOrElse {
+            Log.w("RuntimeInstaller", "Bundled Claude install failed, network route lagega", it)
+            false
+        }
+    }
+
+    /**
+     * Writes the grun wrapper for bin/claude-real, verifies that
+     * `claude --version` really runs, and only then records the marker.
+     * Shared by the bundled (v77) and network Claude routes.
+     */
+    private suspend fun finishClaudeTermuxInstall(
+        termux: TermuxEnvironment,
+        version: String,
+        onProgress: suspend (RuntimeInstallProgress) -> Unit,
+    ) {
+        val binDir = File(termux.prefix, "bin").apply { mkdirs() }
+        val real = File(binDir, "claude-real")
+        val wrapper = File(binDir, "claude")
+        wrapper.writeText(
+            "#!/bin/sh\n" +
+                "export PATH=\"${termux.prefix.absolutePath}/glibc/bin:\$PATH\"\n" +
+                "exec \"${grunPath(termux)}\" \"${real.absolutePath}\" \"\$@\"\n",
+        )
+        Os.chmod(wrapper.absolutePath, 0b111101101)
+        onProgress(RuntimeInstallProgress("Claude Code (Termux): verify ho raha hai…", 0.9f))
+        val out = runTermuxCapture(termux, "\"${wrapper.absolutePath}\" --version 2>&1")
+        check(Regex("[0-9]+\\.[0-9]+\\.[0-9]+").containsMatchIn(out)) {
+            "Claude Code (Termux) verify fail: ${out.take(300)}"
+        }
+        termuxClaudeMarker(termux).writeText(version)
+        onProgress(RuntimeInstallProgress("Claude Code (Termux) ready hai", 1f))
+    }
+
     /** Extracts a .tar.gz with zip-slip protection (used for the glibc CPython). */
     private fun extractTarGz(archive: File, destDir: File) {
+        BufferedInputStream(archive.inputStream()).use { input -> extractTarGzStream(input, destDir) }
+    }
+
+    /** Stream form of [extractTarGz] — the v77 agents bundle extracts straight from APK assets. */
+    private fun extractTarGzStream(input: java.io.InputStream, destDir: File) {
         destDir.mkdirs()
         val destCanonical = destDir.canonicalFile
-        GzipCompressorInputStream(BufferedInputStream(archive.inputStream())).use { gz ->
+        GzipCompressorInputStream(input).use { gz ->
             TarArchiveInputStream(gz).use { tar ->
                 var entry = tar.nextEntry
                 while (entry != null) {
@@ -801,6 +924,10 @@ class RuntimeInstaller(private val context: Context) {
                         entry.isDirectory -> out.mkdirs()
                         entry.isSymbolicLink -> {
                             out.parentFile?.mkdirs()
+                            // Delete first so a re-extract replaces a stale link
+                            // instead of silently keeping it (Os.symlink fails
+                            // with EEXIST and the runCatching would hide it).
+                            runCatching { out.delete() }
                             runCatching { Os.symlink(entry.linkName, out.absolutePath) }
                         }
                         entry.isLink -> {
@@ -835,6 +962,8 @@ class RuntimeInstaller(private val context: Context) {
         termux: TermuxEnvironment,
         onProgress: suspend (RuntimeInstallProgress) -> Unit,
     ) {
+        // v77: the prebuilt bundle inside the APK wins; network is fallback.
+        if (installHermesFromApkBundle(termux, onProgress)) return
         val home = File(termux.prefix, "home").apply { mkdirs() }
         // uv MUST come from Termux's own repo (native bionic build): pip
         // only finds uv's sdist on this platform and tries to compile it
@@ -849,10 +978,10 @@ class RuntimeInstaller(private val context: Context) {
         // glibc CPython (pinned python-build-standalone), extracted once.
         val optDir = File(termux.prefix, "opt").apply { mkdirs() }
         val glibcPythonHome = File(optDir, "python-glibc")
-        val glibcPython = File(glibcPythonHome, "bin/python3.13")
+        val glibcPython = File(glibcPythonHome, "bin/python3.14")
         if (!glibcPython.exists()) {
             onProgress(RuntimeInstallProgress("Hermes (Termux): glibc Python download ho raha hai…", 0.12f))
-            val tarball = File(downloads, "cpython-glibc-3.13.tar.gz")
+            val tarball = File(downloads, "cpython-glibc-3.14.tar.gz")
             downloadVerified(GLIBC_PYTHON_URL, tarball, GLIBC_PYTHON_SHA256) { bytes, total ->
                 val ratio = if (total > 0L) bytes.toFloat() / total else 0f
                 onProgress(
@@ -880,9 +1009,9 @@ class RuntimeInstaller(private val context: Context) {
             cd __HOME__
             if [ -d hermes/.git ]; then git -C hermes pull --ff-only || true; else git clone --depth 1 https://github.com/radhesolanki319-pixel/Hermes-agent- hermes; fi
             cd hermes
-            __GRUN__ "${'$'}PREFIX/glibc/bin/patchelf" --set-interpreter "${'$'}PREFIX/glibc/lib/ld-linux-aarch64.so.1" "${'$'}PREFIX/opt/python-glibc/bin/python3.13"
+            __GRUN__ "${'$'}PREFIX/glibc/bin/patchelf" --set-interpreter "${'$'}PREFIX/glibc/lib/ld-linux-aarch64.so.1" "${'$'}PREFIX/opt/python-glibc/bin/python3.14"
             rm -rf .venv
-            uv sync --no-dev --python "${'$'}PREFIX/opt/python-glibc/bin/python3.13"
+            uv sync --no-dev --python "${'$'}PREFIX/opt/python-glibc/bin/python3.14"
             .venv/bin/hermes --version
         """.trimIndent()
             .replace("__HOME__", home.absolutePath)
@@ -946,16 +1075,13 @@ class RuntimeInstaller(private val context: Context) {
         termux: TermuxEnvironment,
         onProgress: suspend (RuntimeInstallProgress) -> Unit,
     ) {
+        // v77: the prebuilt bundle inside the APK wins; network is fallback.
+        if (installClaudeFromApkBundle(termux, onProgress)) return
         if (!File(termux.prefix, "bin/grun").exists() && !File(termux.prefix, "glibc/bin/grun").exists()) {
             onProgress(RuntimeInstallProgress("Claude Code (Termux): glibc runtime install ho raha hai…", 0.05f))
             termux.install(listOf("glibc-runner")) { line ->
                 onProgress(RuntimeInstallProgress(line, 0.1f))
             }.exceptionOrNull()?.let { throw it }
-        }
-        val grun = if (File(termux.prefix, "bin/grun").exists()) {
-            File(termux.prefix, "bin/grun").absolutePath
-        } else {
-            File(termux.prefix, "glibc/bin/grun").absolutePath
         }
         val latest = JSONObject(
             fetchText("https://registry.npmjs.org/@anthropic-ai/claude-code/latest"),
@@ -981,20 +1107,7 @@ class RuntimeInstaller(private val context: Context) {
         downloaded.copyTo(real, overwrite = true)
         Os.chmod(real.absolutePath, 0b111101101)
         downloaded.delete()
-        val wrapper = File(binDir, "claude")
-        wrapper.writeText(
-            "#!/bin/sh\n" +
-                "export PATH=\"${termux.prefix.absolutePath}/glibc/bin:\$PATH\"\n" +
-                "exec \"$grun\" \"${real.absolutePath}\" \"\$@\"\n",
-        )
-        Os.chmod(wrapper.absolutePath, 0b111101101)
-        onProgress(RuntimeInstallProgress("Claude Code (Termux): verify ho raha hai…", 0.9f))
-        val out = runTermuxCapture(termux, "\"${wrapper.absolutePath}\" --version 2>&1")
-        check(Regex("[0-9]+\\.[0-9]+\\.[0-9]+").containsMatchIn(out)) {
-            "Claude Code (Termux) verify fail: ${out.take(300)}"
-        }
-        termuxClaudeMarker(termux).writeText(latest)
-        onProgress(RuntimeInstallProgress("Claude Code (Termux) ready hai", 1f))
+        finishClaudeTermuxInstall(termux, latest, onProgress)
     }
 
     private suspend fun installHermesFromBundle(
@@ -2831,11 +2944,21 @@ exec 3<&-
         // v55: rebuilt from the rewritten main (custom mods + MAX POWER).
         const val HERMES_VERSION = "2026.11.22"
 
-        /** Pinned glibc CPython (python-build-standalone) for the Hermes venv. */
+        /** Claude Code version inside the v77 APK bundle (agents-bundle-v1). */
+        const val BUNDLED_CLAUDE_VERSION = "2.1.330"
+
+        /**
+         * Pinned glibc CPython (python-build-standalone) for the Hermes venv.
+         * v77: 3.14.10, NOT 3.13 — Hermes 2026.11.22 gates every core
+         * dependency to python_version >= '3.14', so a 3.13 interpreter
+         * resolves ZERO dependencies and Hermes can never start (that is
+         * why the v75 network install failed on-device). SHA-256 verified
+         * against the release's official SHA256SUMS.
+         */
         const val GLIBC_PYTHON_URL =
-            "https://github.com/astral-sh/python-build-standalone/releases/download/20261110/cpython-3.13.18%2B20261110-aarch64-unknown-linux-gnu-install_only.tar.gz"
+            "https://github.com/astral-sh/python-build-standalone/releases/download/20261110/cpython-3.14.10%2B20261110-aarch64-unknown-linux-gnu-install_only.tar.gz"
         const val GLIBC_PYTHON_SHA256 =
-            "d25a65036d5e149db902fa52ad65878d0c00e9301360ec197832f99063087e9e"
+            "e59f83159984a55e719bb3805a0b2b5b281f645769222218084b78b92eedc07f"
 
         /**
          * The aiohttp pin the pinned Hermes wheel's own metadata
