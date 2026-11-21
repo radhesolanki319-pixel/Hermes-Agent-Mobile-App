@@ -2495,6 +2495,7 @@ class RuntimeInstaller(private val context: Context) {
         val effectiveArgv = if (isHermesSpawn) {
             listOf(
                 File(prefix, "bin/python3.11").absolutePath,
+                "-u",
                 "-m",
                 "hermes_cli.main",
             ) + translatedArgv.drop(1)
@@ -2544,6 +2545,7 @@ class RuntimeInstaller(private val context: Context) {
                 put("HERMES_HOME", hermesHome.absolutePath)
                 put("PATH", "${prefix.absolutePath}/bin:" + (get("PATH") ?: ""))
                 put("LD_LIBRARY_PATH", "${prefix.absolutePath}/lib")
+                put("PYTHONUNBUFFERED", "1")
 
                 val dotHermes = File(home, ".hermes")
                 val hermesCfg = File(hermesHome, "config.yaml")
