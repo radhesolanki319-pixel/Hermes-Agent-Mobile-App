@@ -203,6 +203,15 @@ class RuntimeInstaller(private val context: Context) {
     }
 
     suspend fun reinstallClaude(onProgress: suspend (RuntimeInstallProgress) -> Unit) {
+        // Termux: wipe the wrapper + binary + marker and reinstall.
+        val termux = TermuxEnvironment(context)
+        if (termux.isInstalled()) {
+            termuxClaudeMarker(termux).delete()
+            File(termux.prefix, "bin/claude").delete()
+            File(termux.prefix, "bin/claude-real").delete()
+            installClaudeOnTermux(termux, onProgress)
+            return
+        }
         val runtime = installedRuntime()
         claudeMarker.delete()
         File(rootfs, CLAUDE_GUEST_PATH.removePrefix("/")).delete()
@@ -216,6 +225,10 @@ class RuntimeInstaller(private val context: Context) {
     private fun termuxHermesBinary(termux: TermuxEnvironment): File =
         File(termux.prefix, "home/hermes/.venv/bin/hermes")
 
+    /** Where Termux-side Claude Code records its installed version. */
+    private fun termuxClaudeMarker(termux: TermuxEnvironment): File =
+        File(termux.prefix, ".claude-installed")
+
     suspend fun ensureAgentInstalled(
         agent: com.jarves.mh.model.AgentKind,
         onProgress: suspend (RuntimeInstallProgress) -> Unit,
@@ -225,6 +238,10 @@ class RuntimeInstaller(private val context: Context) {
         val termux = TermuxEnvironment(context)
         if (agent == com.jarves.mh.model.AgentKind.HERMES && termux.isInstalled()) {
             if (!isAgentInstalled(agent)) installHermesOnTermux(termux, onProgress)
+            return
+        }
+        if (agent == com.jarves.mh.model.AgentKind.CLAUDE_CODE && termux.isInstalled()) {
+            if (!isAgentInstalled(agent)) installClaudeOnTermux(termux, onProgress)
             return
         }
         val runtime = installedRuntime()
@@ -254,9 +271,17 @@ class RuntimeInstaller(private val context: Context) {
     fun isAgentInstalled(agent: com.jarves.mh.model.AgentKind): Boolean {
         return when (agent) {
             com.jarves.mh.model.AgentKind.CLAUDE_CODE -> {
-                migrateLegacyClaudeMarker()
-                isInstalled() && File(rootfs, CLAUDE_GUEST_PATH.removePrefix("/")).canExecute() &&
-                    !claudeMarker.readTextOrNull().isNullOrBlank()
+                // Termux: Claude lives at <prefix>/bin/claude (a glibc-runner
+                // wrapper). Rootfs state from the PRoot era no longer counts.
+                val termux = TermuxEnvironment(context)
+                if (termux.isInstalled()) {
+                    File(termux.prefix, "bin/claude").canExecute() &&
+                        !termuxClaudeMarker(termux).readTextOrNull().isNullOrBlank()
+                } else {
+                    migrateLegacyClaudeMarker()
+                    isInstalled() && File(rootfs, CLAUDE_GUEST_PATH.removePrefix("/")).canExecute() &&
+                        !claudeMarker.readTextOrNull().isNullOrBlank()
+                }
             }
             com.jarves.mh.model.AgentKind.ANTIGRAVITY -> isInstalled() &&
                 File(rootfs, AGY_GUEST_PATH.removePrefix("/")).canExecute() &&
@@ -349,8 +374,11 @@ class RuntimeInstaller(private val context: Context) {
      * would subsequently offer an agent update.
      */
     fun installedAgentVersions(): Map<com.jarves.mh.model.AgentKind, String> = buildMap {
-        migrateLegacyClaudeMarker()
-        claudeMarker.readTextOrNull()
+        val termuxClaudeEnv = TermuxEnvironment(context)
+        val claudeMarkerFile =
+            if (termuxClaudeEnv.isInstalled()) termuxClaudeMarker(termuxClaudeEnv) else claudeMarker
+        if (!termuxClaudeEnv.isInstalled()) migrateLegacyClaudeMarker()
+        claudeMarkerFile.readTextOrNull()
             ?.trim()
             ?.takeIf { isAgentInstalled(com.jarves.mh.model.AgentKind.CLAUDE_CODE) && it.matches(CLAUDE_VERSION_PATTERN) }
             ?.let { put(com.jarves.mh.model.AgentKind.CLAUDE_CODE, it) }
@@ -419,7 +447,11 @@ class RuntimeInstaller(private val context: Context) {
     ) {
         val runtime = installedRuntime()
         when (agent) {
-            com.jarves.mh.model.AgentKind.CLAUDE_CODE -> updateClaude(runtime, expectedVersion, onProgress)
+            com.jarves.mh.model.AgentKind.CLAUDE_CODE -> {
+                val termux = TermuxEnvironment(context)
+                if (termux.isInstalled()) installClaudeOnTermux(termux, onProgress)
+                else updateClaude(runtime, expectedVersion, onProgress)
+            }
             com.jarves.mh.model.AgentKind.ANTIGRAVITY -> updateAgy(runtime, expectedVersion, onProgress)
             com.jarves.mh.model.AgentKind.HERMES -> updateHermes(runtime, expectedVersion, onProgress)
             com.jarves.mh.model.AgentKind.NATIVE -> Unit
@@ -781,6 +813,91 @@ class RuntimeInstaller(private val context: Context) {
         }
         termuxHermesMarker(termux).writeText(HERMES_VERSION)
         onProgress(RuntimeInstallProgress("Hermes (Termux) ready hai", 1f))
+    }
+
+    /** Runs a Termux shell command and returns its combined output. */
+    private fun runTermuxCapture(termux: TermuxEnvironment, command: String): String {
+        val process = termux.startShell(command, File(termux.prefix, "home"))
+        val text = StringBuilder()
+        val reader = kotlin.concurrent.thread(isDaemon = true) {
+            runCatching {
+                process.inputStream.bufferedReader().forEachLine {
+                    synchronized(text) { text.append(it).append('\n') }
+                }
+            }
+        }
+        if (!process.waitFor(90, java.util.concurrent.TimeUnit.SECONDS)) {
+            runCatching { process.destroy() }
+            throw IllegalStateException("Termux command timeout: $command")
+        }
+        runCatching { reader.join(1_000) }
+        return synchronized(text) { text.toString() }
+    }
+
+    /**
+     * Termux Claude Code install: the official linux-arm64 binary is a glibc
+     * executable, so it cannot run on Android's bionic libc directly. The
+     * community-proven route is Termux's own glibc repo: glibc-runner (grun)
+     * patchelf-loads glibc binaries under the Termux glibc. Layout:
+     * <prefix>/bin/claude-real is the untouched official binary and
+     * <prefix>/bin/claude is a tiny wrapper that execs it through grun — the
+     * bridge's guest path /usr/local/bin/claude translates to the wrapper,
+     * so no bridge change is needed. The install only records its marker
+     * after `claude --version` really runs on the device.
+     */
+    private suspend fun installClaudeOnTermux(
+        termux: TermuxEnvironment,
+        onProgress: suspend (RuntimeInstallProgress) -> Unit,
+    ) {
+        if (!File(termux.prefix, "bin/grun").exists() && !File(termux.prefix, "glibc/bin/grun").exists()) {
+            onProgress(RuntimeInstallProgress("Claude Code (Termux): glibc runtime install ho raha hai…", 0.05f))
+            termux.install(listOf("glibc-runner")) { line ->
+                onProgress(RuntimeInstallProgress(line, 0.1f))
+            }.exceptionOrNull()?.let { throw it }
+        }
+        val grun = if (File(termux.prefix, "bin/grun").exists()) {
+            File(termux.prefix, "bin/grun").absolutePath
+        } else {
+            File(termux.prefix, "glibc/bin/grun").absolutePath
+        }
+        val latest = JSONObject(
+            fetchText("https://registry.npmjs.org/@anthropic-ai/claude-code/latest"),
+        ).getString("version")
+        val base = "https://downloads.claude.ai/claude-code-releases/$latest"
+        val manifest = JSONObject(fetchText("$base/manifest.json"))
+        val checksum = manifest.getJSONObject("platforms").getJSONObject("linux-arm64").getString("checksum")
+        val binDir = File(termux.prefix, "bin").apply { mkdirs() }
+        val real = File(binDir, "claude-real")
+        val downloaded = File(downloads, "claude-termux-$latest")
+        downloadVerified("$base/linux-arm64/claude", downloaded, checksum) { bytes, total ->
+            val ratio = if (total > 0L) bytes.toFloat() / total else 0f
+            onProgress(
+                RuntimeInstallProgress(
+                    "Claude Code $latest download ho raha hai…",
+                    0.15f + ratio * 0.5f,
+                    bytes,
+                    total.takeIf { it > 0L },
+                    event = RuntimeInstallEvent.DOWNLOAD,
+                ),
+            )
+        }
+        downloaded.copyTo(real, overwrite = true)
+        Os.chmod(real.absolutePath, 0b111101101)
+        downloaded.delete()
+        val wrapper = File(binDir, "claude")
+        wrapper.writeText(
+            "#!/bin/sh\n" +
+                "export PATH=\"${termux.prefix.absolutePath}/glibc/bin:\$PATH\"\n" +
+                "exec \"$grun\" \"${real.absolutePath}\" \"\$@\"\n",
+        )
+        Os.chmod(wrapper.absolutePath, 0b111101101)
+        onProgress(RuntimeInstallProgress("Claude Code (Termux): verify ho raha hai…", 0.9f))
+        val out = runTermuxCapture(termux, "\"${wrapper.absolutePath}\" --version 2>&1")
+        check(Regex("[0-9]+\.[0-9]+\.[0-9]+").containsMatchIn(out)) {
+            "Claude Code (Termux) verify fail: ${out.take(300)}"
+        }
+        termuxClaudeMarker(termux).writeText(latest)
+        onProgress(RuntimeInstallProgress("Claude Code (Termux) ready hai", 1f))
     }
 
     private suspend fun installHermesFromBundle(

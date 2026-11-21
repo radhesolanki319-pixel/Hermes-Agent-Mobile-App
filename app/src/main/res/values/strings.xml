@@ -539,7 +539,7 @@
     <string name="agents_installed">Installed · v%1$s</string>
     <string name="agents_not_installed">Not installed</string>
     <string name="agents_builtin">Built-in · always ready</string>
-    <string name="agents_hermes_source">Tumhare GitHub repo (Hermes-agent-) ke latest Hermes ka bundle install hota hai</string>
+    <string name="agents_hermes_source">Termux par tumhare GitHub repo (Hermes-agent-) se automatic install hota hai — kuch tap nahi karna</string>
     <string name="agents_claude_source">Install ke time sabse latest Claude Code release download hota hai</string>
     <string name="agents_native_source">App ke andar built-in hai — kuch install nahi karna</string>
     <string name="agents_update_to">Update to %1$s</string>

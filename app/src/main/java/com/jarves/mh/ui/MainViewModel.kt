@@ -2621,7 +2621,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
             autoPingApi()
             checkForAppUpdate()
-            maybeAutoInstallHermes()
+            maybeAutoInstallAgents()
             autoUpdateHermesIfNeeded()
             // Phone control (Shizuku): restore the bridge when the user
             // left the feature enabled.
@@ -2639,11 +2639,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      * separate "install Hermes" action. The install itself is a local bundle
      * extraction; [installAgent] applies all the usual guards.
      */
-    private fun maybeAutoInstallHermes() {
-        val hermesInstalled = installer.isAgentInstalled(AgentKind.HERMES)
-        val claudeInstalled = installer.isAgentInstalled(AgentKind.CLAUDE_CODE)
-        if (!hermesInstalled && !claudeInstalled) {
-            installAgent(AgentKind.HERMES)
+    private var autoInstallLaunched = false
+
+    private fun maybeAutoInstallAgents() {
+        if (autoInstallLaunched) return
+        autoInstallLaunched = true
+        val needHermes = !installer.isAgentInstalled(AgentKind.HERMES)
+        val needClaude = !installer.isAgentInstalled(AgentKind.CLAUDE_CODE)
+        if (!needHermes && !needClaude) return
+        viewModelScope.launch {
+            if (needHermes) {
+                installAgent(AgentKind.HERMES)
+                delay(300)
+                while (_state.value.agentInstalling != null) delay(500)
+            }
+            if (needClaude && _state.value.agentInstalling == null && !_state.value.isRunning) {
+                installAgent(AgentKind.CLAUDE_CODE)
+            }
         }
     }
 

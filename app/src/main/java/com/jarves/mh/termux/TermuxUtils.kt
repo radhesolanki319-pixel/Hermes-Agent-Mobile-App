@@ -11,13 +11,15 @@ data class PkgMeta(
     val filename: String,
     val size: Long,
     val sha256: String,
+    /** Which repo this package came from: "main" (termux-main) or "glibc" (termux-glibc). */
+    val repo: String = "main",
     val description: String = "",
     val installedSize: Long = 0L,
 )
 
 /** Parses the Debian Packages index served by the Termux repository. */
 object PackageIndex {
-    fun parse(text: String): Map<String, PkgMeta> {
+    fun parse(text: String, repo: String = "main"): Map<String, PkgMeta> {
         val out = mutableMapOf<String, PkgMeta>()
         text.split(Regex("\\n\\n")).forEach { block ->
             val fields = mutableMapOf<String, String>()
@@ -52,6 +54,7 @@ object PackageIndex {
                 filename = filename,
                 size = fields["Size"]?.toLongOrNull() ?: 0L,
                 sha256 = fields["SHA256"] ?: "",
+                repo = repo,
                 description = desc,
                 installedSize = fields["Installed-Size"]?.toLongOrNull() ?: 0L,
             )

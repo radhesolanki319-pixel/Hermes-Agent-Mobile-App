@@ -142,6 +142,9 @@ class TermuxEnvironment(private val context: Context) {
     private fun indexUrl(base: String): String =
         "$base/dists/stable/main/binary-${abiName()}/Packages"
 
+    private fun glibcIndexUrl(glibcBase: String): String =
+        "$glibcBase/dists/glibc/stable/binary-${abiName()}/Packages"
+
     suspend fun getPackageIndex(forceRefresh: Boolean = false): Map<String, PkgMeta> =
         withContext(Dispatchers.IO) {
             if (!forceRefresh) indexCache?.let { return@withContext it }
@@ -150,7 +153,17 @@ class TermuxEnvironment(private val context: Context) {
             // Termux's own hosts.
             for (host in PackageMirrors.official) {
                 try {
-                    val parsed = PackageIndex.parse(fetchText(indexUrl(host)))
+                    val parsed = PackageIndex.parse(fetchText(indexUrl(host))).toMutableMap()
+                    // The termux-glibc repo carries glibc-runner & friends —
+                    // the loader that lets glibc binaries (Claude Code) run
+                    // on Termux. Best-effort merge: the main repo must keep
+                    // working even when the glibc repo is unreachable, and
+                    // main-repo entries always win name collisions.
+                    runCatching {
+                        val glibcHost = host.replace("termux-main", "termux-glibc")
+                        PackageIndex.parse(fetchText(glibcIndexUrl(glibcHost)), repo = "glibc")
+                            .forEach { (name, meta) -> parsed.putIfAbsent(name, meta) }
+                    }
                     indexCache = parsed
                     return@withContext parsed
                 } catch (e: CancellationException) {
@@ -226,7 +239,7 @@ class TermuxEnvironment(private val context: Context) {
                     }
                     val debFile = File(tempDir, debBase)
                     onProgress("Download ${i + 1}/${closure.size}: ${pkg.name}")
-                    downloadPoolFile(fileField, debFile, pkg.sha256)
+                    downloadPoolFile(fileField, debFile, pkg.sha256, pkg.repo)
                     onProgress("Install ${i + 1}/${closure.size}: ${pkg.name}")
                     extractDeb(debFile)
                     debFile.delete()
@@ -277,10 +290,16 @@ class TermuxEnvironment(private val context: Context) {
      * match the official checksum, so a stale or broken mirror only costs a
      * retry. Without a checksum, only Termux's own hosts are trusted.
      */
-    private suspend fun downloadPoolFile(fileField: String, dest: File, expectedSha256: String) {
-        val ranked = PackageMirrors.ranked()
+    private suspend fun downloadPoolFile(fileField: String, dest: File, expectedSha256: String, repo: String = "main") {
+        // glibc packages only exist on Termux's own glibc hosts (the public
+        // mirrors carry termux-main only).
+        val ranked = if (repo == "glibc") {
+            PackageMirrors.official.map { it.replace("termux-main", "termux-glibc") }
+        } else {
+            PackageMirrors.ranked()
+        }
         val hosts = ranked
-            .let { if (expectedSha256.isBlank()) it.filter { h -> h in PackageMirrors.official } else it }
+            .let { if (expectedSha256.isBlank() && repo != "glibc") it.filter { h -> h in PackageMirrors.official } else it }
             .ifEmpty { listOf(BASE_URL) }
             .take(MAX_DOWNLOAD_HOSTS)
         var failure: Exception? = null
