@@ -18,7 +18,7 @@ class HermesConfigFilesTest {
         baseUrl = "https://api.deepseek.com/v1",
     )
     private val customRoute = HermesRoute(
-        provider = "custom-provider",
+        provider = "custom",
         keyEnv = "CUSTOM_PROVIDER_API_KEY",
         baseUrl = "https://llm.example.com/v1",
         custom = true,
@@ -129,11 +129,11 @@ class HermesConfigFilesTest {
     @Test
     fun freshCustomConfigWritesNamedProviderWithoutModelBaseUrl() {
         val config = HermesConfigFiles.freshConfig(customRoute, "my-model")
-        assertTrue(config.contains("  provider: 'custom-provider'\n"))
+        assertTrue(config.contains("  provider: 'custom'\n"))
         assertFalse(config.contains("base_url"))
         assertTrue(
             config.contains(
-                "providers:\n  custom-provider:\n    name: 'Custom endpoint'\n" +
+                "providers:\n  custom:\n    name: 'Custom endpoint'\n" +
                     "    api: 'https://llm.example.com/v1'\n    key_env: CUSTOM_PROVIDER_API_KEY\n",
             ),
         )
@@ -187,12 +187,12 @@ class HermesConfigFilesTest {
     fun mergeToCustomRemovesStaleModelBaseUrlAndAddsProviderBlock() {
         val existing = HermesConfigFiles.freshConfig(anthropicRoute, "claude-sonnet-4")
         val merged = HermesConfigFiles.mergedConfig(existing, customRoute, "my-model")
-        assertTrue(merged.contains("  provider: 'custom-provider'\n"))
+        assertTrue(merged.contains("  provider: 'custom'\n"))
         // The Anthropic endpoint must not leak into the custom route.
         assertFalse(merged.contains("api.anthropic.com"))
         assertTrue(
             merged.contains(
-                "providers:\n  custom-provider:\n    name: 'Custom endpoint'\n" +
+                "providers:\n  custom:\n    name: 'Custom endpoint'\n" +
                     "    api: 'https://llm.example.com/v1'\n    key_env: CUSTOM_PROVIDER_API_KEY\n",
             ),
         )

@@ -900,7 +900,7 @@ class RuntimeInstaller(private val context: Context) {
             rm -rf $HERMES_PREFIX_GUEST_PATH/venv
             $UV_GUEST_PATH venv --python 3.14 $HERMES_PREFIX_GUEST_PATH/venv
             printf 'pillow==13.0.0\n' > /tmp/hermes-overrides.txt
-            $UV_GUEST_PATH pip install --python $HERMES_PREFIX_GUEST_PATH/venv/bin/python --overrides /tmp/hermes-overrides.txt "hermes-agent[acp,mcp] @ https://github.com/NousResearch/hermes-agent/archive/refs/tags/v$version.tar.gz" "$HERMES_AIOHTTP_SPEC"
+            $UV_GUEST_PATH pip install --python $HERMES_PREFIX_GUEST_PATH/venv/bin/python --overrides /tmp/hermes-overrides.txt "hermes-agent[acp,mcp] @ https://github.com/radhesolanki319-pixel/Hermes-agent-/archive/refs/heads/main.tar.gz" "$HERMES_AIOHTTP_SPEC"
             $HERMES_GUEST_PATH --version
         """.trimIndent()
         runGuestCommand(
