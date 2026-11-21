@@ -31,6 +31,7 @@ import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
 import org.apache.commons.compress.compressors.gzip.GzipCompressorInputStream
 import org.apache.commons.compress.compressors.zstandard.ZstdCompressorInputStream
 import org.json.JSONObject
+import com.jarves.mh.termux.TermuxEnvironment
 
 data class InstalledRuntime(
     val proot: File,
@@ -89,6 +90,10 @@ class RuntimeInstaller(private val context: Context) {
         AppStrings.get(context, id, *args)
 
     fun isInstalled(): Boolean {
+        // Termux cut-over (transitional): a working Termux environment counts
+        // as "runtime installed" everywhere the PRoot core did. Stage E makes
+        // this the only runtime.
+        if (TermuxEnvironment(context).isInstalled()) return true
         val proot = File(context.applicationInfo.nativeLibraryDir, "libproot.so")
         val rootfsLayoutReady = ensureRootfsCompatibilityLinks()
         // Devices set up before staged toolchains keep working through the legacy marker;
@@ -1840,6 +1845,19 @@ class RuntimeInstaller(private val context: Context) {
         ptyRows: Int = 40,
         ptyColumns: Int = 120,
     ): Process {
+        // Termux cut-over: once the Termux environment is installed it fully
+        // replaces the PRoot guest for process execution. Guest paths in the
+        // command and environment are translated to the real filesystem, the
+        // Termux process environment is overlaid, and the same
+        // NativeSpawnProcess handle is returned, so every bridge keeps
+        // working unchanged. (Transitional: Stage E deletes the PRoot path.)
+        val termux = TermuxEnvironment(context)
+        if (termux.isInstalled()) {
+            return termuxProcess(
+                termux, workspace, environment, guestCommand, guestWorkspacePath,
+                outputFile, pseudoTerminal, ptyRows, ptyColumns,
+            )
+        }
         check(ensureRootfsCompatibilityLinks()) { "Core runtime has an invalid Linux filesystem layout" }
         require(
             guestWorkspacePath == "/workspace" ||
@@ -1931,6 +1949,106 @@ class RuntimeInstaller(private val context: Context) {
             ptyRows = ptyRows,
             ptyColumns = ptyColumns,
         )
+    }
+
+    /**
+     * The Termux twin of [process]: same contract, no PRoot. Translates the
+     * guest command line and environment onto the real filesystem (see the
+     * path rules in [termuxProcess]'s translate), spawns through
+     * [NativeSpawnProcess] so callers keep the handle type they cast to, and
+     * launches the outermost binary through the dynamic linker when the
+     * app's targetSdk blocks direct execution of app-private files.
+     */
+    private fun termuxProcess(
+        termux: TermuxEnvironment,
+        workspace: File,
+        environment: Map<String, String>,
+        guestCommand: List<String>,
+        guestWorkspacePath: String,
+        outputFile: File,
+        pseudoTerminal: Boolean,
+        ptyRows: Int,
+        ptyColumns: Int,
+    ): Process {
+        val prefix = termux.prefix
+        val home = File(prefix, "home")
+        val cwd = resolveTermuxWorkspace(guestWorkspacePath, workspace)
+        cwd.mkdirs()
+        // Sibling projects: /workspace/<slug> → that project's real directory.
+        val siblingPaths: Map<String, String> = runCatching {
+            AppPreferences(context).loadProjects().associate { project ->
+                val base = File(context.filesDir, "workspaces/${project.id}")
+                val host = if (project.rootPath.isBlank()) base else File(base, project.rootPath)
+                "/workspace/${project.slug}" to host.absolutePath
+            }
+        }.getOrDefault(emptyMap())
+
+        fun translate(value: String): String {
+            var out = value
+            // Hermes's venv: guest /root/.pocket-hermes/venv is the uv-sync
+            // venv of the repo cloned at <home>/hermes on the Termux side.
+            out = out.replace(
+                "/root/.pocket-hermes/venv",
+                File(home, "hermes/.venv").absolutePath,
+            )
+            out = out.replace("/pocket-bridge", File(context.filesDir, "runtime-bridge").absolutePath)
+            out = out.replace(guestWorkspacePath, cwd.absolutePath)
+            siblingPaths.forEach { (guest, host) -> out = out.replace(guest, host) }
+            out = out.replace(
+                "/workspace/.agent-chats",
+                File(context.filesDir, "workspaces/.agent-chats").absolutePath,
+            )
+            out = out.replace("/workspace", workspace.absolutePath)
+            out = out.replace("/root", home.absolutePath)
+            val bin = "${prefix.absolutePath}/bin/"
+            out = out.replace("/usr/local/sbin/", bin)
+            out = out.replace("/usr/local/bin/", bin)
+            out = out.replace("/usr/sbin/", bin)
+            out = out.replace("/usr/bin/", bin)
+            out = out.replace("/sbin/", bin)
+            out = out.replace("/bin/", bin)
+            return out
+        }
+
+        val translatedArgv = guestCommand.map { translate(it) }
+        val linker = termux.linkerPath()
+        val needsLinker = linker != null &&
+            context.applicationInfo.targetSdkVersion >= 29 &&
+            translatedArgv.isNotEmpty() && File(translatedArgv[0]).isFile
+        val argv = if (needsLinker) listOf(linker!!) + translatedArgv else translatedArgv
+        val env = buildMap {
+            putAll(termux.processEnv())
+            environment.forEach { (key, value) ->
+                // Termux owns these; caller values are guest-style and would
+                // break the environment (guest PATH, HOME=/root, PRoot's
+                // LD_LIBRARY_PATH pointing at the native lib dir).
+                if (key == "PATH" || key == "HOME" ||
+                    key == "LD_LIBRARY_PATH" || key == "LD_PRELOAD"
+                ) return@forEach
+                put(key, translate(value))
+            }
+        }
+        return NativeSpawnProcess.start(
+            argv = argv,
+            environment = env,
+            cwd = cwd.absolutePath,
+            outputFile = outputFile,
+            pseudoTerminal = pseudoTerminal,
+            ptyRows = ptyRows,
+            ptyColumns = ptyColumns,
+        )
+    }
+
+    /** The real directory a guest workspace path names under Termux. */
+    private fun resolveTermuxWorkspace(guestWorkspacePath: String, workspace: File): File {
+        if (guestWorkspacePath == "/workspace") return workspace
+        val slug = guestWorkspacePath.removePrefix("/workspace/").trim('/')
+        if (slug == ".agent-chats") return File(context.filesDir, "workspaces/.agent-chats")
+        val project = runCatching {
+            AppPreferences(context).loadProjects().firstOrNull { it.slug == slug }
+        }.getOrNull() ?: return workspace
+        val base = File(context.filesDir, "workspaces/${project.id}")
+        return if (project.rootPath.isBlank()) base else File(base, project.rootPath)
     }
 
     /**

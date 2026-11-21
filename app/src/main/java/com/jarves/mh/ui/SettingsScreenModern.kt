@@ -173,6 +173,9 @@ fun SettingsScreen(
     }
     var terminalCleared by remember { mutableStateOf(false) }
     var showReliabilityHelp by rememberSaveable { mutableStateOf(false) }
+    var termuxStatus by remember { mutableStateOf<String?>(null) }
+    var termuxBusy by remember { mutableStateOf(false) }
+    val termuxScope = rememberCoroutineScope()
     var stackPendingRemoval by remember { mutableStateOf<DevStack?>(null) }
 
     stackPendingRemoval?.let { stack ->
@@ -490,6 +493,38 @@ fun SettingsScreen(
                                 RuntimeInfoRow(agent.localizedTitle(), "v$version")
                             }
                         }
+                    }
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                    Text(
+                        "Termux runtime (naya system)",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    val termuxEnv = remember { com.jarves.mh.termux.TermuxEnvironment(context) }
+                    Text(
+                        termuxStatus ?: termuxEnv.checkMissing(),
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Button(
+                        onClick = {
+                            termuxBusy = true
+                            termuxScope.launch {
+                                val result = termuxEnv.install(com.jarves.mh.termux.TermuxEnvironment.fullPackages) { line ->
+                                    termuxStatus = line
+                                }
+                                termuxStatus = result.fold(
+                                    onSuccess = { "Termux ready hai — ab terminal aur agents isi par chalenge." },
+                                    onFailure = { "Termux install fail: ${it.message}" },
+                                )
+                                termuxBusy = false
+                            }
+                        },
+                        enabled = !termuxBusy,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(if (termuxBusy) "Termux install ho raha hai…" else "Termux install karo")
                     }
                     Spacer(Modifier.height(8.dp))
                     OutlinedButton(
