@@ -308,8 +308,11 @@ class RuntimeInstaller(private val context: Context) {
                 // at <prefix>/home/hermes (see installHermesOnTermux).
                 val termux = TermuxEnvironment(context)
                 if (termux.isInstalled()) {
-                    termuxHermesBinary(termux).canExecute() &&
-                        !termuxHermesMarker(termux).readTextOrNull().isNullOrBlank()
+                    val hasBin = termuxHermesBinary(termux).canExecute() ||
+                        File(termux.prefix, "bin/python3.11").canExecute()
+                    val hasAgent = File(termux.prefix, "home/hermes/Hermes-agent-").isDirectory
+                    val hasMarker = !termuxHermesMarker(termux).readTextOrNull().isNullOrBlank()
+                    hasBin && hasAgent && hasMarker
                 } else {
                     isInstalled() &&
                         File(rootfs, HERMES_GUEST_PATH.removePrefix("/")).canExecute() &&
@@ -867,11 +870,23 @@ class RuntimeInstaller(private val context: Context) {
                 ensureBundledPython(termux)
             }
             extractBundledAsset(assetName, termux.prefix)
+            val pyBin = File(termux.prefix, "bin/python3.11")
             val launcher = termuxHermesBinary(termux)
             runCatching { Os.chmod(launcher.absolutePath, 0b111101101) }
             runCatching { Os.chmod(File(termux.prefix, "bin/bash").absolutePath, 0b111101101) }
-            runCatching { Os.chmod(File(termux.prefix, "bin/python3.11").absolutePath, 0b111101101) }
+            runCatching { Os.chmod(pyBin.absolutePath, 0b111101101) }
             runCatching { Os.chmod(File(termux.prefix, "bin/git").absolutePath, 0b111101101) }
+            val venvBin = File(termux.prefix, "home/hermes/.venv/bin")
+            runCatching {
+                val pLink = File(venvBin, "python")
+                pLink.delete()
+                Os.symlink("../../../../bin/python3.11", pLink.absolutePath)
+            }
+            runCatching {
+                val p3Link = File(venvBin, "python3")
+                p3Link.delete()
+                Os.symlink("../../../../bin/python3.11", p3Link.absolutePath)
+            }
             if (isBionic) {
                 File(termux.prefix, ".harness-installed").writeText(
                     "bash\nbusybox\nca-certificates\ntermux-exec\ngit\ngh\npython\npython-pip\nnodejs\nnpm\nuv\n",
@@ -879,7 +894,8 @@ class RuntimeInstaller(private val context: Context) {
             }
             onProgress(RuntimeInstallProgress("Hermes (Termux): verify ho raha hai…", 0.9f))
             val verifyCmd = if (isBionic) {
-                "\"${launcher.absolutePath}\" --version 2>&1"
+                val hermesPyPath = "${File(termux.prefix, "home/hermes/Hermes-agent-").absolutePath}:${File(termux.prefix, "home/hermes/.venv/lib/python3.11/site-packages").absolutePath}"
+                "PYTHONPATH=\"$hermesPyPath\" HERMES_HOME=\"${File(termux.prefix, "home/hermes").absolutePath}\" \"${pyBin.absolutePath}\" -m hermes_cli.main --version 2>&1"
             } else {
                 val cleanEnv = "env -u LD_PRELOAD " +
                     "LD_LIBRARY_PATH=\"${termux.prefix.absolutePath}/glibc/lib\""
@@ -2228,6 +2244,15 @@ class RuntimeInstaller(private val context: Context) {
             File(context.filesDir, "runtime-bridge").apply {
                 mkdirs(); listFiles()?.forEach { runCatching { it.delete() } }
             }
+            if (bundledAssetPresent("hermes-bionic.bin")) {
+                val pyBin = File(termux.prefix, "bin/python3.11")
+                val hermesAgentDir = File(termux.prefix, "home/hermes/Hermes-agent-")
+                val marker = termuxHermesMarker(termux)
+                if (!pyBin.canExecute() || !hermesAgentDir.isDirectory || !marker.exists() || marker.readText().trim() != HERMES_VERSION) {
+                    onProgress(RuntimeInstallProgress("Termux Bionic + Hermes unpack ho raha hai…", 0.15f))
+                    installHermesFromApkBundle(termux, onProgress)
+                }
+            }
             return InstalledRuntime(termux.prefix, termux.prefix)
         }
         val installed = installedRuntime()
@@ -2422,11 +2447,59 @@ class RuntimeInstaller(private val context: Context) {
         }
 
         val translatedArgv = guestCommand.map { translate(it) }
+
+        // Self-heal: ensure bundled Bionic Termux + Hermes rootfs is unpacked before spawning
+        if (bundledAssetPresent("hermes-bionic.bin")) {
+            val pyBin = File(prefix, "bin/python3.11")
+            val hermesAgentDir = File(home, "hermes/Hermes-agent-")
+            val marker = termuxHermesMarker(termux)
+            if (!pyBin.canExecute() || !hermesAgentDir.isDirectory || !marker.exists() || marker.readText().trim() != HERMES_VERSION) {
+                android.util.Log.i("RuntimeInstaller", "Auto-healing bundled hermes-bionic before process execution...")
+                kotlinx.coroutines.runBlocking {
+                    installHermesFromApkBundle(termux) {}
+                }
+            }
+        }
+
+        val isHermesSpawn = translatedArgv.isNotEmpty() && (
+            guestCommand[0] == HERMES_GUEST_PATH ||
+            translatedArgv[0] == termuxHermesBinary(termux).absolutePath ||
+            translatedArgv[0].endsWith("/home/hermes/.venv/bin/hermes")
+        )
+
+        val effectiveArgv = if (isHermesSpawn) {
+            listOf(
+                File(prefix, "bin/python3.11").absolutePath,
+                "-m",
+                "hermes_cli.main",
+            ) + translatedArgv.drop(1)
+        } else {
+            translatedArgv
+        }
+
+        val targetBinary = File(effectiveArgv[0])
+        val isElfBinary = termux.isElf(targetBinary)
         val linker = termux.linkerPath()
         val needsLinker = linker != null &&
             context.applicationInfo.targetSdkVersion >= 29 &&
-            translatedArgv.isNotEmpty() && File(translatedArgv[0]).isFile
-        val argv = if (needsLinker) listOf(linker!!) + translatedArgv else translatedArgv
+            effectiveArgv.isNotEmpty() &&
+            isElfBinary
+
+        val argv = when {
+            needsLinker -> listOf(linker!!) + effectiveArgv
+            targetBinary.isFile && !isElfBinary -> {
+                // Script with shebang: dynamic linker fails on non-ELF files ("bad ELF magic").
+                // Execute script via Termux bash or /system/bin/sh.
+                val bash = File(prefix, "bin/bash")
+                if (bash.isFile && linker != null) {
+                    listOf(linker, bash.absolutePath) + effectiveArgv
+                } else {
+                    listOf("/system/bin/sh") + effectiveArgv
+                }
+            }
+            else -> effectiveArgv
+        }
+
         val env = buildMap {
             putAll(termux.processEnv())
             environment.forEach { (key, value) ->
@@ -2438,18 +2511,18 @@ class RuntimeInstaller(private val context: Context) {
                 ) return@forEach
                 put(key, translate(value))
             }
+            if (isHermesSpawn) {
+                val hermesHome = File(home, "hermes")
+                val hermesAgent = File(hermesHome, "Hermes-agent-")
+                val venvPkgs = File(hermesHome, ".venv/lib/python3.11/site-packages")
+                put("PYTHONPATH", "${hermesAgent.absolutePath}:${venvPkgs.absolutePath}")
+                put("HERMES_HOME", hermesHome.absolutePath)
+                put("PATH", "${prefix.absolutePath}/bin:" + (get("PATH") ?: ""))
+                put("LD_LIBRARY_PATH", "${prefix.absolutePath}/lib")
+            }
         }
-        // v79 — glibc processes (the Hermes venv and its CPython) must NOT
-        // inherit the shared Termux env: LD_LIBRARY_PATH puts the BIONIC
-        // lib dir first, so the glibc loader picks bionic libssl/libsqlite/
-        // libffi for the venv Python's stdlib modules and it dies at import
-        // time (seen on device, v77/v78: bundled Hermes extracted fine but
-        // `hermes --version` never printed; the same tree ran clean in a
-        // glibc-only env). LD_PRELOAD (bionic termux-exec) likewise does
-        // not belong in a glibc process. Give glibc-tree spawns a clean
-        // loader env: glibc/lib only, no preload.
-        val touchesGlibcTree = translatedArgv.any {
-            it.contains("/home/hermes/.venv/") || it.contains("/opt/python-glibc/")
+        val touchesGlibcTree = !isHermesSpawn && translatedArgv.any {
+            it.contains("/opt/python-glibc/")
         }
         val hasGlibc = File(prefix, "glibc/lib").isDirectory
         val finalEnv = if (touchesGlibcTree && hasGlibc) {

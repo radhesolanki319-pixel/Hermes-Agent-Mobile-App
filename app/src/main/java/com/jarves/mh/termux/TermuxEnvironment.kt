@@ -550,14 +550,16 @@ class TermuxEnvironment(private val context: Context) {
 
     fun bashExecutable(): File? = File(prefix, "bin/bash").takeIf { it.isFile }
 
-    private fun File.isElf(): Boolean = runCatching {
-        inputStream().use { ins ->
+    fun isElf(file: File): Boolean = runCatching {
+        file.inputStream().use { ins ->
             val magic = ByteArray(4)
             ins.read(magic) == 4 &&
                 magic[0] == 0x7f.toByte() && magic[1] == 'E'.code.toByte() &&
                 magic[2] == 'L'.code.toByte() && magic[3] == 'F'.code.toByte()
         }
     }.getOrDefault(false)
+
+    private fun File.isElf(): Boolean = isElf(this)
 
     private fun shellQuote(s: String): String = "'" + s.replace("'", "'\\''") + "'"
 
