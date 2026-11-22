@@ -205,11 +205,7 @@ object HermesProfileRoute {
     fun modelFor(profile: ProviderProfile): String {
         val trimmed = profile.model.trim()
         if (trimmed.isNotBlank()) return trimmed
-        return if (profile.kind == ProviderKind.CUSTOM) {
-            HermesProviderCatalog.CUSTOM_DEF.defaultModel
-        } else {
-            ""
-        }
+        return ""
     }
 }
 

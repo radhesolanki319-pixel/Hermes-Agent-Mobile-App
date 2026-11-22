@@ -201,6 +201,8 @@ class ClaudeRuntimeBridge(
                 guestWorkspacePath = guestWorkspacePath,
             )
             activeProcess = process
+            // Close stdin so Claude Code doesn't wait for piped input.
+            runCatching { process.outputStream.close() }
             if (userStopRequested) process.destroy()
             coroutineScope {
                 val permissionWatcher = launch { watchPermissionRequests(sessionId) }
@@ -229,9 +231,21 @@ class ClaudeRuntimeBridge(
                             pendingOutput.delete(0, newline + 1)
                             if (line.isNotBlank()) {
                                 Log.d("ClaudeBridge", "OUTPUT: $line")
-                                ProviderRuntimeErrorDetector.detect(line)?.let { reason ->
-                                    process.destroyForcibly()
-                                    throw ProviderSessionException(reason)
+                                // Only run provider error detection on error-shaped JSON events
+                                // (e.g., type="result" with is_error=true, or api_retry/system errors).
+                                // Plain text deltas and tool results must never trigger it.
+                                val json = runCatching { JSONObject(line) }.getOrNull()
+                                val isErrorEvent = json?.let {
+                                    it.optString("type") == "result" && it.optBoolean("is_error") == true
+                                } == true || json?.let {
+                                    val subtype = it.optString("subtype")
+                                    subtype == "api_retry" || subtype == "error"
+                                } == true
+                                if (isErrorEvent) {
+                                    ProviderRuntimeErrorDetector.detect(line)?.let { reason ->
+                                        process.destroyForcibly()
+                                        throw ProviderSessionException(reason)
+                                    }
                                 }
                                 if (!consumeClaudeEvent(sessionId, line)) {
                                     lastDiagnostic = line.takeLast(500)

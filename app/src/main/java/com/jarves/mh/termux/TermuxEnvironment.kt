@@ -399,6 +399,11 @@ class TermuxEnvironment(private val context: Context) {
                             // own build prefix; rewrite them relative or they
                             // arrive dangling (bzcmp, bzless, …).
                             val linkName = TermuxLinkRewrite.relativeTarget(e.linkName, rel) ?: e.linkName
+                            // Delete existing non-directory file/symlink to avoid EEXIST on reinstall/upgrade
+                            runCatching {
+                                val isLink = java.nio.file.Files.isSymbolicLink(target.toPath())
+                                if (isLink || (target.exists() && !target.isDirectory)) target.delete()
+                            }
                             runCatching { Os.symlink(linkName, target.absolutePath) }
                         }
                         else -> {

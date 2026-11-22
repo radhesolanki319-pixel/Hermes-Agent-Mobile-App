@@ -136,6 +136,7 @@
     <string name="rt_update_download_failed">Update download failed (HTTP %1$d)</string>
     <string name="rt_update_checksum_failed">Downloaded APK failed its SHA-256 verification</string>
     <string name="rt_update_prepare_failed">Could not prepare the downloaded update</string>
+    <string name="rt_update_download_incomplete">Update download incomplete (%1$d of %2$d bytes)</string>
     <string name="rt_update_invalid_apk">Downloaded file is not a valid APK</string>
     <string name="rt_update_package_mismatch">Update package name does not match Hermes Agent</string>
     <string name="rt_update_version_mismatch">Update version does not match its manifest</string>

@@ -77,7 +77,7 @@ class AppUpdater(
         val connection = URL(info.apkUrl).openConnection() as HttpURLConnection
         try {
             connection.connectTimeout = 15_000
-            connection.readTimeout = 30_000
+            connection.readTimeout = 120_000  // Raised from 30s to 120s for ~125 MB APK
             connection.instanceFollowRedirects = true
             // GitHub release asset downloads require a User-Agent header
             connection.setRequestProperty("User-Agent", "Hermes-Agent-App-Updater")
@@ -97,12 +97,21 @@ class AppUpdater(
                     }
                 }
             }
+        } catch (e: Exception) {
+            // On failure, delete the .part file
+            runCatching { partial.delete() }
+            throw e
         } finally {
             connection.disconnect()
         }
         if (info.sha256.isNotBlank()) {
             val actual = sha256(partial)
             check(actual.equals(info.sha256, ignoreCase = true)) { str(R.string.rt_update_checksum_failed) }
+        }
+        // Verify downloaded size matches expected sizeBytes when known
+        if (info.sizeBytes > 0 && partial.length() != info.sizeBytes) {
+            runCatching { partial.delete() }
+            error(str(R.string.rt_update_download_incomplete, partial.length(), info.sizeBytes))
         }
         verifyApk(partial, info.versionCode)
         if (target.exists()) target.delete()

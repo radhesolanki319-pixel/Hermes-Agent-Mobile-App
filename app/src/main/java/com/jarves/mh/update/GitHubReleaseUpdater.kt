@@ -68,16 +68,46 @@ object GitHubReleaseUpdate {
         val remoteVersionCode = parseVersionCode(root.optString("tag_name")) ?: return null
         if (!isUpdateAvailable(installedVersionCode, remoteVersionCode)) return null
         val assets = root.optJSONArray("assets") ?: return null
-        var apkUrl = ""
-        var apkSize = -1L
+
+        // Collect all .apk assets first, then pick by priority:
+        // 1. Name contains "online" (case-insensitive)
+        // 2. Name matches "Hermes_Agent_v<N>.apk" pattern
+        // 3. First .apk asset
+        val apkAssets = mutableListOf<Pair<String, Long>>()
         for (index in 0 until assets.length()) {
             val asset = assets.optJSONObject(index) ?: continue
-            if (asset.optString("name").endsWith(".apk", ignoreCase = true)) {
-                apkUrl = asset.optString("browser_download_url")
-                apkSize = asset.optLong("size", -1L)
-                break
+            val name = asset.optString("name")
+            if (name.endsWith(".apk", ignoreCase = true)) {
+                val url = asset.optString("browser_download_url")
+                val size = asset.optLong("size", -1L)
+                apkAssets.add(url to size)
             }
         }
+
+        var apkUrl = ""
+        var apkSize = -1L
+        // Priority 1: contains "online"
+        val onlineAsset = apkAssets.firstOrNull { (url, _) -> url.contains("online", ignoreCase = true) }
+        if (onlineAsset != null) {
+            apkUrl = onlineAsset.first
+            apkSize = onlineAsset.second
+        } else {
+            // Priority 2: matches Hermes_Agent_v<N>.apk
+            val versionAsset = apkAssets.firstOrNull { (url, _) ->
+                Regex("Hermes_Agent_v\\d+\\.apk\$", RegexOption.IGNORE_CASE).containsMatchIn(url)
+            }
+            if (versionAsset != null) {
+                apkUrl = versionAsset.first
+                apkSize = versionAsset.second
+            } else if (apkAssets.isNotEmpty()) {
+                // Priority 3: first .apk asset
+                apkUrl = apkAssets[0].first
+                apkSize = apkAssets[0].second
+            } else {
+                return null
+            }
+        }
+
         if (!apkUrl.startsWith("https://")) return null
         return AppUpdateInfo(
             versionCode = remoteVersionCode,

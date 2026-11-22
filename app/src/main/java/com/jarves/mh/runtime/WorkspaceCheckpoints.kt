@@ -55,6 +55,8 @@ class WorkspaceCheckpoints(
         if (File(checkpoint, "project").isDirectory && File(checkpoint, "changes.json").isFile) return
         checkpoint.deleteRecursively()
         val backup = File(checkpoint, "project").apply { mkdirs() }
+        // Write an empty changes.json baseline so read-only turns don't re-copy
+        File(checkpoint, "changes.json").writeText("[]")
         val workspacePath = workspace.canonicalFile.toPath()
         workspace.walkTopDown()
             .onEnter { directory ->
@@ -258,12 +260,20 @@ class WorkspaceCheckpoints(
         .onEnter { directory ->
             directory == root || !isInternalRuntimePath(directory.relativeTo(root).invariantSeparatorsPath)
         }
-        .filter { it.isFile && !isInternalRuntimePath(it.relativeTo(root).invariantSeparatorsPath) }
-        .associate { it.relativeTo(root).path to digest(it) }
+        .filter { it.isFile && !isInternalRuntimePath(it.relativeTo(root).invariantSeparatorsPath) && !java.nio.file.Files.isSymbolicLink(it.toPath()) }
+        .associate { it.relativeTo(root).path to fastFingerprint(it) }
 
     fun changedFiles(root: File, before: Map<String, String>): List<String> {
         val after = snapshot(root)
         return (before.keys + after.keys).distinct().filter { before[it] != after[it] }.sorted()
+    }
+
+    private fun fastFingerprint(file: File): String {
+        // For files > 10 MB, use length + lastModified instead of hashing contents
+        if (file.length() > 10 * 1024 * 1024) {
+            return "${file.length()}:${file.lastModified()}"
+        }
+        return digest(file)
     }
 
     fun isInternalRuntimePath(path: String): Boolean {

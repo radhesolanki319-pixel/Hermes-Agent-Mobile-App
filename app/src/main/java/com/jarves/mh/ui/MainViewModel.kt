@@ -2921,14 +2921,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
             Triple(chats, chat.id, msgs)
         }
+        // Hoist save/load out of the state update lambda to avoid re-running on CAS contention
+        val currentProvider = _state.value.provider
+        preferences.saveProvider(currentProvider, _state.value.agentKind)
+        val provider = preferences.loadProvider(vault, kind)
+        val activeApiKeyName = vault.list(ProviderKeys.canonicalForKind(provider.kind)).firstOrNull(ApiKeyInfo::isActive)?.name
         _state.update { current ->
-            preferences.saveProvider(current.provider, current.agentKind)
-            val provider = preferences.loadProvider(vault, kind)
             val base = current.copy(
                 agentKind = kind,
                 primaryAgentKind = if (selectingInitialAgent) kind else current.primaryAgentKind,
                 provider = provider,
-                activeApiKeyName = vault.list(ProviderKeys.canonicalForKind(provider.kind)).firstOrNull(ApiKeyInfo::isActive)?.name,
+                activeApiKeyName = activeApiKeyName,
                 // Ping results belong to the previous agent; never leak them across.
                 apiPingStatus = ApiPingStatus.IDLE,
                 apiPingMessage = null,
@@ -5573,10 +5576,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun stopTask() {
         if (!_state.value.isRunning) return
+        val stoppedSessionId = _state.value.activeSessionId
+        val stoppedProjectId = _state.value.activeProject?.id
         steeringToFollowUp = false
         pendingFollowUps.clear()
         _state.update { it.copy(queuedFollowUps = emptyList()) }
-        viewModelScope.launch { activeRuntime().stopActiveSession() }
+        viewModelScope.launch {
+            activeRuntime().stopActiveSession()
+            // Force-clear isRunning if the bridge dies silently and doesn't emit SessionCompleted/SessionFailed
+            delay(2000)
+            if (_state.value.isRunning &&
+                _state.value.activeSessionId == stoppedSessionId &&
+                _state.value.activeProject?.id == stoppedProjectId
+            ) {
+                _state.update { it.copy(isRunning = false, activeSessionId = null, taskStartedAtMillis = null) }
+            }
+        }
     }
 
     private fun startNextFollowUp() {

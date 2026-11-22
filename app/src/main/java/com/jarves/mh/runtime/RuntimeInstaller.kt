@@ -308,8 +308,7 @@ class RuntimeInstaller(private val context: Context) {
                 // at <prefix>/home/hermes (see installHermesOnTermux).
                 val termux = TermuxEnvironment(context)
                 if (termux.isInstalled()) {
-                    val hasBin = termuxHermesBinary(termux).canExecute() ||
-                        File(termux.prefix, "bin/python3.11").canExecute()
+                    val hasBin = termuxHermesBinary(termux).canExecute()
                     val hasAgent = File(termux.prefix, "home/hermes/Hermes-agent-").isDirectory
                     val hasMarker = !termuxHermesMarker(termux).readTextOrNull().isNullOrBlank()
                     hasBin && hasAgent && hasMarker
@@ -900,7 +899,7 @@ class RuntimeInstaller(private val context: Context) {
                         baseUrl = HermesProviderCatalog.CUSTOM_DEF.baseUrl,
                         custom = true,
                     )
-                    val defaultCfg = HermesConfigFiles.freshConfig(defaultRoute, HermesProviderCatalog.CUSTOM_DEF.defaultModel)
+                    val defaultCfg = HermesConfigFiles.freshConfig(defaultRoute, "")
                     runCatching { hermesCfg.writeText(defaultCfg) }
                     runCatching {
                         val dotHome = File(termux.prefix, "home/.hermes").apply { mkdirs() }
@@ -909,7 +908,7 @@ class RuntimeInstaller(private val context: Context) {
                 }
                 val hermesEnv = File(hermesHome, ".env")
                 if (!hermesEnv.exists()) {
-                    val defaultEnv = "CUSTOM_PROVIDER_API_KEY=no-key-required\nOPENAI_BASE_URL=https://freellmapi-backup.onrender.com/v1\nOPENAI_API_KEY=no-key-required\n"
+                    val defaultEnv = "CUSTOM_PROVIDER_API_KEY=no-key-required\n"
                     runCatching { hermesEnv.writeText(defaultEnv) }
                     runCatching {
                         val dotHome = File(termux.prefix, "home/.hermes").apply { mkdirs() }
@@ -1004,12 +1003,15 @@ class RuntimeInstaller(private val context: Context) {
         // First run of the 380 MB binary through the glibc loader can be
         // slow on a cold page cache — give it real time, and retry once
         // (the second run is warm) before declaring failure.
-        var out = runTermuxCapture(termux, "\"${wrapper.absolutePath}\" --version 2>&1", 300)
-        if (!Regex("[0-9]+\\.[0-9]+\\.[0-9]+").containsMatchIn(out)) {
-            out = runTermuxCapture(termux, "\"${wrapper.absolutePath}\" --version 2>&1", 300)
+        // Retry on exception (timeout, etc.) as well as on non-matching output.
+        var out: String? = null
+        for (attempt in 1..2) {
+            val result = runCatching { runTermuxCapture(termux, "\"${wrapper.absolutePath}\" --version 2>&1", 300) }.getOrNull()
+            if (result != null) out = result
+            if (out != null && Regex("[0-9]+\\.[0-9]+\\.[0-9]+").containsMatchIn(out!!)) break
         }
-        check(Regex("[0-9]+\\.[0-9]+\\.[0-9]+").containsMatchIn(out)) {
-            "Claude Code (Termux) verify fail: ${out.take(300)}"
+        check(out != null && Regex("[0-9]+\\.[0-9]+\\.[0-9]+").containsMatchIn(out!!)) {
+            "Claude Code (Termux) verify fail: ${out?.take(300) ?: "timeout/error"}"
         }
         termuxClaudeMarker(termux).writeText(version)
         onProgress(RuntimeInstallProgress("Claude Code (Termux) ready hai", 1f))
@@ -2600,7 +2602,7 @@ class RuntimeInstaller(private val context: Context) {
                                 baseUrl = HermesProviderCatalog.CUSTOM_DEF.baseUrl,
                                 custom = true,
                             )
-                            val defaultCfg = HermesConfigFiles.freshConfig(defaultRoute, HermesProviderCatalog.CUSTOM_DEF.defaultModel)
+                            val defaultCfg = HermesConfigFiles.freshConfig(defaultRoute, "")
                             runCatching {
                                 hermesHome.mkdirs()
                                 hermesCfg.writeText(defaultCfg)
@@ -2618,7 +2620,7 @@ class RuntimeInstaller(private val context: Context) {
                         dotEnv.exists() -> runCatching { dotEnv.copyTo(hermesEnv, overwrite = true) }
                         rootfsEnv.exists() -> runCatching { rootfsEnv.copyTo(hermesEnv, overwrite = true) }
                         else -> {
-                            val defaultEnv = "CUSTOM_PROVIDER_API_KEY=no-key-required\nOPENAI_BASE_URL=https://freellmapi-backup.onrender.com/v1\nOPENAI_API_KEY=no-key-required\n"
+                            val defaultEnv = "CUSTOM_PROVIDER_API_KEY=no-key-required\n"
                             runCatching {
                                 hermesEnv.writeText(defaultEnv)
                                 dotEnv.writeText(defaultEnv)
@@ -2626,23 +2628,19 @@ class RuntimeInstaller(private val context: Context) {
                         }
                     }
                 }
-
-                if (!containsKey("OPENAI_BASE_URL")) {
-                    put("OPENAI_BASE_URL", "https://freellmapi-backup.onrender.com/v1")
-                }
-                if (!containsKey("OPENAI_API_KEY")) {
-                    put("OPENAI_API_KEY", "no-key-required")
-                }
             }
         }
-        val touchesGlibcTree = !isHermesSpawn && translatedArgv.any {
-            it.contains("/opt/python-glibc/")
+        val touchesGlibcTree = !isHermesSpawn && translatedArgv.any { arg ->
+            arg.contains("/opt/python-glibc/") ||
+            arg == "${prefix.absolutePath}/bin/claude" ||
+            arg.startsWith("${prefix.absolutePath}/glibc/")
         }
         val hasGlibc = File(prefix, "glibc/lib").isDirectory
         val finalEnv = if (touchesGlibcTree && hasGlibc) {
             env.toMutableMap().apply {
                 put("LD_LIBRARY_PATH", "${prefix.absolutePath}/glibc/lib")
                 remove("LD_PRELOAD")
+                put("GLIBC_TUNABLES", "glibc.pthread.rseq=0")
             }
         } else {
             env
@@ -2718,14 +2716,14 @@ class RuntimeInstaller(private val context: Context) {
     }.getOrDefault(emptyList())
 
     fun ensureSettingsAndHooks() {
+        // PRoot (legacy) paths
         val hook = File(rootfs, "opt/pocket/permission-hook.sh")
         hook.parentFile?.mkdirs()
-        hook.writeText(
-            """#!/bin/sh
+        val hookScript = """#!/bin/sh
 cat > /dev/null
 printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow"}}}'
-""",
-        )
+"""
+        hook.writeText(hookScript)
         Os.chmod(hook.absolutePath, 0b111101101)
 
         // Phone control (Shizuku): harness-host script and token file
@@ -2766,6 +2764,52 @@ printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decis
             target.parentFile?.mkdirs()
             target.writeText(settingsContent)
         }
+
+        // Termux paths (actual runtime environment)
+        val termux = TermuxEnvironment(context)
+        if (termux.isInstalled()) {
+            val termuxPrefix = termux.prefix
+            val termuxHook = File(termuxPrefix, "opt/pocket/permission-hook.sh")
+            termuxHook.parentFile?.mkdirs()
+            termuxHook.writeText(hookScript)
+            Os.chmod(termuxHook.absolutePath, 0b111101101)
+
+            val termuxSettingsPaths = listOf(
+                File(termuxPrefix, "home/.claude/settings.json"),
+            )
+            // Hook command points to the Termux absolute path
+            val termuxSettingsContent = JSONObject()
+                .put("disableAllHooks", false)
+                .put(
+                    "permissions",
+                    JSONObject()
+                        .put("allow", claudeWorkspaceToolRules())
+                        .put("defaultMode", "acceptEdits"),
+                )
+                .put(
+                    "hooks",
+                    JSONObject().put(
+                        "PermissionRequest",
+                        org.json.JSONArray().put(
+                            JSONObject()
+                                .put("matcher", "Bash|Edit|Write|NotebookEdit")
+                                .put(
+                                    "hooks",
+                                    org.json.JSONArray().put(
+                                        JSONObject().put("type", "command").put("command", termuxHook.absolutePath),
+                                    ),
+                                ),
+                        ),
+                    ),
+                )
+                .toString()
+
+            for (target in termuxSettingsPaths) {
+                target.parentFile?.mkdirs()
+                target.writeText(termuxSettingsContent)
+            }
+        }
+
         ensureWorkspaceTrust("/workspace")
     }
 

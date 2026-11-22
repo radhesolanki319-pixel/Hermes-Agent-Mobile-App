@@ -154,17 +154,13 @@ internal object HermesConfigFiles {
             // #49: after code edits the agent must produce fresh
             // verification evidence before its final answer.
             "  verify_on_stop: true",
-            // Latency (v17): cap the model's reasoning depth for chat.
-            // 0.19.0 resolves agent.reasoning_effort at CLI startup
-            // (hermes_constants.resolve_reasoning_config; valid levels
-            // none|minimal|low|medium|high|xhigh|max|ultra) — unset
-            // means the provider's default depth, which visibly
-            // "thinks" even over a greeting before answering.
-            // "minimal" is the lowest enabled level: near-instant
-            // simple replies while tool planning keeps a sliver of
-            // reasoning. Ensure-if-absent like every static here, so a
-            // value Hermes or the user sets deliberately always wins.
-            "  reasoning_effort: \"minimal\"",
+            // reasoning_effort is deliberately NOT seeded (v86): the
+            // v17 "minimal" cap made replies shallow and robotic —
+            // the user wants Hermes to talk naturally, like a person.
+            // Hermes/provider default depth applies; the one-time
+            // cleanup in mergedConfig removes the app-written
+            // "minimal" line from existing configs (a value set to
+            // anything else is user/Hermes state and is preserved).
         ),
         "checkpoints" to listOf(
             // #36: snapshot the working dir once per turn; /rollback
@@ -245,9 +241,6 @@ internal object HermesConfigFiles {
      */
     private val API_SERVER_BASE_TOOLSET = "hermes-api-server"
 
-    /** .env names the app owns (the Hermes provider catalog's key envs); any other line is user state. */
-    private val APP_ENV_KEYS: List<String> = HermesProviderCatalog.ALL_KEY_ENVS
-
     private val TOP_LEVEL_KEY = Regex("^([A-Za-z_][A-Za-z0-9_.-]*):")
 
     /** Full default config.yaml for a HERMES_HOME that has none yet. */
@@ -287,6 +280,7 @@ internal object HermesConfigFiles {
         // the result is re-terminated below.
         if (lines.isNotEmpty() && lines.last().isEmpty()) lines.removeAt(lines.lastIndex)
         updateModelSection(lines, route, model)
+        removeAppWrittenMinimalReasoning(lines)
         if (route.custom) updateCustomProviderSection(lines, route)
         if (mcpServers.isNotEmpty()) updateMcpServersSection(lines, mcpServers)
         for ((section, children) in STATIC_SECTIONS) {
@@ -308,7 +302,14 @@ internal object HermesConfigFiles {
     fun mergedEnv(existing: String, route: HermesRoute, secret: String): String {
         val lines = existing.split("\n").toMutableList()
         if (lines.isNotEmpty() && lines.last().isEmpty()) lines.removeAt(lines.lastIndex)
-        lines.removeAll { line -> APP_ENV_KEYS.any { key -> line.trimStart().startsWith("$key=") } }
+        // Remove only the current route's keyEnv and legacy MH_HERMES_API_KEY for custom route
+        val keysToRemove = mutableSetOf<String>()
+        if (route.keyEnv.isNotBlank()) keysToRemove.add(route.keyEnv)
+        if (route.custom) keysToRemove.add("MH_HERMES_API_KEY")
+        lines.removeAll { line ->
+            val trimmed = line.trimStart()
+            keysToRemove.any { key -> trimmed.startsWith("$key=") }
+        }
         if (secret.isNotBlank() && route.keyEnv.isNotBlank()) {
             lines += "${route.keyEnv}=$secret"
         }
@@ -445,9 +446,7 @@ internal object HermesConfigFiles {
         // Unset model (v24): no `default:` line at all — Hermes's own
         // resolution decides; an empty `default: ''` would be a value
         // the app chose, and a stale one would override Hermes.
-        val effectiveModel = model.ifBlank {
-            if (route.custom) HermesProviderCatalog.CUSTOM_DEF.defaultModel else ""
-        }
+        val effectiveModel = model.ifBlank { "" }
         if (effectiveModel.isNotBlank()) {
             add("  default: ${quote(effectiveModel)}")
         }
@@ -558,9 +557,7 @@ internal object HermesConfigFiles {
             section.inlineValue -> Unit
             else -> {
                 var current = setChildLine(lines, section, indent = 2, key = "provider", "  provider: ${quote(route.provider)}")
-                val effectiveModel = model.ifBlank {
-                    if (route.custom) HermesProviderCatalog.CUSTOM_DEF.defaultModel else ""
-                }
+                val effectiveModel = model.ifBlank { "" }
                 current = if (effectiveModel.isNotBlank()) {
                     setChildLine(lines, current, indent = 2, key = "default", "  default: ${quote(effectiveModel)}")
                 } else {
@@ -812,6 +809,22 @@ internal object HermesConfigFiles {
         return section.copy(endIndex = section.endIndex - 1)
     }
 
+    /**
+     * v86 one-time cleanup: builds up to v85 seeded
+     * `agent.reasoning_effort: "minimal"` (the v17 latency cap) into
+     * every config, which made replies shallow and robotic. Only that
+     * exact app-written value is removed; any other value is
+     * user/Hermes state and stays.
+     */
+    private fun removeAppWrittenMinimalReasoning(lines: MutableList<String>) {
+        val section = findSection(lines, "agent") ?: return
+        if (section.inlineValue) return
+        val index = childKeyIndex(lines, section, indent = 2, key = "reasoning_effort")
+        if (index < 0) return
+        val value = lines[index].substringAfter(':').trim().trim('"', '\'')
+        if (value == "minimal") lines.removeAt(index)
+    }
+
     private fun quote(value: String): String = "'${value.replace("'", "''")}'"
 }
 
@@ -849,7 +862,14 @@ internal fun hermesLaunchEnvironment(route: HermesRoute, secret: String): Map<St
     "HERMES_INTERACTIVE" to "1",
     "HERMES_ACCEPT_HOOKS" to "1",
     "HERMES_ENABLE_PROJECT_PLUGINS" to "1",
-)
+).apply {
+    if (route.custom && route.baseUrl.isNotBlank()) {
+        put("OPENAI_BASE_URL", route.baseUrl)
+    }
+    if (route.custom && secret.isNotBlank()) {
+        put("OPENAI_API_KEY", secret)
+    }
+}
 
 /**
  * [RuntimeBridge] driving Nous Research's Hermes Agent, with three
@@ -1101,9 +1121,7 @@ class HermesRuntimeBridge(
             add(route.provider)
             // Unset model (v24): no `-m` at all — Hermes decides. The
             // custom-route default matches the other transports exactly.
-            val effectiveModel = model.ifBlank {
-                if (route.custom) HermesProviderCatalog.CUSTOM_DEF.defaultModel else ""
-            }
+            val effectiveModel = model.ifBlank { "" }
             if (effectiveModel.isNotBlank()) {
                 add("-m")
                 add(effectiveModel)
@@ -1296,15 +1314,20 @@ class HermesRuntimeBridge(
             resumed = plan is HermesSessionPlan.Resume,
         )
         pushForegroundProgress(R.string.rt_bridge_working, "Hermes Agent")
-        val outcome = warmClient.streamTurn(
-            apiKey = warmServer.serverKey(),
-            model = model,
-            prompt = contextPrompt,
-            plan = plan,
-            isStopped = { userStopRequested },
-            onTextDelta = { delta -> eventBus.emit(RuntimeEvent.AssistantDelta(sessionId, delta)) },
-            onToolActivity = { label -> pushForegroundProgress(label) },
-        )
+        warmServer.beginTurn()
+        val outcome = try {
+            warmClient.streamTurn(
+                apiKey = warmServer.serverKey(),
+                model = model,
+                prompt = contextPrompt,
+                plan = plan,
+                isStopped = { userStopRequested },
+                onTextDelta = { delta -> eventBus.emit(RuntimeEvent.AssistantDelta(sessionId, delta)) },
+                onToolActivity = { label -> pushForegroundProgress(label) },
+            )
+        } finally {
+            warmServer.endTurn()
+        }
         if (HermesWarmFallback.shouldUseCli(outcome)) {
             Log.d("HermesBridge", "Warm turn delivered nothing; the CLI path takes this turn")
             return false
@@ -1409,9 +1432,7 @@ class HermesRuntimeBridge(
             add(route.provider)
             // Unset model (v24): no `-m` at all — an empty argument
             // would still count as "set" for Hermes's resolution.
-            val effectiveModel = model.ifBlank {
-                if (route.custom) HermesProviderCatalog.CUSTOM_DEF.defaultModel else ""
-            }
+            val effectiveModel = model.ifBlank { "" }
             if (effectiveModel.isNotBlank()) {
                 add("-m")
                 add(effectiveModel)
@@ -1498,8 +1519,11 @@ class HermesRuntimeBridge(
             exit == 0 -> {
                 if (outcome.responseText.isNotBlank()) {
                     eventBus.emit(RuntimeEvent.AssistantDelta(sessionId, outcome.responseText))
+                    emitCompletedOnce(sessionId)
+                } else {
+                    // Silent empty success — treat as failure so user sees an error bubble
+                    error("Hermes ne koi jawab nahi diya (empty response)")
                 }
-                emitCompletedOnce(sessionId)
             }
             else -> {
                 // If the CLI created a new session, save it. Otherwise clear the old
@@ -1672,8 +1696,45 @@ class HermesRuntimeBridge(
             val existingEnv = envFile.takeIf(File::isFile)?.readText().orEmpty()
             val newEnv = HermesConfigFiles.mergedEnv(existingEnv, route, secret)
             if (newEnv != existingEnv) envFile.writeText(newEnv)
+            writeHermesSoul(home)
         }
     }
+
+    /** SHA-256 of the SOUL.md captured inside the app bundle (its factory persona). */
+    private val bundleSoulSha256 = "36c1f5a2e92cd1d018311eaf4c8f1e8886672eae78212e033c681d0e3d5d506f"
+
+    private val hermesSoulPersona = """
+        You are Hermes Agent, the user's personal AI assistant in this app. You were built by Nous Research.
+
+        How you talk:
+        - Talk like a person, not a manual or a call-center script: warm, direct, natural.
+        - Reply in the user's language and script — if they write Hinglish (Roman Hindi), reply in Hinglish; if English, reply in English. Match their tone.
+        - Match the length of your reply to the weight of the ask. A greeting or a one-line question gets a short, friendly answer — never a menu of your services, and never "what would you like to build?" unless the user actually asks for work.
+        - Never use canned phrases like "Namaste Boss", "Bataiye Boss" or "How can I assist you today?" Just answer, the way a smart friend who knows the work would.
+        - When the user asks for work, just do it and decide the obvious details yourself. When it is done, say what changed in a line or two — no step-by-step narration of your process.
+        - Have a point of view. Agree because it is right, not because the user said it. When you are unsure or blocked, say so plainly.
+        - No filler ("Great question!", "I'd be happy to help!"), no restating the request back, and no re-summarizing what you already said.
+    """.trimIndent() + "\n"
+
+    /**
+     * Hermes's persona is HERMES_HOME/SOUL.md — its primary identity.
+     * The bundle ships a captured SOUL.md whose canned style made
+     * replies robotic, so the app replaces that one factory file
+     * (identified by SHA-256) with [hermesSoulPersona] and writes the
+     * persona when SOUL.md is missing. Any other content is
+     * user/Hermes state and is never touched.
+     */
+    private fun writeHermesSoul(home: File) {
+        val soul = File(home, "SOUL.md")
+        val existing = soul.takeIf(File::isFile)?.readText()
+        if (existing != null && sha256Hex(existing) != bundleSoulSha256) return
+        if (existing != hermesSoulPersona) runCatching { soul.writeText(hermesSoulPersona) }
+    }
+
+    private fun sha256Hex(text: String): String =
+        java.security.MessageDigest.getInstance("SHA-256")
+            .digest(text.toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(it) }
 
     /**
      * Assembles the context prompt for the `-q` argv transport. The shared

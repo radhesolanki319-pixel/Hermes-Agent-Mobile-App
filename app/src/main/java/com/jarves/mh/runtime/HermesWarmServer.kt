@@ -55,9 +55,19 @@ internal class HermesWarmServerManager(private val context: Context) {
     @Volatile private var serverFingerprint: HermesWarmFingerprint? = null
     @Volatile private var lastFailureAtMs: Long = 0L
     @Volatile private var lastUsedAtMs: Long = 0L
+    @Volatile private var lastFailedFingerprint: HermesWarmFingerprint? = null
+    @Volatile private var inFlightTurns: Int = 0
     private var idleStopJob: Job? = null
 
     private val warmDir: File get() = File(context.filesDir, "hermes-warm").apply { mkdirs() }
+
+    fun beginTurn() {
+        inFlightTurns++
+    }
+
+    fun endTurn() {
+        if (inFlightTurns > 0) inFlightTurns--
+    }
 
     /**
      * The local API server's bearer key, generated on first use and
@@ -88,7 +98,8 @@ internal class HermesWarmServerManager(private val context: Context) {
             markUsed()
             return true
         }
-        if (serverFingerprint == launch.fingerprint &&
+        // Check cooldown against lastFailedFingerprint (not serverFingerprint which is nulled on failure)
+        if (lastFailedFingerprint == launch.fingerprint &&
             HermesWarmTiming.inCooldown(lastFailureAtMs, now)
         ) {
             return false
@@ -122,10 +133,12 @@ internal class HermesWarmServerManager(private val context: Context) {
         }
         if (process == null) {
             lastFailureAtMs = System.currentTimeMillis()
+            lastFailedFingerprint = launch.fingerprint
             return false
         }
         serverProcess = process
         serverFingerprint = launch.fingerprint
+        lastFailedFingerprint = null
         val deadline = System.currentTimeMillis() + HermesWarmTiming.START_WAIT_BUDGET_MS
         var healthySinceMs = 0L
         while (System.currentTimeMillis() < deadline) {
@@ -146,6 +159,7 @@ internal class HermesWarmServerManager(private val context: Context) {
         }
         Log.w(TAG, "Warm Hermes server did not become healthy in time")
         lastFailureAtMs = System.currentTimeMillis()
+        lastFailedFingerprint = launch.fingerprint
         stopServer()
         return false
     }
@@ -173,8 +187,14 @@ internal class HermesWarmServerManager(private val context: Context) {
         idleStopJob = scope.launch {
             delay(HermesWarmTiming.IDLE_STOP_MS)
             if (HermesWarmTiming.idleExpired(lastUsedAtMs, System.currentTimeMillis())) {
-                Log.d(TAG, "Stopping idle warm Hermes server")
-                stopServer()
+                // Don't stop if a turn is in flight — reschedule instead
+                if (inFlightTurns > 0) {
+                    Log.d(TAG, "Idle stop deferred: $inFlightTurns turn(s) in flight")
+                    scheduleIdleStop()
+                } else {
+                    Log.d(TAG, "Stopping idle warm Hermes server")
+                    stopServer()
+                }
             }
         }
     }
