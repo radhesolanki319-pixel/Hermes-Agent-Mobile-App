@@ -6,10 +6,9 @@
     <string name="whats_new_got_it">Got it</string>
     <!-- Update for every release; shown once after the app is updated. -->
     <string-array name="whats_new_items">
-        <item>Backup &amp; Restore: save your projects, files, chats and settings into one file. Find it in Settings.</item>
-        <item>Add a password to also save your API keys and logins (GitHub, git, SSH, coding agents).</item>
-        <item>Restoring adds the backup\'s projects next to the ones on your phone, so nothing here is lost.</item>
-        <item>After a reinstall, restore from the setup screen to get everything back.</item>
-        <item>Backups keep running with the screen off and show live progress.</item>
+        <item>Sovereign Hinglish Brain: Hermes and App Agent speak fluent Roman Hinglish and address Boss (Radhe Solanki) with full clarity.</item>
+        <item>De-isolated System Power: Full access to the Termux Linux environment, bash terminal, python, git and project tools.</item>
+        <item>Autonomous Bug Solving: Self-healing bug investigation and direct file fixes without confusing error dumps.</item>
+        <item>Real-time Token Streaming: High-speed unbuffered typing with zero response delay.</item>
     </string-array>
 </resources>

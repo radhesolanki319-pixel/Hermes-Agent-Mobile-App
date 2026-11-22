@@ -165,8 +165,8 @@ internal object HermesQuietOutput {
      */
     fun failureMessage(outcome: Outcome, exitCode: Int, providerError: String?): String =
         providerError
-            ?: outcome.usageError?.let { "Hermes Agent could not start: $it" }
-            ?: outcome.tracebackTail
+            ?: outcome.usageError?.let { "Hermes Agent start nahi ho paya: $it" }
+            ?: outcome.tracebackTail?.let { "Hermes runtime error: $it" }
             // An explicit `Error:`/init/session diagnostic outranks the
             // response bucket: in the quiet protocol the two never carry a
             // real reply at the same time (the `Error:` print fires only
@@ -174,7 +174,7 @@ internal object HermesQuietOutput {
             // hold follow-on hint lines the diagnostic refers to.
             ?: outcome.errorText
             ?: outcome.responseText.takeIf(String::isNotBlank)
-            ?: "Hermes Agent stopped with exit code $exitCode"
+            ?: "Hermes Agent ruk gaya (Exit code $exitCode)"
 
     private val ANSI_ESCAPE = Regex("\u001B\\[[0-9;]*[A-Za-z]")
     /** `┌─ Reasoning ───┐` — the frame header cli.py draws around thinking. */
