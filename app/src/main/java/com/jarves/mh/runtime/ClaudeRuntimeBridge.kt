@@ -144,6 +144,8 @@ class ClaudeRuntimeBridge(
             // messages into the conversation.
             val installed = installer.installedRuntime()
             installer.ensureSettingsAndHooks()
+            installer.writeResolver()
+            installer.patchGlibcNetworkPaths(com.jarves.mh.termux.TermuxEnvironment(context).prefix)
             val workspace = ensureWorkspace(projectId)
             installer.seedMcpServersConfig(workspace, mcpServersPrefs)
             createCheckpoint(projectId, workspace)
@@ -322,6 +324,8 @@ class ClaudeRuntimeBridge(
         val secret = secretFor(provider).orEmpty()
         check(secret.isNotBlank()) { "No Claude subscription token is saved." }
         val installed = installer.installedRuntime()
+        installer.writeResolver()
+        installer.patchGlibcNetworkPaths(com.jarves.mh.termux.TermuxEnvironment(context).prefix)
         val probeDir = File(context.cacheDir, "claude-hello").apply { mkdirs() }
         val outputFile = File(context.cacheDir, "claude-hello-${System.nanoTime()}.log")
         val launch = RuntimeLaunchConfigBuilder.build(provider, authToken = secret)

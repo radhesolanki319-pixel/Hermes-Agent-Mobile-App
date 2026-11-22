@@ -1030,6 +1030,7 @@ class RuntimeInstaller(private val context: Context) {
                 "export LD_LIBRARY_PATH=\"${termux.prefix.absolutePath}/lib\"\n" +
                 "export GLIBC_TUNABLES=\"glibc.pthread.rseq=0\"\n" +
                 "export PATH=\"${termux.prefix.absolutePath}/glibc/bin:${termux.prefix.absolutePath}/bin:\$PATH\"\n" +
+                "export RESOLV_HOST_CONF=\"${context.filesDir.absolutePath}/etc/host.conf\"\n" +
                 "if [ -f \"$loader\" ]; then\n" +
                 "    exec \"$loader\" --library-path \"$glibcLib\" \"${real.absolutePath}\" \"\$@\"\n" +
                 "else\n" +
@@ -1037,6 +1038,8 @@ class RuntimeInstaller(private val context: Context) {
                 "fi\n",
         )
         Os.chmod(wrapper.absolutePath, 0b111101101)
+        writeResolver()
+        patchGlibcNetworkPaths(termux.prefix)
         onProgress(RuntimeInstallProgress("Claude Code (Termux): verify ho raha hai…", 0.9f))
         // First run of the 380 MB binary through the glibc loader can be
         // slow on a cold page cache — give it real time, and retry once
@@ -2828,6 +2831,10 @@ class RuntimeInstaller(private val context: Context) {
         ) {
             purgeClaudeFiles(termux)
         }
+
+        // Keep DNS resolver and hosts files fresh and patch glibc network paths if present
+        writeResolver()
+        patchGlibcNetworkPaths(prefix)
     }
 
     private fun cleanBrokenHermesTools(home: File) {
@@ -3138,11 +3145,115 @@ exec 3<&-
         put("Grep")
     }
 
-    private fun writeResolver() {
-        val manager = context.getSystemService(ConnectivityManager::class.java)
-        val dns = manager.getLinkProperties(manager.activeNetwork)?.dnsServers.orEmpty()
-        val servers = dns.mapNotNull { it.hostAddress }.ifEmpty { listOf("8.8.8.8", "1.1.1.1") }
-        File(rootfs, "etc/resolv.conf").writeText(servers.joinToString("\n") { "nameserver $it" } + "\n")
+    fun writeResolver() {
+        val dns = runCatching {
+            val manager = context.getSystemService(ConnectivityManager::class.java)
+            manager?.getLinkProperties(manager.activeNetwork)?.dnsServers.orEmpty()
+        }.getOrDefault(emptyList())
+        val servers = (dns.mapNotNull { it.hostAddress } + listOf("8.8.8.8", "1.1.1.1", "8.8.4.4", "1.0.0.1")).distinct()
+        val resolvContent = buildString {
+            servers.forEach { append("nameserver $it\n") }
+            append("options timeout:2 attempts:3\n")
+        }
+        val hostsContent = buildString {
+            append("127.0.0.1 localhost\n")
+            append("::1 localhost\n")
+            append("160.79.104.10 api.anthropic.com\n")
+            append("216.24.57.18 freellmapi-backup.onrender.com\n")
+            append("216.24.57.16 freellmapi.onrender.com\n")
+            append("104.18.3.115 openrouter.ai\n")
+            append("3.173.21.63 api.deepseek.com\n")
+        }
+        val nssContent = "hosts: files dns\n"
+        val hostConfContent = "order hosts, bind\nmulti on\n"
+
+        val targetDirs = listOf(
+            File(context.filesDir, "etc"),
+            File(context.filesDir, "linux/etc"),
+            File(context.filesDir, "linux/glibc/etc"),
+            File(rootfs, "etc"),
+        )
+        targetDirs.forEach { dir ->
+            runCatching {
+                dir.mkdirs()
+                File(dir, "resolv.conf").writeText(resolvContent)
+                File(dir, "hosts").writeText(hostsContent)
+                File(dir, "nsswitch.conf").writeText(nssContent)
+                File(dir, "host.conf").writeText(hostConfContent)
+            }
+        }
+        runCatching {
+            File(context.filesDir, "resolv.conf").writeText(resolvContent)
+        }
+    }
+
+    fun patchGlibcNetworkPaths(prefix: File = TermuxEnvironment(context).prefix) {
+        runCatching {
+            val libc = File(prefix, "glibc/lib/libc.so.6")
+            if (!libc.isFile) return@runCatching
+
+            val preferredResolv = "${context.filesDir.absolutePath}/etc/resolv.conf"
+            val fallbackResolv = "/data/data/${context.packageName}/files/etc/resolv.conf"
+            val targetResolv = if (preferredResolv.length < 53) preferredResolv else fallbackResolv
+
+            val preferredHosts = "${context.filesDir.absolutePath}/etc/hosts"
+            val fallbackHosts = "/data/data/${context.packageName}/files/etc/hosts"
+            val targetHosts = if (preferredHosts.length < 47) preferredHosts else fallbackHosts
+
+            val preferredNss = "${context.filesDir.absolutePath}/etc/nsswitch.conf"
+            val fallbackNss = "/data/data/${context.packageName}/files/etc/nsswitch.conf"
+            val targetNss = if (preferredNss.length < 55) preferredNss else fallbackNss
+
+            val preferredGai = "${context.filesDir.absolutePath}/etc/gai.conf"
+            val fallbackGai = "/data/data/${context.packageName}/files/etc/gai.conf"
+            val targetGai = if (preferredGai.length < 50) preferredGai else fallbackGai
+
+            val preferredHostConf = "${context.filesDir.absolutePath}/etc/host.conf"
+            val fallbackHostConf = "/data/data/${context.packageName}/files/etc/host.conf"
+            val targetHostConf = if (preferredHostConf.length < 51) preferredHostConf else fallbackHostConf
+
+            val bytes = libc.readBytes()
+            var modified = false
+
+            fun replacePath(oldPathStr: String, newPathStr: String) {
+                val oldBytes = (oldPathStr + "\u0000").toByteArray(Charsets.UTF_8)
+                val newBytesRaw = (newPathStr + "\u0000").toByteArray(Charsets.UTF_8)
+                if (newBytesRaw.size > oldBytes.size) return
+                val paddedNewBytes = java.util.Arrays.copyOf(newBytesRaw, oldBytes.size)
+
+                var i = 0
+                while (i <= bytes.size - oldBytes.size) {
+                    var match = true
+                    for (j in oldBytes.indices) {
+                        if (bytes[i + j] != oldBytes[j]) {
+                            match = false
+                            break
+                        }
+                    }
+                    if (match) {
+                        System.arraycopy(paddedNewBytes, 0, bytes, i, oldBytes.size)
+                        modified = true
+                        i += oldBytes.size
+                    } else {
+                        i++
+                    }
+                }
+            }
+
+            replacePath("/data/data/com.termux/files/usr/glibc/etc/resolv.conf", targetResolv)
+            replacePath("/data/data/com.termux/files/usr/glibc/etc/hosts", targetHosts)
+            replacePath("/data/data/com.termux/files/usr/glibc/etc/nsswitch.conf", targetNss)
+            replacePath("/data/data/com.termux/files/usr/glibc/etc/gai.conf", targetGai)
+            replacePath("/data/data/com.termux/files/usr/glibc/etc/host.conf", targetHostConf)
+
+            if (modified) {
+                libc.writeBytes(bytes)
+                runCatching { Os.chmod(libc.absolutePath, 0b111101101) }
+                Log.i("RuntimeInstaller", "Patched glibc network config paths in libc.so.6 to ${context.filesDir}/etc")
+            }
+        }.onFailure {
+            Log.w("RuntimeInstaller", "patchGlibcNetworkPaths error", it)
+        }
     }
 
     private fun extractRootfs(archive: File, destination: File) {

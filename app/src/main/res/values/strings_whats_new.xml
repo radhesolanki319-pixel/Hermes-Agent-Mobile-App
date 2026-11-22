@@ -6,9 +6,9 @@
     <string name="whats_new_got_it">Got it</string>
     <!-- Update for every release; shown once after the app is updated. -->
     <string-array name="whats_new_items">
-        <item>Fix Bash Linker Error: Resolved libandroid-support.so missing error when launching Claude Code from chat.</item>
-        <item>Bionic LD_LIBRARY_PATH Isolation: Shell interpreter retains native lib path while glibc loader isolates runtime libraries.</item>
-        <item>Complete Claude Purge &amp; Reset: Corrupt glibc wrappers and stale markers cleanly purged on install/uninstall.</item>
-        <item>Direct Glibc Loader: Claude Code executes directly via ld-linux-aarch64 with 1-click in-app installer &amp; uninstaller.</item>
+        <item>Fix DNS Error (EAI_AGAIN): Resolved DNS lookup failure for Claude Code by dynamically writing resolv.conf and hosts.</item>
+        <item>Automatic Glibc Path Relocation: Patched glibc libc.so.6 network paths to the app\'s internal sandbox.</item>
+        <item>Instant AI Hostname Resolution: Embedded static entries for Anthropic and FreeLLM endpoints with zero lookup latency.</item>
+        <item>Bash Linker &amp; Bionic Isolation: Native shell environment completely isolated from glibc dynamic loader.</item>
     </string-array>
 </resources>
