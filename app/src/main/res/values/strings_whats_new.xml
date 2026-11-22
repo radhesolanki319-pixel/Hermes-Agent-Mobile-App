@@ -6,9 +6,9 @@
     <string name="whats_new_got_it">Got it</string>
     <!-- Update for every release; shown once after the app is updated. -->
     <string-array name="whats_new_items">
-        <item>Complete Claude Purge &amp; Reset: Old corrupt glibc wrappers and markers cleanly removed from app.</item>
-        <item>Direct Glibc Loader: Claude Code executes directly via ld-linux-aarch64 dynamic linker without broken grun scripts.</item>
-        <item>1-Click Clean Claude Installer: Lightweight APK (119MB) with robust on-demand Claude &amp; glibc downloader + uninstall button.</item>
-        <item>Bionic Isolation &amp; Zero ELF Magic Error: Native Python and Hermes tools remain 100% protected and isolated.</item>
+        <item>Fix Bash Linker Error: Resolved libandroid-support.so missing error when launching Claude Code from chat.</item>
+        <item>Bionic LD_LIBRARY_PATH Isolation: Shell interpreter retains native lib path while glibc loader isolates runtime libraries.</item>
+        <item>Complete Claude Purge &amp; Reset: Corrupt glibc wrappers and stale markers cleanly purged on install/uninstall.</item>
+        <item>Direct Glibc Loader: Claude Code executes directly via ld-linux-aarch64 with 1-click in-app installer &amp; uninstaller.</item>
     </string-array>
 </resources>

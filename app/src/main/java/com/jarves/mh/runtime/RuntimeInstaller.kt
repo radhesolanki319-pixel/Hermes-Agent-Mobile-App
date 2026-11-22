@@ -1027,7 +1027,7 @@ class RuntimeInstaller(private val context: Context) {
         wrapper.writeText(
             "#!${termux.prefix.absolutePath}/bin/bash\n" +
                 "unset LD_PRELOAD\n" +
-                "unset LD_LIBRARY_PATH\n" +
+                "export LD_LIBRARY_PATH=\"${termux.prefix.absolutePath}/lib\"\n" +
                 "export GLIBC_TUNABLES=\"glibc.pthread.rseq=0\"\n" +
                 "export PATH=\"${termux.prefix.absolutePath}/glibc/bin:${termux.prefix.absolutePath}/bin:\$PATH\"\n" +
                 "if [ -f \"$loader\" ]; then\n" +
@@ -2728,9 +2728,8 @@ class RuntimeInstaller(private val context: Context) {
                 }
             }
         }
-        val touchesGlibcTree = !isHermesSpawn && translatedArgv.any { arg ->
+        val touchesGlibcTree = !isHermesSpawn && isElfBinary && translatedArgv.any { arg ->
             arg.contains("/opt/python-glibc/") ||
-            arg == "${prefix.absolutePath}/bin/claude" ||
             arg.startsWith("${prefix.absolutePath}/glibc/")
         }
         val hasGlibc = File(prefix, "glibc/lib").isDirectory
