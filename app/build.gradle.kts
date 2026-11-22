@@ -34,7 +34,7 @@ val runtimeReleaseBaseUrl =
 // installer verifies it against the bundle's pinned SHA-256). The offline
 // flavor still embeds it — see offlineRuntimeBundleFiles below.
 val hermesBundleBaseUrl =
-    "https://github.com/radhesolanki319-pixel/Mobile-Harness/releases/download/hermes-bundle-2026.11.22"
+    "https://github.com/radhesolanki319-pixel/Hermes-Agent-Mobile-App/releases/download/hermes-bundle-2026.11.22"
 // The Core bundle follows the same pattern since v40: the Ubuntu 26.04
 // core is published as a release asset in the user's own repo (the
 // shared upstream runtime release still carries the old Ubuntu 20.04
@@ -42,7 +42,7 @@ val hermesBundleBaseUrl =
 // fetched from there). The offline flavor embeds the file from
 // dist/runtime-bundles when it is present at build time.
 val coreBundleBaseUrl =
-    "https://github.com/radhesolanki319-pixel/Mobile-Harness/releases/download/core-bundle-2026.11.4"
+    "https://github.com/radhesolanki319-pixel/Hermes-Agent-Mobile-App/releases/download/core-bundle-2026.11.4"
 val appUpdateManifestUrl =
     "https://github.com/techjarves/Mobile-Harness/releases/latest/download/mobile-harness-update.json"
 // v31: the v26 gateway pre-connect is REMOVED (Hermes is embedded only —
@@ -94,7 +94,7 @@ val prepareBundledAgentAssets = tasks.register<Sync>("prepareBundledAgentAssets"
 // assembled on Muse's VM and run-verified under QEMU on the exact
 // device paths before publishing.
 val agentsBundleBaseUrl =
-    "https://github.com/radhesolanki319-pixel/Mobile-Harness/releases/download/agents-bundle-v1"
+    "https://github.com/radhesolanki319-pixel/Hermes-Agent-Mobile-App/releases/download/agents-bundle-v1"
 val generatedAgentsAssets = layout.buildDirectory.dir("generated/agents-assets")
 // NOTE: the assets use a .bin suffix, NOT .tar.gz — AAPT strips a .gz
 // extension and stores the content decompressed, which would break the
@@ -187,8 +187,8 @@ android {
         targetSdk = if (playBuild) 36 else 28
         // Keep literal defaults so F-Droid's static manifest parser can detect
         // the tagged release. Gradle properties may still override Play builds.
-        versionCode = 86
-        versionName = "1.0.86"
+        versionCode = 87
+        versionName = "1.0.87"
         providers.gradleProperty("appVersionCode").orNull?.toIntOrNull()?.let { versionCode = it }
         providers.gradleProperty("appVersionName").orNull?.let { versionName = it }
 

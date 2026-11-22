@@ -409,7 +409,7 @@ class NativeRuntimeBridge(
             setRequestProperty("Accept", "text/event-stream")
             if (key.isNotBlank()) setRequestProperty("Authorization", "Bearer $key")
             if (provider.kind.protocol == ProviderProtocol.OPENROUTER) {
-                setRequestProperty("HTTP-Referer", "https://github.com/radhesolanki319-pixel/Mobile-Harness")
+                setRequestProperty("HTTP-Referer", "https://github.com/radhesolanki319-pixel/Hermes-Agent-Mobile-App")
                 setRequestProperty("X-Title", "Hermes Agent (built-in)")
             }
         }

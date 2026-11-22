@@ -20,7 +20,7 @@ import org.json.JSONObject
 object GitHubReleaseUpdate {
 
     const val RELEASES_API_URL =
-        "https://api.github.com/repos/radhesolanki319-pixel/Mobile-Harness/releases?per_page=30"
+        "https://api.github.com/repos/radhesolanki319-pixel/Hermes-Agent-Mobile-App/releases?per_page=30"
 
     /** Release tag → versionCode: "v12" → 12, "12" → 12, anything else → null. */
     fun parseVersionCode(tagName: String?): Long? =
