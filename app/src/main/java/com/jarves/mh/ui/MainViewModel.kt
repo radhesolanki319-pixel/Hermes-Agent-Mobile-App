@@ -3054,9 +3054,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun uninstallAgent(kind: AgentKind) {
         if (_state.value.agentInstalling != null || _state.value.agentUpdating != null || _state.value.isRunning) return
         viewModelScope.launch(Dispatchers.IO) {
-            val termux = TermuxEnvironment(getApplication())
             when (kind) {
-                AgentKind.CLAUDE_CODE -> installer.purgeClaudeFiles(termux)
+                AgentKind.CLAUDE_CODE -> installer.purgeClaudeFiles()
                 else -> Unit
             }
             val versions = installer.installedAgentVersions()

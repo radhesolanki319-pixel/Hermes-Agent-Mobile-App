@@ -230,7 +230,7 @@ class RuntimeInstaller(private val context: Context) {
     }
 
     /** Fully wipes all Claude Code binaries, wrappers, markers, and glibc runner leftovers. */
-    fun purgeClaudeFiles(termux: TermuxEnvironment) {
+    fun purgeClaudeFiles(termux: TermuxEnvironment = TermuxEnvironment(context)) {
         runCatching {
             termuxClaudeMarker(termux).delete()
             File(termux.prefix, "bin/claude").delete()
