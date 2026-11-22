@@ -580,7 +580,9 @@ class TermuxEnvironment(private val context: Context) {
             val bash = File(binDir, "bash").absolutePath
             val nodeBin = File(binDir, "node").takeIf { it.exists() }?.absolutePath
             val pythonBin = (File(binDir, "python3").takeIf { it.exists() }
-                ?: File(binDir, "python").takeIf { it.exists() })?.absolutePath
+                ?: File(binDir, "python").takeIf { it.exists() }
+                ?: File(binDir, "python3.11").takeIf { it.exists() }
+                ?: File(binDir, "python3.14").takeIf { it.exists() })?.absolutePath
             val sb = StringBuilder()
             sb.append(header).append('\n')
 
@@ -594,6 +596,22 @@ class TermuxEnvironment(private val context: Context) {
 
             binDir.listFiles()?.forEach { if (it.isFile || it.canonicalPath != it.absolutePath) addShim(it) }
             File(prefix, "bin/applets").listFiles()?.forEach { addShim(it) }
+
+            // Ensure shims for python and python3 are always present when pythonBin is found
+            if (pythonBin != null) {
+                listOf("python", "python3").forEach { name ->
+                    if (!sb.contains("$name() {")) {
+                        ShellShims.line(name, pythonBin, isElf = true, shebang = null, linker, bash, nodeBin, pythonBin)
+                            ?.let { sb.append(it) }
+                    }
+                }
+            }
+            if (nodeBin != null) {
+                if (!sb.contains("node() {")) {
+                    ShellShims.line("node", nodeBin, isElf = true, shebang = null, linker, bash, nodeBin, pythonBin)
+                        ?.let { sb.append(it) }
+                }
+            }
 
             shimFile.parentFile?.mkdirs()
             shimFile.writeText(sb.toString())

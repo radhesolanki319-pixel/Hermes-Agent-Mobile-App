@@ -869,23 +869,39 @@ class RuntimeInstaller(private val context: Context) {
                 ensureBundledPython(termux)
             }
             extractBundledAsset(assetName, termux.prefix)
-            val pyBin = File(termux.prefix, "bin/python3.11")
+            val binDir = File(termux.prefix, "bin").apply { mkdirs() }
+            val py311 = File(binDir, "python3.11")
+            val pyTarget = if (py311.exists()) "python3.11" else "python3.14"
+            runCatching {
+                val pLink = File(binDir, "python")
+                pLink.delete()
+                Os.symlink(pyTarget, pLink.absolutePath)
+            }
+            runCatching {
+                val p3Link = File(binDir, "python3")
+                p3Link.delete()
+                Os.symlink(pyTarget, p3Link.absolutePath)
+            }
+            val pyBin = File(binDir, pyTarget)
             val launcher = termuxHermesBinary(termux)
             runCatching { Os.chmod(launcher.absolutePath, 0b111101101) }
-            runCatching { Os.chmod(File(termux.prefix, "bin/bash").absolutePath, 0b111101101) }
+            runCatching { Os.chmod(File(binDir, "bash").absolutePath, 0b111101101) }
             runCatching { Os.chmod(pyBin.absolutePath, 0b111101101) }
-            runCatching { Os.chmod(File(termux.prefix, "bin/git").absolutePath, 0b111101101) }
-            val venvBin = File(termux.prefix, "home/hermes/.venv/bin")
+            runCatching { Os.chmod(File(binDir, "git").absolutePath, 0b111101101) }
+            val venvBin = File(termux.prefix, "home/hermes/.venv/bin").apply { mkdirs() }
             runCatching {
                 val pLink = File(venvBin, "python")
                 pLink.delete()
-                Os.symlink("../../../../bin/python3.11", pLink.absolutePath)
+                Os.symlink("../../../../bin/$pyTarget", pLink.absolutePath)
             }
             runCatching {
                 val p3Link = File(venvBin, "python3")
                 p3Link.delete()
-                Os.symlink("../../../../bin/python3.11", p3Link.absolutePath)
+                Os.symlink("../../../../bin/$pyTarget", p3Link.absolutePath)
             }
+            cleanBrokenHermesTools(File(termux.prefix, "home/hermes"))
+            cleanBrokenHermesTools(File(termux.prefix, "home/.hermes"))
+            termux.ensureShims(force = true)
             if (isBionic) {
                 File(termux.prefix, ".harness-installed").writeText(
                     "bash\nbusybox\nca-certificates\ntermux-exec\ngit\ngh\npython\npython-pip\nnodejs\nnpm\nuv\n",
@@ -2525,6 +2541,7 @@ class RuntimeInstaller(private val context: Context) {
                 }
             }
         }
+        ensureCoreToolchain(termux)
 
         val isHermesSpawn = translatedArgv.isNotEmpty() && (
             guestCommand[0] == HERMES_GUEST_PATH ||
@@ -2583,8 +2600,16 @@ class RuntimeInstaller(private val context: Context) {
                 val venvPkgs = File(hermesHome, ".venv/lib/python3.11/site-packages")
                 put("PYTHONPATH", "${hermesAgent.absolutePath}:${venvPkgs.absolutePath}")
                 put("HERMES_HOME", hermesHome.absolutePath)
-                put("PATH", "${prefix.absolutePath}/bin:" + (get("PATH") ?: ""))
-                put("LD_LIBRARY_PATH", "${prefix.absolutePath}/lib")
+                val venvBin = File(hermesHome, ".venv/bin").absolutePath
+                val prefixBin = "${prefix.absolutePath}/bin"
+                val appletsBin = "${prefix.absolutePath}/bin/applets"
+                put("PATH", "$prefixBin:$venvBin:$appletsBin:" + (get("PATH") ?: ""))
+                val libDirs = listOfNotNull(
+                    File(prefix, "lib").takeIf { it.isDirectory }?.absolutePath,
+                    File(prefix, "glibc/lib").takeIf { it.isDirectory }?.absolutePath,
+                    File(prefix, "opt/python-glibc/lib").takeIf { it.isDirectory }?.absolutePath,
+                ).joinToString(":")
+                put("LD_LIBRARY_PATH", libDirs)
                 put("PYTHONUNBUFFERED", "1")
 
                 val dotHermes = File(home, ".hermes")
@@ -2666,6 +2691,64 @@ class RuntimeInstaller(private val context: Context) {
         }.getOrNull() ?: return workspace
         val base = File(context.filesDir, "workspaces/${project.id}")
         return if (project.rootPath.isBlank()) base else File(base, project.rootPath)
+    }
+
+    /**
+     * Guarantees python, python3, bash, and git are properly symlinked,
+     * executable, and that any broken glibc tool entries are purged from Hermes store.
+     */
+    fun ensureCoreToolchain(termux: TermuxEnvironment) {
+        val prefix = termux.prefix
+        val binDir = File(prefix, "bin").apply { mkdirs() }
+        val py311 = File(binDir, "python3.11")
+        val py314 = File(binDir, "python3.14")
+        val pyTarget = when {
+            py311.exists() -> "python3.11"
+            py314.exists() -> "python3.14"
+            else -> null
+        }
+        if (pyTarget != null) {
+            val p = File(binDir, "python")
+            val p3 = File(binDir, "python3")
+            if (!p.exists()) runCatching { p.delete(); Os.symlink(pyTarget, p.absolutePath) }
+            if (!p3.exists()) runCatching { p3.delete(); Os.symlink(pyTarget, p3.absolutePath) }
+            runCatching { Os.chmod(File(binDir, pyTarget).absolutePath, 0b111101101) }
+        }
+        val venvBin = File(prefix, "home/hermes/.venv/bin")
+        if (venvBin.isDirectory && pyTarget != null) {
+            val vp = File(venvBin, "python")
+            val vp3 = File(venvBin, "python3")
+            runCatching { vp.delete(); Os.symlink("../../../../bin/$pyTarget", vp.absolutePath) }
+            runCatching { vp3.delete(); Os.symlink("../../../../bin/$pyTarget", vp3.absolutePath) }
+        }
+        runCatching { Os.chmod(File(binDir, "bash").absolutePath, 0b111101101) }
+        runCatching { Os.chmod(File(binDir, "git").absolutePath, 0b111101101) }
+        val nodeFile = File(binDir, "node")
+        if (nodeFile.exists()) runCatching { Os.chmod(nodeFile.absolutePath, 0b111101101) }
+        val uvFile = File(binDir, "uv")
+        if (uvFile.exists()) runCatching { Os.chmod(uvFile.absolutePath, 0b111101101) }
+
+        cleanBrokenHermesTools(File(prefix, "home/hermes"))
+        cleanBrokenHermesTools(File(prefix, "home/.hermes"))
+        termux.ensureShims(force = false)
+    }
+
+    private fun cleanBrokenHermesTools(home: File) {
+        runCatching {
+            val toolsDir = File(home, "tools")
+            val factsFile = File(toolsDir, "facts.json")
+            if (factsFile.isFile) {
+                val content = factsFile.readText()
+                if (content.contains("python-") || content.contains("linux-arm64")) {
+                    factsFile.writeText("{\"packages\":{},\"schema\":1}")
+                }
+            }
+            toolsDir.listFiles()?.forEach { file ->
+                if (file.isDirectory && file.name.startsWith("python-")) {
+                    file.deleteRecursively()
+                }
+            }
+        }
     }
 
     /**

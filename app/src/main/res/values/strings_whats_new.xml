@@ -6,9 +6,9 @@
     <string name="whats_new_got_it">Got it</string>
     <!-- Update for every release; shown once after the app is updated. -->
     <string-array name="whats_new_items">
-        <item>Sovereign Hinglish Brain: Hermes and App Agent speak fluent Roman Hinglish and address Boss (Radhe Solanki) with full clarity.</item>
-        <item>De-isolated System Power: Full access to the Termux Linux environment, bash terminal, python, git and project tools.</item>
-        <item>Autonomous Bug Solving: Self-healing bug investigation and direct file fixes without confusing error dumps.</item>
-        <item>Real-time Token Streaming: High-speed unbuffered typing with zero response delay.</item>
+        <item>Full Shell &amp; Command Access: Native Python 3 and Node.js execution enabled with dynamic linker shims and W^X bypass.</item>
+        <item>Zero-Error Python Linker: Auto-purges invalid glibc tools and cleanly links Termux Bionic Python to eliminate missing libpython3 error.</item>
+        <item>Direct Execution Guarantee: Run scripts, test web servers, and execute commands without fake mobile policy or sandbox excuses.</item>
+        <item>Sovereign Hinglish Persona Locked: Hermes communicates strictly in Roman Hinglish with Boss (Radhe Solanki) with full autonomous ownership.</item>
     </string-array>
 </resources>
