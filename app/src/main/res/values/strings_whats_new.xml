@@ -6,9 +6,9 @@
     <string name="whats_new_got_it">Got it</string>
     <!-- Update for every release; shown once after the app is updated. -->
     <string-array name="whats_new_items">
-        <item>Full Shell &amp; Command Access: Native Python 3 and Node.js execution enabled with dynamic linker shims and W^X bypass.</item>
-        <item>Zero-Error Python Linker: Auto-purges invalid glibc tools and cleanly links Termux Bionic Python to eliminate missing libpython3 error.</item>
-        <item>Direct Execution Guarantee: Run scripts, test web servers, and execute commands without fake mobile policy or sandbox excuses.</item>
+        <item>Bionic Linker Isolation: Glibc library path strictly segregated; eliminates bad ELF magic crashes (2f2a2047) on python3.11.</item>
+        <item>GNU ld Script Purge: Auto-removes non-ELF glibc linker scripts so native Termux tools load cleanly via Bionic.</item>
+        <item>Full Python &amp; Node Execution: Hermes agent runs Python 3.11 scripts, web servers, and shell commands without library collisions.</item>
         <item>Sovereign Hinglish Persona Locked: Hermes communicates strictly in Roman Hinglish with Boss (Radhe Solanki) with full autonomous ownership.</item>
     </string-array>
 </resources>

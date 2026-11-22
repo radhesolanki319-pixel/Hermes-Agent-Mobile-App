@@ -2604,12 +2604,8 @@ class RuntimeInstaller(private val context: Context) {
                 val prefixBin = "${prefix.absolutePath}/bin"
                 val appletsBin = "${prefix.absolutePath}/bin/applets"
                 put("PATH", "$prefixBin:$venvBin:$appletsBin:" + (get("PATH") ?: ""))
-                val libDirs = listOfNotNull(
-                    File(prefix, "lib").takeIf { it.isDirectory }?.absolutePath,
-                    File(prefix, "glibc/lib").takeIf { it.isDirectory }?.absolutePath,
-                    File(prefix, "opt/python-glibc/lib").takeIf { it.isDirectory }?.absolutePath,
-                ).joinToString(":")
-                put("LD_LIBRARY_PATH", libDirs)
+                // Bionic python3.11 must ONLY search Bionic lib. Glibc libraries must NEVER be searched.
+                put("LD_LIBRARY_PATH", "${prefix.absolutePath}/lib")
                 put("PYTHONUNBUFFERED", "1")
 
                 val dotHermes = File(home, ".hermes")
@@ -2663,7 +2659,11 @@ class RuntimeInstaller(private val context: Context) {
         val hasGlibc = File(prefix, "glibc/lib").isDirectory
         val finalEnv = if (touchesGlibcTree && hasGlibc) {
             env.toMutableMap().apply {
-                put("LD_LIBRARY_PATH", "${prefix.absolutePath}/glibc/lib")
+                val glibcDirs = listOfNotNull(
+                    File(prefix, "glibc/lib").takeIf { it.isDirectory }?.absolutePath,
+                    File(prefix, "opt/python-glibc/lib").takeIf { it.isDirectory }?.absolutePath,
+                ).joinToString(":")
+                put("LD_LIBRARY_PATH", glibcDirs)
                 remove("LD_PRELOAD")
                 put("GLIBC_TUNABLES", "glibc.pthread.rseq=0")
             }
@@ -2731,6 +2731,20 @@ class RuntimeInstaller(private val context: Context) {
         cleanBrokenHermesTools(File(prefix, "home/hermes"))
         cleanBrokenHermesTools(File(prefix, "home/.hermes"))
         termux.ensureShims(force = false)
+
+        // Purge non-ELF GNU ld text scripts in glibc/lib that cause Bionic linker crashes
+        // (e.g. libc.so, libm.so, libpthread.so with "bad ELF magic: 2f2a2047").
+        // Glibc runtime executables link against versioned SONAMEs (libc.so.6, libm.so.6, etc.)
+        // and never need unversioned ld scripts.
+        val glibcLib = File(prefix, "glibc/lib")
+        if (glibcLib.isDirectory) {
+            listOf("libc.so", "libm.so", "libpthread.so").forEach { libName ->
+                val libFile = File(glibcLib, libName)
+                if (libFile.exists() && !termux.isElf(libFile)) {
+                    runCatching { libFile.delete() }
+                }
+            }
+        }
     }
 
     private fun cleanBrokenHermesTools(home: File) {

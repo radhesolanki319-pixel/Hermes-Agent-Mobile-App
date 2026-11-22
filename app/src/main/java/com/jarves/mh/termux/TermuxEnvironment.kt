@@ -470,10 +470,9 @@ class TermuxEnvironment(private val context: Context) {
     fun processEnv(extra: Map<String, String> = emptyMap()): Map<String, String> = buildMap {
         val p = prefix.absolutePath
         put("PATH", "$p/bin:$p/bin/applets:/system/bin:/system/xbin:/vendor/bin")
-        // The Termux glibc (glibc-runner route) keeps its libs in glibc/lib;
-        // glibc-linked binaries (Claude Code, the glibc CPython that runs
-        // Hermes) need it on the loader path.
-        put("LD_LIBRARY_PATH", if (File(prefix, "glibc/lib").isDirectory) "$p/lib:$p/glibc/lib" else "$p/lib")
+        // Bionic executables must ONLY search Bionic lib directory. Glibc libraries
+        // are segregated for glibc-runner/Claude only to prevent bad ELF magic crashes.
+        put("LD_LIBRARY_PATH", "$p/lib")
         put("HOME", "$p/home")
         put("TMPDIR", "$p/tmp")
         put("PREFIX", p)
