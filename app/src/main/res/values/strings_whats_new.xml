@@ -6,9 +6,9 @@
     <string name="whats_new_got_it">Got it</string>
     <!-- Update for every release; shown once after the app is updated. -->
     <string-array name="whats_new_items">
-        <item>Bionic Linker Isolation: Glibc library path strictly segregated; eliminates bad ELF magic crashes (2f2a2047) on python3.11.</item>
-        <item>GNU ld Script Purge: Auto-removes non-ELF glibc linker scripts so native Termux tools load cleanly via Bionic.</item>
-        <item>Full Python &amp; Node Execution: Hermes agent runs Python 3.11 scripts, web servers, and shell commands without library collisions.</item>
-        <item>Sovereign Hinglish Persona Locked: Hermes communicates strictly in Roman Hinglish with Boss (Radhe Solanki) with full autonomous ownership.</item>
+        <item>Complete Claude Purge &amp; Reset: Old corrupt glibc wrappers and markers cleanly removed from app.</item>
+        <item>Direct Glibc Loader: Claude Code executes directly via ld-linux-aarch64 dynamic linker without broken grun scripts.</item>
+        <item>1-Click Clean Claude Installer: Lightweight APK (119MB) with robust on-demand Claude &amp; glibc downloader + uninstall button.</item>
+        <item>Bionic Isolation &amp; Zero ELF Magic Error: Native Python and Hermes tools remain 100% protected and isolated.</item>
     </string-array>
 </resources>

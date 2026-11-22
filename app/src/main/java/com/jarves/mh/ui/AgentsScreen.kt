@@ -14,6 +14,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -54,6 +55,7 @@ fun AgentsScreen(
     onUseAgent: (AgentKind) -> Unit,
     onUpdateAgent: (AgentKind) -> Unit,
     onCheckUpdates: () -> Unit,
+    onUninstallAgent: (AgentKind) -> Unit = {},
 ) {
     Scaffold(
         topBar = { TopAppBar(title = { Text(stringResource(R.string.agents_screen_title)) }) },
@@ -78,6 +80,7 @@ fun AgentsScreen(
                     onInstallAgent = onInstallAgent,
                     onUseAgent = onUseAgent,
                     onUpdateAgent = onUpdateAgent,
+                    onUninstallAgent = onUninstallAgent,
                 )
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -114,6 +117,7 @@ private fun AgentInstallCard(
     onInstallAgent: (AgentKind) -> Unit,
     onUseAgent: (AgentKind) -> Unit,
     onUpdateAgent: (AgentKind) -> Unit,
+    onUninstallAgent: (AgentKind) -> Unit = {},
 ) {
     val installedVersion = state.installedAgentVersions[kind]
     val installed = kind == AgentKind.NATIVE || !installedVersion.isNullOrBlank()
@@ -243,6 +247,14 @@ private fun AgentInstallCard(
                         Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(17.dp))
                         Spacer(Modifier.width(6.dp))
                         Text(stringResource(R.string.agents_reinstall_claude))
+                    }
+                    OutlinedButton(
+                        onClick = { onUninstallAgent(kind) },
+                        enabled = state.agentInstalling == null && state.agentUpdating == null,
+                    ) {
+                        Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(17.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text(stringResource(R.string.uninstall))
                     }
                 }
                 if (installed && kind != state.agentKind) {

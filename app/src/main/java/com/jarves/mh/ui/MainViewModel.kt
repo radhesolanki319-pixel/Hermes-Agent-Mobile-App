@@ -3051,6 +3051,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun uninstallAgent(kind: AgentKind) {
+        if (_state.value.agentInstalling != null || _state.value.agentUpdating != null || _state.value.isRunning) return
+        viewModelScope.launch(Dispatchers.IO) {
+            val termux = TermuxEnvironment(getApplication())
+            when (kind) {
+                AgentKind.CLAUDE_CODE -> installer.purgeClaudeFiles(termux)
+                else -> Unit
+            }
+            val versions = installer.installedAgentVersions()
+            _state.update { current ->
+                val fallbackKind = if (current.agentKind == kind) AgentKind.NATIVE else current.agentKind
+                current.copy(
+                    installedAgentVersions = versions,
+                    agentKind = fallbackKind,
+                    toastMessage = str(R.string.uninstall) + ": " + kind.localizedTitle(getApplication()),
+                )
+            }
+        }
+    }
+
     fun checkAgentUpdates() {
         if (_state.value.agentUpdatesChecking || _state.value.agentUpdating != null || _state.value.isRunning) return
         _state.update { it.copy(agentUpdatesChecking = true, agentUpdateMessage = str(R.string.vm_checking_agent_releases)) }

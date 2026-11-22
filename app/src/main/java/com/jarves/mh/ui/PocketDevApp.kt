@@ -2549,6 +2549,7 @@ private fun RootScreenHost(
                     },
                     onUpdateAgent = viewModel::updateAgent,
                     onCheckUpdates = viewModel::checkAgentUpdates,
+                    onUninstallAgent = viewModel::uninstallAgent,
                 )
                 RootScreen.SETTINGS -> SettingsScreen(
                     state = state,
