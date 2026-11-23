@@ -4482,41 +4482,9 @@ private fun WorkspaceScreen(
                             .padding(vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        // v54: agent chip — the current agent; tapping opens
-                        // the switcher (App Agent / Hermes, with install).
-                        Surface(
-                            onClick = { showAgentSwitcher = true },
-                            shape = CircleShape,
-                            color = when (state.agentKind) {
-                                AgentKind.HERMES -> Color(0xFF0F766E)
-                                AgentKind.CLAUDE_CODE -> Color(0xFFD97757)
-                                else -> Color(0xFF2563EB)
-                            },
-                            modifier = Modifier.padding(end = 10.dp),
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
-                            ) {
-                                Text(
-                                    when (state.agentKind) {
-                                        AgentKind.HERMES -> "HA"
-                                        AgentKind.CLAUDE_CODE -> "CC"
-                                        AgentKind.ANTIGRAVITY -> "AG"
-                                        AgentKind.NATIVE -> "AA"
-                                    },
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color.White,
-                                )
-                                Icon(
-                                    Icons.Default.ExpandMore,
-                                    contentDescription = stringResource(R.string.agent_choose),
-                                    tint = Color.White,
-                                    modifier = Modifier.size(13.dp),
-                                )
-                            }
-                        }
+                        // v94: purana agent chip (CC/HA gol nishan) HATA diya —
+                        // woh v93 ke header pill ka duplicate tha. Agent ab sirf
+                        // header ke naam pill / Agents screen se badlega.
                         Column(Modifier.weight(1f)) {
                             Text(
                                 state.activeProject?.name.orEmpty(),
@@ -4622,34 +4590,10 @@ private fun WorkspaceScreen(
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
             )
         },
-        bottomBar = {
-            // Hidden on the Chat tab: the chat screen's sections moved to the top-bar
-            // 3-dot menu and the composer sits at the very bottom. Other sections keep
-            // the bar, which is also their way back to Chat.
-            if (!keyboardVisible && selectedTab != WorkspaceTab.CHAT) NavigationBar(containerColor = MaterialTheme.colorScheme.background) {
-                WorkspaceTab.entries.filter { it != WorkspaceTab.CHANGES }.forEach { tab ->
-                    NavigationBarItem(
-                        selected = selectedTab == tab,
-                        onClick = {
-                            selectedTab = tab
-                            if (tab == WorkspaceTab.FILES) onRefreshFiles()
-                            if (tab == WorkspaceTab.TERMINAL) onTerminalOpened()
-                        },
-                        icon = { Icon(tab.icon, stringResource(tab.labelRes)) },
-                        label = { Text(stringResource(tab.labelRes), fontSize = 10.sp) },
-                        // Muse-app style bar: active item plain white, inactive grey,
-                        // no pill indicator (visuals only — tabs and behaviour unchanged).
-                        colors = NavigationBarItemDefaults.colors(
-                            selectedIconColor = Color.White,
-                            selectedTextColor = Color.White,
-                            unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                            unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                            indicatorColor = Color.Transparent,
-                        ),
-                    )
-                }
-            }
-        },
+        // v94 (user: "sab double-double hai"): workspace ka apna bottom tab bar
+        // HATA diya — v93 ke root bar (Chat/Files/Ideas/Goals/Agents) ke saath
+        // woh dusra bar ban raha tha. Sections ab root bar, drawer aur upar ke
+        // 3-dot menu se hi khulenge — koi function nahi gaya.
     ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding)) {
             when (selectedTab) {
