@@ -21,6 +21,7 @@ import android.webkit.WebViewClient
 import android.webkit.WebChromeClient
 import android.widget.Toast
 import com.jarves.mh.BuildConfig
+import com.jarves.mh.data.AgentListsStore
 import com.jarves.mh.genui.GenUiEvent
 import com.jarves.mh.genui.GenUiMessageState
 import com.jarves.mh.genui.GenerativeUiView
@@ -111,6 +112,13 @@ import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Chat
+import androidx.compose.material.icons.filled.CheckBox
+import androidx.compose.material.icons.filled.GridView
+import androidx.compose.material.icons.filled.Lightbulb
+import androidx.compose.material.icons.filled.Link
+import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.RssFeed
+import androidx.compose.material.icons.filled.Update
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.Download
@@ -166,7 +174,12 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.DrawerValue
+import androidx.compose.material3.ModalDrawerSheet
+import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationDrawerItem
+import androidx.compose.material3.rememberDrawerState
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.NavigationBarItem
@@ -291,11 +304,18 @@ import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.Terminal
 
 private enum class RootScreen(@StringRes val labelRes: Int, val icon: ImageVector) {
-    CHAT(R.string.tab_chat, Icons.Default.Chat),
-    // v56 (user order): the Agents tab is back — the old-style home for
-    // downloading/installing Hermes and Claude Code, like before v48.
-    AGENT(R.string.tab_agent, Icons.Default.SmartToy),
+    // UI transplant (user order, 2026-11-23): Termux Agent App wala 5-icon
+    // bottom bar — Chat, Files, Ideas, Goals, Agents. FILES asal me CHAT host
+    // screen hi hai, bas WorkspaceTab.FILES khulta hai (requestedTab se).
+    // SETTINGS aur FEED enum me rehte hain lekin bar me nahi — woh header ke
+    // gear button aur side drawer se khulte hain.
+    CHAT(R.string.tab_chat_tab, Icons.Default.Chat),
+    FILES(R.string.tab_files, Icons.Default.Folder),
+    IDEAS(R.string.tab_ideas, Icons.Default.Lightbulb),
+    GOALS(R.string.tab_goals, Icons.Default.CheckBox),
+    AGENT(R.string.tab_agent, Icons.Default.GridView),
     SETTINGS(R.string.tab_settings, Icons.Default.Settings),
+    FEED(R.string.tab_feed, Icons.Default.RssFeed),
 }
 private enum class WorkspaceTab(@StringRes val labelRes: Int, val icon: ImageVector) {
     CHAT(R.string.tab_chat_tab, Icons.Default.AutoAwesome),
@@ -2435,19 +2455,127 @@ private fun RootScreenHost(
     }
     val keyboardVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
 
+    // UI transplant: bottom bar ka FILES aur drawer ke workspace items
+    // WorkspaceScreen ke andar ka tab maangte hain — request yahan rehti hai,
+    // WorkspaceScreen LaunchedEffect se use apna leta hai.
+    var requestedTabName by rememberSaveable { mutableStateOf(WorkspaceTab.CHAT.name) }
+    val requestedTab = WorkspaceTab.entries.firstOrNull { it.name == requestedTabName } ?: WorkspaceTab.CHAT
+    val drawerState = rememberDrawerState(DrawerValue.Closed)
+    val scope = rememberCoroutineScope()
+    fun goChat(tab: WorkspaceTab) {
+        requestedTabName = tab.name
+        screenName = RootScreen.CHAT.name
+    }
+    fun closeDrawer() {
+        scope.launch { drawerState.close() }
+    }
+
+    ModalNavigationDrawer(
+        drawerState = drawerState,
+        drawerContent = {
+            ModalDrawerSheet(drawerContainerColor = MaterialTheme.colorScheme.background) {
+                Column(Modifier.padding(vertical = 12.dp)) {
+                    NavigationDrawerItem(
+                        label = { Text("New chat") },
+                        icon = { Icon(Icons.Default.Add, contentDescription = null) },
+                        selected = false,
+                        onClick = { viewModel.createChat(); goChat(WorkspaceTab.CHAT); closeDrawer() },
+                    )
+                    NavigationDrawerItem(
+                        label = { Text("Main chat") },
+                        icon = { Icon(Icons.Default.Chat, contentDescription = null) },
+                        selected = false,
+                        onClick = { goChat(WorkspaceTab.CHAT); closeDrawer() },
+                    )
+                    NavigationDrawerItem(
+                        label = { Text("Feed") },
+                        icon = { Icon(Icons.Default.RssFeed, contentDescription = null) },
+                        selected = false,
+                        onClick = { screenName = RootScreen.FEED.name; closeDrawer() },
+                    )
+                    NavigationDrawerItem(
+                        label = { Text("Ideas") },
+                        icon = { Icon(Icons.Default.Lightbulb, contentDescription = null) },
+                        selected = false,
+                        onClick = { screenName = RootScreen.IDEAS.name; closeDrawer() },
+                    )
+                    NavigationDrawerItem(
+                        label = { Text("Goals") },
+                        icon = { Icon(Icons.Default.CheckBox, contentDescription = null) },
+                        selected = false,
+                        onClick = { screenName = RootScreen.GOALS.name; closeDrawer() },
+                    )
+                    NavigationDrawerItem(
+                        label = { Text("Library") },
+                        icon = { Icon(Icons.Default.Folder, contentDescription = null) },
+                        selected = false,
+                        onClick = { goChat(WorkspaceTab.FILES); closeDrawer() },
+                    )
+                    NavigationDrawerItem(
+                        label = { Text("Agents") },
+                        icon = { Icon(Icons.Default.GridView, contentDescription = null) },
+                        selected = false,
+                        onClick = { screenName = RootScreen.AGENT.name; closeDrawer() },
+                    )
+                    NavigationDrawerItem(
+                        label = { Text("Sessions") },
+                        icon = { Icon(Icons.Default.History, contentDescription = null) },
+                        selected = false,
+                        onClick = { goChat(WorkspaceTab.CHAT); closeDrawer() },
+                    )
+                    NavigationDrawerItem(
+                        label = { Text("Terminal") },
+                        icon = { Icon(Icons.Default.Terminal, contentDescription = null) },
+                        selected = false,
+                        onClick = { goChat(WorkspaceTab.TERMINAL); closeDrawer() },
+                    )
+                    NavigationDrawerItem(
+                        label = { Text("Connect") },
+                        icon = { Icon(Icons.Default.Link, contentDescription = null) },
+                        selected = false,
+                        onClick = { screenName = RootScreen.SETTINGS.name; closeDrawer() },
+                    )
+                    NavigationDrawerItem(
+                        label = { Text("Settings") },
+                        icon = { Icon(Icons.Default.Settings, contentDescription = null) },
+                        selected = false,
+                        onClick = { screenName = RootScreen.SETTINGS.name; closeDrawer() },
+                    )
+                    NavigationDrawerItem(
+                        label = { Text("Check Update") },
+                        icon = { Icon(Icons.Default.Update, contentDescription = null) },
+                        selected = false,
+                        onClick = { onShowAppUpdate(); closeDrawer() },
+                    )
+                }
+            }
+        },
+    ) {
     Scaffold(
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         bottomBar = {
             if (!keyboardVisible) NavigationBar(containerColor = MaterialTheme.colorScheme.background) {
-                RootScreen.entries.forEach { tab ->
+                // Termux Agent App wala 5-icon bar: Chat, Files, Ideas, Goals, Agents.
+                val bottomTabs = listOf(
+                    RootScreen.CHAT, RootScreen.FILES, RootScreen.IDEAS,
+                    RootScreen.GOALS, RootScreen.AGENT,
+                )
+                bottomTabs.forEach { tab ->
+                    val tabSelected = when (tab) {
+                        RootScreen.CHAT -> screen == RootScreen.CHAT && requestedTab == WorkspaceTab.CHAT
+                        RootScreen.FILES -> screen == RootScreen.CHAT && requestedTab == WorkspaceTab.FILES
+                        else -> screen == tab
+                    }
                     NavigationBarItem(
-                        selected = screen == tab,
-                        onClick = { screenName = tab.name },
-                        icon = {
-                            BadgedBox(
-                                badge = { if (tab == RootScreen.SETTINGS && !state.backupFeatureSeen) Badge() },
-                            ) { Icon(tab.icon, contentDescription = stringResource(tab.labelRes)) }
+                        selected = tabSelected,
+                        onClick = {
+                            when (tab) {
+                                RootScreen.CHAT -> goChat(WorkspaceTab.CHAT)
+                                RootScreen.FILES -> goChat(WorkspaceTab.FILES)
+                                else -> screenName = tab.name
+                            }
                         },
+                        icon = { Icon(tab.icon, contentDescription = stringResource(tab.labelRes)) },
                         label = { Text(stringResource(tab.labelRes), fontSize = 11.sp) },
                         colors = NavigationBarItemDefaults.colors(
                             selectedIconColor = MaterialTheme.colorScheme.primary,
@@ -2459,11 +2587,23 @@ private fun RootScreenHost(
             }
         },
     ) { padding ->
-        Box(Modifier.fillMaxSize().padding(padding)) {
+        Column(Modifier.fillMaxSize().padding(padding)) {
+            // Termux Agent App wala pinned header — har screen ke upar:
+            // LIVE Jolly avatar + naam/status pill, menu aur + / gear button.
+            AgentHeader(
+                agentName = state.agentKind.title.removeSuffix(" Agent"),
+                busy = state.isRunning,
+                onMenuClick = { scope.launch { drawerState.open() } },
+                onNewClick = { viewModel.createChat(); goChat(WorkspaceTab.CHAT) },
+                onSettingsClick = { screenName = RootScreen.SETTINGS.name },
+                onAgentClick = { screenName = RootScreen.AGENT.name },
+            )
+            Box(Modifier.weight(1f).fillMaxWidth()) {
             when (screen) {
-                RootScreen.CHAT -> if (state.activeProject != null) {
+                RootScreen.CHAT, RootScreen.FILES -> if (state.activeProject != null) {
                     WorkspaceScreen(
                         state = state,
+                        requestedTab = requestedTab,
                         onSend = viewModel::sendPrompt,
                         onStop = viewModel::stopTask,
                         onSteerFollowUp = viewModel::steerQueuedFollowUp,
@@ -2608,8 +2748,22 @@ private fun RootScreenHost(
                     onDisconnectGitHub = viewModel::disconnectGitHub,
                     onCloneGitHub = viewModel::cloneGitHubRepository,
                 )
+                RootScreen.IDEAS -> AgentListScreen(
+                    storeKey = AgentListsStore.KEY_IDEAS,
+                    emptyHint = "Abhi koi idea nahi — pehla idea neeche likho",
+                )
+                RootScreen.GOALS -> AgentListScreen(
+                    storeKey = AgentListsStore.KEY_GOALS,
+                    emptyHint = "Abhi koi goal nahi — pehla goal neeche likho",
+                )
+                RootScreen.FEED -> AgentListScreen(
+                    storeKey = AgentListsStore.KEY_FEED,
+                    emptyHint = "Feed abhi khali hai",
+                )
+            }
             }
         }
+    }
     }
 }
 
@@ -3957,6 +4111,7 @@ private fun ReadOnlyProjectScreen(
 @Composable
 private fun WorkspaceScreen(
     state: AppUiState,
+    requestedTab: WorkspaceTab = WorkspaceTab.CHAT,
     onSend: (String) -> Unit,
     onStop: () -> Unit,
     onSteerFollowUp: (String) -> Unit,
@@ -4135,6 +4290,8 @@ private fun WorkspaceScreen(
             restore = { name -> WorkspaceTab.entries.firstOrNull { it.name == name } ?: WorkspaceTab.CHAT },
         ),
     ) { mutableStateOf(WorkspaceTab.CHAT) }
+    // UI transplant: root bar / drawer se aayi tab request ko apna lo.
+    LaunchedEffect(requestedTab) { selectedTab = requestedTab }
     // Chat screen has no bottom tab bar (user direction, 2026-11-18): its workspace
     // sections live in this top-bar overflow menu instead.
     var sectionMenuOpen by remember { mutableStateOf(false) }

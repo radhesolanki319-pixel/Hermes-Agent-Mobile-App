@@ -13,6 +13,9 @@
     <string name="tab_chat">Workspace</string>
     <string name="tab_chat_tab">Chat</string>
     <string name="tab_files">Files</string>
+    <string name="tab_ideas">Ideas</string>
+    <string name="tab_goals">Goals</string>
+    <string name="tab_feed">Feed</string>
     <string name="tab_terminal">Terminal</string>
     <string name="tab_changes">Changes</string>
     <string name="tab_preview">Preview</string>
